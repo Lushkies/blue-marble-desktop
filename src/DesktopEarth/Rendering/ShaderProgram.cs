@@ -1,7 +1,7 @@
 using Silk.NET.OpenGL;
 using System.Numerics;
 
-namespace DesktopEarth;
+namespace DesktopEarth.Rendering;
 
 public class ShaderProgram : IDisposable
 {

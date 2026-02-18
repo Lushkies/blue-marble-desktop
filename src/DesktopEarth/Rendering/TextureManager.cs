@@ -3,7 +3,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
-namespace DesktopEarth;
+namespace DesktopEarth.Rendering;
 
 public class TextureManager : IDisposable
 {
@@ -48,6 +48,8 @@ public class TextureManager : IDisposable
         _textures[name] = texture;
         return texture;
     }
+
+    public bool HasTexture(string name) => _textures.ContainsKey(name);
 
     public uint GetTexture(string name) => _textures[name];
 

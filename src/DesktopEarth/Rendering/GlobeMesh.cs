@@ -1,10 +1,7 @@
 using Silk.NET.OpenGL;
 
-namespace DesktopEarth;
+namespace DesktopEarth.Rendering;
 
-/// <summary>
-/// Generates and manages a UV sphere mesh for the earth globe.
-/// </summary>
 public class GlobeMesh : IDisposable
 {
     private readonly GL _gl;
@@ -17,36 +14,30 @@ public class GlobeMesh : IDisposable
     {
         _gl = gl;
 
-        // Generate sphere vertices
-        // Each vertex: position (3) + normal (3) + texCoord (2) = 8 floats
         var vertices = new List<float>();
         var indices = new List<uint>();
 
         for (int i = 0; i <= stacks; i++)
         {
-            float phi = MathF.PI * i / stacks; // 0 to PI (top to bottom)
+            float phi = MathF.PI * i / stacks;
             float y = MathF.Cos(phi);
             float sinPhi = MathF.Sin(phi);
 
             for (int j = 0; j <= slices; j++)
             {
-                float theta = 2.0f * MathF.PI * j / slices; // 0 to 2*PI
+                float theta = 2.0f * MathF.PI * j / slices;
 
                 float x = sinPhi * MathF.Cos(theta);
                 float z = sinPhi * MathF.Sin(theta);
 
-                // Position
                 vertices.Add(x);
                 vertices.Add(y);
                 vertices.Add(z);
 
-                // Normal (same as position for unit sphere)
                 vertices.Add(x);
                 vertices.Add(y);
                 vertices.Add(z);
 
-                // Texture coordinates
-                // U goes from 0 to 1 across longitude, V goes from 0 (south) to 1 (north)
                 float u = (float)j / slices;
                 float v = 1.0f - (float)i / stacks;
                 vertices.Add(u);
@@ -54,7 +45,6 @@ public class GlobeMesh : IDisposable
             }
         }
 
-        // Generate indices for triangle strips
         for (int i = 0; i < stacks; i++)
         {
             for (int j = 0; j < slices; j++)
@@ -76,7 +66,6 @@ public class GlobeMesh : IDisposable
 
         _indexCount = (uint)indices.Count;
 
-        // Create OpenGL buffers
         _vao = _gl.GenVertexArray();
         _gl.BindVertexArray(_vao);
 
@@ -104,15 +93,12 @@ public class GlobeMesh : IDisposable
 
         uint stride = 8 * sizeof(float);
 
-        // Position attribute (location = 0)
         _gl.EnableVertexAttribArray(0);
         unsafe { _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0); }
 
-        // Normal attribute (location = 1)
         _gl.EnableVertexAttribArray(1);
         unsafe { _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float))); }
 
-        // TexCoord attribute (location = 2)
         _gl.EnableVertexAttribArray(2);
         unsafe { _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float))); }
 

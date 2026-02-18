@@ -1,4 +1,4 @@
-namespace DesktopEarth;
+namespace DesktopEarth.Rendering;
 
 public static class Shaders
 {
@@ -37,7 +37,13 @@ in vec2 vTexCoord;
 uniform sampler2D uDayTexture;
 uniform sampler2D uNightTexture;
 uniform vec3 uSunDirection;
+uniform vec3 uCameraPos;
 uniform float uAmbient;
+uniform float uNightBrightness;
+uniform float uSpecularIntensity;
+uniform float uSpecularPower;
+uniform sampler2D uBathyMask;
+uniform bool uHasBathyMask;
 
 out vec4 FragColor;
 
@@ -46,31 +52,33 @@ void main()
     vec3 normal = normalize(vNormal);
     vec3 sunDir = normalize(uSunDirection);
 
-    // Diffuse lighting (how much this point faces the sun)
     float NdotL = dot(normal, sunDir);
-
-    // Smooth transition between day and night
-    // The transition zone is roughly +/- 0.1 around the terminator
     float blend = smoothstep(-0.1, 0.1, NdotL);
 
     vec3 dayColor = texture(uDayTexture, vTexCoord).rgb;
     vec3 nightColor = texture(uNightTexture, vTexCoord).rgb;
 
-    // On the day side, apply diffuse lighting
     float dayLight = max(NdotL, 0.0) * 0.8 + uAmbient;
     vec3 litDay = dayColor * dayLight;
 
-    // Night side shows city lights
-    vec3 litNight = nightColor * 1.2;
+    // Specular reflection on water (Blinn-Phong)
+    if (uSpecularIntensity > 0.0 && uHasBathyMask)
+    {
+        vec3 viewDir = normalize(uCameraPos - vWorldPos);
+        vec3 halfDir = normalize(sunDir + viewDir);
+        float spec = pow(max(dot(normal, halfDir), 0.0), uSpecularPower);
+        float waterMask = texture(uBathyMask, vTexCoord).r;
+        litDay += vec3(1.0) * spec * uSpecularIntensity * waterMask * max(blend, 0.0);
+    }
 
-    // Blend between day and night
+    vec3 litNight = nightColor * uNightBrightness;
+
     vec3 finalColor = mix(litNight, litDay, blend);
 
     FragColor = vec4(finalColor, 1.0);
 }
 ";
 
-    // Simple atmosphere glow shader
     public const string AtmosphereVertex = @"
 #version 330 core
 
@@ -111,14 +119,11 @@ void main()
     vec3 viewDir = normalize(uCameraPos - vWorldPos);
     vec3 sunDir = normalize(uSunDirection);
 
-    // Fresnel-like effect: glow stronger at edges
     float rim = 1.0 - max(dot(viewDir, normal), 0.0);
     rim = pow(rim, 3.0);
 
-    // Sun-facing side gets more glow
     float sunFacing = max(dot(normal, sunDir), 0.0) * 0.5 + 0.5;
 
-    // Atmosphere color (blue tint)
     vec3 atmosColor = vec3(0.3, 0.5, 1.0) * rim * sunFacing * 0.6;
 
     FragColor = vec4(atmosColor, rim * 0.5);
