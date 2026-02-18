@@ -1,4 +1,6 @@
 using System.Drawing;
+using System.Reflection;
+using AutoUpdaterDotNET;
 
 namespace DesktopEarth.UI;
 
@@ -8,6 +10,9 @@ public class TrayApplicationContext : ApplicationContext
     private readonly SettingsManager _settingsManager;
     private readonly RenderScheduler _renderScheduler;
     private SettingsForm? _settingsForm;
+
+    // Update manifest URL — change this when hosting the update feed
+    private const string UpdateUrl = "https://raw.githubusercontent.com/youruser/desktop-earth/main/update.xml";
 
     public TrayApplicationContext(SettingsManager settingsManager, RenderScheduler renderScheduler)
     {
@@ -26,17 +31,50 @@ public class TrayApplicationContext : ApplicationContext
 
         _renderScheduler.StatusChanged += OnStatusChanged;
         _renderScheduler.Start();
+
+        // Check for updates silently after 10 second delay
+        ConfigureAutoUpdater();
+        var updateTimer = new System.Windows.Forms.Timer { Interval = 10000 };
+        updateTimer.Tick += (_, _) =>
+        {
+            updateTimer.Stop();
+            updateTimer.Dispose();
+            AutoUpdater.Start(UpdateUrl);
+        };
+        updateTimer.Start();
+    }
+
+    private static void ConfigureAutoUpdater()
+    {
+        AutoUpdater.ShowSkipButton = true;
+        AutoUpdater.ShowRemindLaterButton = true;
+        AutoUpdater.RunUpdateAsAdmin = false;
+        AutoUpdater.ReportErrors = false; // Silent on network errors
+        AutoUpdater.Synchronous = false;
+        AutoUpdater.AppTitle = "Desktop Earth";
+
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        if (version != null)
+            AutoUpdater.InstalledVersion = version;
     }
 
     private ContextMenuStrip BuildContextMenu()
     {
         var menu = new ContextMenuStrip();
 
-        var updateNowItem = new ToolStripMenuItem("Update Now");
+        var updateNowItem = new ToolStripMenuItem("Update Wallpaper Now");
         updateNowItem.Click += (_, _) => _renderScheduler.TriggerUpdate();
 
         var settingsItem = new ToolStripMenuItem("Settings...");
         settingsItem.Click += (_, _) => ShowSettings();
+
+        var checkUpdatesItem = new ToolStripMenuItem("Check for Updates...");
+        checkUpdatesItem.Click += (_, _) =>
+        {
+            AutoUpdater.ReportErrors = true; // Show errors when manually checking
+            AutoUpdater.Start(UpdateUrl);
+            AutoUpdater.ReportErrors = false;
+        };
 
         var aboutItem = new ToolStripMenuItem("About Desktop Earth");
         aboutItem.Click += (_, _) => ShowAbout();
@@ -47,6 +85,7 @@ public class TrayApplicationContext : ApplicationContext
         menu.Items.Add(updateNowItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(settingsItem);
+        menu.Items.Add(checkUpdatesItem);
         menu.Items.Add(aboutItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -85,7 +124,6 @@ public class TrayApplicationContext : ApplicationContext
     {
         try
         {
-            // Truncate to 63 chars (NotifyIcon.Text limit)
             string text = $"Desktop Earth - {status}";
             if (text.Length > 63) text = text[..63];
             _trayIcon.Text = text;
@@ -95,7 +133,6 @@ public class TrayApplicationContext : ApplicationContext
 
     private static Icon LoadAppIcon()
     {
-        // Try to load custom icon from Resources
         string iconPath = Path.Combine(AppContext.BaseDirectory, "Resources", "desktopearth.ico");
         if (File.Exists(iconPath))
         {
@@ -103,7 +140,6 @@ public class TrayApplicationContext : ApplicationContext
             catch { }
         }
 
-        // Try embedded resource path relative to exe
         string exeDir = AppContext.BaseDirectory;
         string[] searchPaths =
         [
@@ -119,7 +155,6 @@ public class TrayApplicationContext : ApplicationContext
             }
         }
 
-        // Fallback: use system globe icon
         return SystemIcons.Application;
     }
 

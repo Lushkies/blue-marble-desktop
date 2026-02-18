@@ -10,6 +10,12 @@
     <AssemblyName>DesktopEarth</AssemblyName>
     <RootNamespace>DesktopEarth</RootNamespace>
     <ApplicationIcon>Resources\desktopearth.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <Product>Desktop Earth</Product>
+    <Company>Desktop Earth</Company>
+    <Description>Dynamic wallpaper showing a 3D Earth with real-time day/night illumination</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Autoupdater.NET.Official" Version="1.9.2" />
     <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
     <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
