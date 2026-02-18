@@ -20,7 +20,7 @@ public class TextureManager : IDisposable
         if (_textures.TryGetValue(name, out uint existing))
             return existing;
 
-        using var image = Image.Load<Rgba32>(path);
+        using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(path);
         image.Mutate(x => x.Flip(FlipMode.Vertical));
 
         uint texture = _gl.GenTexture();
