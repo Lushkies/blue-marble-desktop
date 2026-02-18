@@ -45,14 +45,11 @@ public class RenderScheduler : IDisposable
     public void Stop()
     {
         _stopRequested = true;
-        _renderNowSignal.Set(); // Wake up if sleeping
+        _renderNowSignal.Set();
         _renderThread?.Join(5000);
         _renderThread = null;
     }
 
-    /// <summary>
-    /// Triggers an immediate wallpaper update (e.g. from tray menu "Update Now").
-    /// </summary>
     public void TriggerUpdate()
     {
         _renderNowSignal.Set();
@@ -61,15 +58,8 @@ public class RenderScheduler : IDisposable
     private void RenderLoop()
     {
         var settings = _settingsManager.Settings;
+        var (renderWidth, renderHeight) = MonitorManager.GetRenderResolution(settings);
 
-        int renderWidth = settings.RenderWidth > 0 ? settings.RenderWidth : GetPrimaryScreenWidth();
-        int renderHeight = settings.RenderHeight > 0 ? settings.RenderHeight : GetPrimaryScreenHeight();
-
-        string dayTexPath = _assets.GetDayTexturePath(settings.ImageStyle);
-        string nightTexPath = _assets.GetNightTexturePath();
-        string? bathyMaskPath = _assets.GetBathyMaskPath();
-
-        // Create hidden GLFW window (must be on this thread since it owns the GL context)
         var options = WindowOptions.Default;
         options.Size = new Vector2D<int>(renderWidth, renderHeight);
         options.Title = "Desktop Earth";
@@ -77,23 +67,28 @@ public class RenderScheduler : IDisposable
         options.VSync = false;
         options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(3, 3));
 
-        EarthRenderer? renderer = null;
+        // Renderers (created on GL thread)
+        EarthRenderer? earthRenderer = null;
+        FlatMapRenderer? flatMapRenderer = null;
+        MoonRenderer? moonRenderer = null;
+        DisplayMode currentMode = settings.DisplayMode;
+
         DateTime lastUpdate = DateTime.MinValue;
         bool firstRender = true;
+        GL? gl = null;
 
         var window = Window.Create(options);
 
         window.Load += () =>
         {
-            var gl = GL.GetApi(window);
-            renderer = new EarthRenderer(settings);
-            renderer.Initialize(gl, dayTexPath, nightTexPath, bathyMaskPath);
+            gl = GL.GetApi(window);
+            InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
             ReportStatus("Renderer initialized.");
         };
 
         window.Render += (_) =>
         {
-            if (renderer == null || _stopRequested)
+            if (gl == null || _stopRequested)
             {
                 if (_stopRequested) window.Close();
                 return;
@@ -112,18 +107,37 @@ public class RenderScheduler : IDisposable
             _renderNowSignal.Reset();
             firstRender = false;
 
-            ReportStatus($"Rendering earth...");
-
             try
             {
-                // Re-read settings in case they changed
+                // Re-read settings
                 settings = _settingsManager.Settings;
-                renderWidth = settings.RenderWidth > 0 ? settings.RenderWidth : GetPrimaryScreenWidth();
-                renderHeight = settings.RenderHeight > 0 ? settings.RenderHeight : GetPrimaryScreenHeight();
+                (renderWidth, renderHeight) = MonitorManager.GetRenderResolution(settings);
 
-                byte[] pixels = renderer.Render(renderWidth, renderHeight);
+                // Re-initialize renderers if display mode changed
+                if (settings.DisplayMode != currentMode)
+                {
+                    currentMode = settings.DisplayMode;
+                    DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+                    InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+                }
+
+                string modeName = settings.DisplayMode switch
+                {
+                    DisplayMode.FlatMap => "flat map",
+                    DisplayMode.Moon => "moon",
+                    _ => "earth"
+                };
+                ReportStatus($"Rendering {modeName}...");
+
+                byte[] pixels = settings.DisplayMode switch
+                {
+                    DisplayMode.FlatMap => flatMapRenderer!.Render(renderWidth, renderHeight),
+                    DisplayMode.Moon => moonRenderer!.Render(renderWidth, renderHeight),
+                    _ => earthRenderer!.Render(renderWidth, renderHeight),
+                };
+
                 SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
-                WallpaperSetter.SetWallpaper(_wallpaperPath);
+                WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
                 lastUpdate = DateTime.UtcNow;
                 ReportStatus($"Wallpaper updated at {DateTime.Now:HH:mm:ss}");
             }
@@ -135,7 +149,7 @@ public class RenderScheduler : IDisposable
 
         window.Closing += () =>
         {
-            renderer?.Dispose();
+            DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
         };
 
         try
@@ -148,21 +162,50 @@ public class RenderScheduler : IDisposable
         }
     }
 
+    private void InitializeRenderers(GL gl, AppSettings settings,
+        ref EarthRenderer? earthRenderer, ref FlatMapRenderer? flatMapRenderer, ref MoonRenderer? moonRenderer)
+    {
+        string dayTexPath = _assets.GetDayTexturePath(settings.ImageStyle);
+        string nightTexPath = _assets.GetNightTexturePath();
+        string? bathyMaskPath = _assets.GetBathyMaskPath();
+
+        switch (settings.DisplayMode)
+        {
+            case DisplayMode.FlatMap:
+                flatMapRenderer = new FlatMapRenderer(settings);
+                flatMapRenderer.Initialize(gl, dayTexPath, nightTexPath);
+                break;
+            case DisplayMode.Moon:
+                try
+                {
+                    string moonTexPath = _assets.GetMoonTexturePath();
+                    moonRenderer = new MoonRenderer(settings);
+                    moonRenderer.Initialize(gl, moonTexPath);
+                }
+                catch (FileNotFoundException)
+                {
+                    ReportStatus("Moon texture not found, falling back to globe.");
+                    earthRenderer = new EarthRenderer(settings);
+                    earthRenderer.Initialize(gl, dayTexPath, nightTexPath, bathyMaskPath);
+                }
+                break;
+            default:
+                earthRenderer = new EarthRenderer(settings);
+                earthRenderer.Initialize(gl, dayTexPath, nightTexPath, bathyMaskPath);
+                break;
+        }
+    }
+
+    private static void DisposeRenderers(ref EarthRenderer? earth, ref FlatMapRenderer? flatMap, ref MoonRenderer? moon)
+    {
+        earth?.Dispose(); earth = null;
+        flatMap?.Dispose(); flatMap = null;
+        moon?.Dispose(); moon = null;
+    }
+
     private void ReportStatus(string message)
     {
         StatusChanged?.Invoke(message);
-    }
-
-    private static int GetPrimaryScreenWidth()
-    {
-        try { return System.Windows.Forms.Screen.PrimaryScreen?.Bounds.Width ?? 1920; }
-        catch { return 1920; }
-    }
-
-    private static int GetPrimaryScreenHeight()
-    {
-        try { return System.Windows.Forms.Screen.PrimaryScreen?.Bounds.Height ?? 1080; }
-        catch { return 1080; }
     }
 
     private static void SaveAsBmp(byte[] rgbaPixels, int width, int height, string path)
