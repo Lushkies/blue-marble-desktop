@@ -25,6 +25,10 @@ lib/mesa3d/*.dll
 
 ## Build outputs
 publish/
+installer/output/
+
+## Misc
+nul
 
 ## Tool build artifacts
 tools/GenIcon/bin/
