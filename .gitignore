@@ -19,3 +19,15 @@ DesktopEarthSetup3.2.42.msi
 ## Large texture files (tracked via Git LFS or distributed separately)
 # Uncomment below if textures should not be in repo:
 # assets/textures/*.jpg
+
+## Mesa3D binaries (download separately for ARM64 builds)
+lib/mesa3d/*.dll
+
+## Build outputs
+publish/
+
+## Tool build artifacts
+tools/GenIcon/bin/
+tools/GenIcon/obj/
+tools/GenIcon.cs
+tools/GenerateIcon.csx
