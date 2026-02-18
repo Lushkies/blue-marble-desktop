@@ -1,0 +1,21 @@
+## .NET build outputs
+bin/
+obj/
+
+## IDE
+.vs/
+*.user
+*.suo
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## Original MSI and extracted temp files
+msi_extract/
+DesktopEarthSetup3.2.42.msi
+
+## Large texture files (tracked via Git LFS or distributed separately)
+# Uncomment below if textures should not be in repo:
+# assets/textures/*.jpg
