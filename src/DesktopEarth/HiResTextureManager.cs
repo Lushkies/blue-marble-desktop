@@ -12,19 +12,25 @@ public class HiResTextureManager
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "BlueMarbleDesktop", "textures_hd");
 
+    // Month names for URL paths (lowercase)
+    private static readonly string[] MonthNames =
+        ["january", "february", "march", "april", "may", "june",
+         "july", "august", "september", "october", "november", "december"];
+
     // NASA Blue Marble Next Generation - 21600x10800 topo+bathymetry (12 months)
-    private static readonly string[] DayBathyUrls = Enumerable.Range(1, 12)
-        .Select(m => $"https://eoimages.gsfc.nasa.gov/images/imagerecords/73000/73776/world.topo.bathy.{2004}{m:D2}.3x21600x10800.jpg")
+    // Hosted at assets.science.nasa.gov (migrated from eoimages.gsfc.nasa.gov)
+    private static readonly string[] DayBathyUrls = Enumerable.Range(0, 12)
+        .Select(i => $"https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography-bathymetry/{MonthNames[i]}/world.topo.bathy.{2004}{(i + 1):D2}.3x21600x10800.jpg")
         .ToArray();
 
     // NASA Blue Marble Next Generation - 21600x10800 topo only (12 months)
-    private static readonly string[] DayTopoUrls = Enumerable.Range(1, 12)
-        .Select(m => $"https://eoimages.gsfc.nasa.gov/images/imagerecords/73000/73751/world.topo.{2004}{m:D2}.3x21600x10800.jpg")
+    private static readonly string[] DayTopoUrls = Enumerable.Range(0, 12)
+        .Select(i => $"https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography/{MonthNames[i]}/world.topo.{2004}{(i + 1):D2}.3x21600x10800.jpg")
         .ToArray();
 
     // NASA Black Marble 2016 - VIIRS nighttime lights (3km resolution, 13500x6750)
     private const string NightLightsUrl =
-        "https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km.jpg";
+        "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/imagerecords/144000/144898/BlackMarble_2016_3km.jpg";
 
     private CancellationTokenSource? _cts;
     private Task? _downloadTask;

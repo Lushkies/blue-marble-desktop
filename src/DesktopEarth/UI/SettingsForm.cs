@@ -369,8 +369,8 @@ public class SettingsForm : Form
             out _nightBrightnessSlider, out _nightBrightnessValue,
             (s, v) => v.Text = (s.Value / 10f).ToString("F1"));
 
-        // ── Ambient light ──
-        y = AddSliderRow(tab, "Ambient light:", "0.15", LeftMargin, y, 0, 50, 15, SliderWidth,
+        // ── Daytime light ──
+        y = AddSliderRow(tab, "Daytime light:", "0.15", LeftMargin, y, 0, 50, 15, SliderWidth,
             out _ambientSlider, out _ambientValue,
             (s, v) => v.Text = (s.Value / 100f).ToString("F2"));
 
@@ -649,12 +649,16 @@ public class SettingsForm : Form
     private void UpdateModeVisibility()
     {
         bool isFlatMap = _displayModeCombo.SelectedIndex == 1;
+        bool isMoon = _displayModeCombo.SelectedIndex == 2;
 
         // In flat map mode: disable controls that don't apply
         _sphericalPanel.Enabled = !isFlatMap;
         _zoomSlider.Enabled = !isFlatMap;
         _offsetXSlider.Enabled = !isFlatMap;
         _offsetYSlider.Enabled = !isFlatMap;
+
+        // Location presets only apply to Globe view (lon/lat sliders still work for Moon)
+        _locationCombo.Enabled = !isFlatMap && !isMoon;
     }
 
     private void UpdatePerDisplayVisibility()

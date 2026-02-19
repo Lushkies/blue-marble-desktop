@@ -179,7 +179,7 @@ public class MoonRenderer : IDisposable
             // Rotate globe so the Americas face camera (lon -90°)
             // Mesh theta=0 at +X, so to center lon=-90° toward +Z: rotate by -(-90+90)=0
             // For a more interesting default, show a slight rotation:
-            float earthLonOffset = -(-90.0f + 90.0f) * MathF.PI / 180.0f;
+            float earthLonOffset = (-90.0f + 90.0f) * MathF.PI / 180.0f;
 
             var earthRotationMatrix = Matrix4x4.CreateRotationY(earthLonOffset);
             var earthModel = Matrix4x4.CreateScale(earthScale) *
