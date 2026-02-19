@@ -44,7 +44,7 @@ public class AboutForm : Form
 
         var creditLabel = new Label
         {
-            Text = "Inspired by Desktop Earth by Marton Anka.\nRebuilt with .NET 8 and OpenGL.",
+            Text = "Built with .NET 8 and OpenGL.\nEarth textures courtesy of NASA (public domain).",
             Font = new Font("Segoe UI", 8),
             ForeColor = Color.Gray,
             AutoSize = true,

@@ -1,7 +1,7 @@
 # Desktop Earth - Windows 11 Revival Project
 
 ## Overview
-Reviving Desktop Earth (v3.2.42), a 3D Earth visualization wallpaper app originally by Marton Anka (anka.me). Rebuilt from scratch for Windows 11.
+A 3D Earth visualization wallpaper app for Windows 11. Renders a real-time globe with day/night lighting and sets it as your desktop wallpaper.
 
 ## Current Status: System Tray App with Settings UI
 Full-featured tray application with settings dialog, multiple renderers, and multi-monitor support.
