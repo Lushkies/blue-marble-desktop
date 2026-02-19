@@ -2,7 +2,7 @@
 ; Produces a standard Windows installer for ARM64 (Windows on ARM) systems
 
 #define MyAppName "Blue Marble Desktop"
-#define MyAppVersion "2.0.6"
+#define MyAppVersion "2.0.7"
 #define MyAppPublisher "Blue Marble Desktop"
 #define MyAppURL "https://github.com/Lushkies/blue-marble-desktop"
 #define MyAppExeName "BlueMarbleDesktop.exe"
@@ -54,15 +54,17 @@ Source: "..\assets\textures\*"; DestDir: "{app}\assets\textures"; Flags: ignorev
 Source: "..\src\DesktopEarth\Resources\bluemarbledesktop.ico"; DestDir: "{app}\Resources"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Resources\bluemarbledesktop.ico"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Resources\bluemarbledesktop.ico"; Tasks: desktopicon
 
 [Registry]
 ; Run on startup (optional task)
 Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BlueMarbleDesktop"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: startupentry
 
 [Run]
+; Clear Windows icon cache so the new icon appears immediately
+Filename: "ie4uinit.exe"; Parameters: "-show"; Flags: runhidden nowait
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

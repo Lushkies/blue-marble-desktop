@@ -305,10 +305,10 @@ public class SettingsForm : Form
 
         // Longitude
         _sphericalPanel.Controls.Add(MakeLabel("Longitude:", LeftMargin, sy));
-        _longitudeValue = MakeLabel("-90\u00b0", RightValueX, sy);
+        _longitudeValue = MakeLabel("-100\u00b0", RightValueX, sy);
         _sphericalPanel.Controls.Add(_longitudeValue);
         sy += LabelHeight;
-        _longitudeSlider = MakeSlider(LeftMargin, sy, -180, 180, -90);
+        _longitudeSlider = MakeSlider(LeftMargin, sy, -180, 180, -100);
         _longitudeSlider.Scroll += (_, _) =>
         {
             _longitudeValue.Text = _longitudeSlider.Value + "\u00b0";
@@ -320,10 +320,10 @@ public class SettingsForm : Form
 
         // Latitude
         _sphericalPanel.Controls.Add(MakeLabel("Latitude:", LeftMargin, sy));
-        _latitudeValue = MakeLabel("20\u00b0", RightValueX, sy);
+        _latitudeValue = MakeLabel("42\u00b0", RightValueX, sy);
         _sphericalPanel.Controls.Add(_latitudeValue);
         sy += LabelHeight;
-        _latitudeSlider = MakeSlider(LeftMargin, sy, -60, 60, 20);
+        _latitudeSlider = MakeSlider(LeftMargin, sy, -60, 60, 42);
         _latitudeSlider.Scroll += (_, _) =>
         {
             _latitudeValue.Text = _latitudeSlider.Value + "\u00b0";
@@ -336,8 +336,8 @@ public class SettingsForm : Form
         y += _sphericalPanel.Height;
 
         // ── Zoom (combined distance + FoV) ──
-        // Slider 1..100, default 30. Higher = more zoomed in.
-        y = AddSliderRow(tab, "Zoom:", "30", LeftMargin, y, 1, 100, 30, SliderWidth,
+        // Slider 1..100, default 100 (extreme close-up). Higher = more zoomed in.
+        y = AddSliderRow(tab, "Zoom:", "100", LeftMargin, y, 1, 100, 100, SliderWidth,
             out _zoomSlider, out _zoomValue,
             (s, v) => v.Text = s.Value.ToString());
 
@@ -346,7 +346,7 @@ public class SettingsForm : Form
             out _offsetXSlider, out _offsetXValue,
             (s, v) => v.Text = s.Value.ToString());
 
-        y = AddSliderRow(tab, "Vertical offset:", "0", LeftMargin, y, -25, 25, 0, SliderWidth,
+        y = AddSliderRow(tab, "Vertical offset:", "-15", LeftMargin, y, -25, 25, -15, SliderWidth,
             out _offsetYSlider, out _offsetYValue,
             (s, v) => v.Text = s.Value.ToString());
 
@@ -365,7 +365,7 @@ public class SettingsForm : Form
         tab.Controls.Add(_nightLightsCheck);
         y += 24;
 
-        y = AddSliderRow(tab, "Brightness:", "1.2", IndentMargin, y, 1, 30, 12, IndentSliderWidth,
+        y = AddSliderRow(tab, "Brightness:", "1.7", IndentMargin, y, 1, 30, 17, IndentSliderWidth,
             out _nightBrightnessSlider, out _nightBrightnessValue,
             (s, v) => v.Text = (s.Value / 10f).ToString("F1"));
 
@@ -400,6 +400,18 @@ public class SettingsForm : Form
 
         styleGroup.Controls.AddRange([_topoRadio, _topoBathyRadio]);
         tab.Controls.Add(styleGroup);
+        y += 75;
+
+        // ── Reset to defaults ──
+        var resetButton = new Button
+        {
+            Text = "Reset to Defaults",
+            Location = new Point(LeftMargin, y),
+            Width = 140,
+            Height = 30
+        };
+        resetButton.Click += (_, _) => ResetToDefaults();
+        tab.Controls.Add(resetButton);
 
         return tab;
     }
@@ -711,6 +723,36 @@ public class SettingsForm : Form
         _locationCombo.SelectedIndex = 0; // Custom
         UpdateModeVisibility();
         _isLoading = false;
+    }
+
+    private void ResetToDefaults()
+    {
+        _isLoading = true;
+
+        // Reset all appearance controls to the app's built-in defaults
+        _displayModeCombo.SelectedIndex = (int)DisplayMode.Spherical;
+        _longitudeSlider.Value = -100;
+        _longitudeValue.Text = "-100\u00b0";
+        _latitudeSlider.Value = 42;
+        _latitudeValue.Text = "42\u00b0";
+        _zoomSlider.Value = 100;
+        _zoomValue.Text = "100";
+        _offsetXSlider.Value = 0;
+        _offsetXValue.Text = "0";
+        _offsetYSlider.Value = -15;
+        _offsetYValue.Text = "-15";
+        _nightLightsCheck.Checked = true;
+        _nightBrightnessSlider.Value = 17; // 1.7 * 10
+        _nightBrightnessValue.Text = "1.7";
+        _nightBrightnessSlider.Enabled = true;
+        _ambientSlider.Value = 15; // 0.15 * 100
+        _ambientValue.Text = "0.15";
+        _topoBathyRadio.Checked = true;
+        _locationCombo.SelectedIndex = 0; // Custom
+
+        UpdateModeVisibility();
+        _isLoading = false;
+        SchedulePreview();
     }
 
     private void LoadAppearanceFromGlobalSettings()

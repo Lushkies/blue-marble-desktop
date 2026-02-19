@@ -9,25 +9,26 @@ public class AppSettings
     public DisplayMode DisplayMode { get; set; } = DisplayMode.Spherical;
 
     // View controls — Zoom combines old ZoomLevel + FieldOfView into a single control
-    public float ZoomLevel { get; set; } = 2.8f;
-    public float FieldOfView { get; set; } = 45.0f;
+    // Default: extreme close-up on US (zoom slider = 100)
+    public float ZoomLevel { get; set; } = 1.15f;
+    public float FieldOfView { get; set; } = 20.0f;
 
     // Latitude (degrees north/south). Was "CameraTilt" — kept same JSON key for back-compat.
-    public float CameraTilt { get; set; } = 20.0f;
+    public float CameraTilt { get; set; } = 42.0f;
 
-    // Longitude offset (degrees). Default -90 shows Americas
-    public float LongitudeOffset { get; set; } = -90.0f;
+    // Longitude offset (degrees). Default -100 shows US Mountain/Central time zone
+    public float LongitudeOffset { get; set; } = -100.0f;
 
     // Image offset (percentage of screen, -25 to +25). Moves rendered image without affecting view.
     public float ImageOffsetX { get; set; } = 0.0f;
-    public float ImageOffsetY { get; set; } = 0.0f;
+    public float ImageOffsetY { get; set; } = -15.0f;
 
     // Night lights
     public bool NightLightsEnabled { get; set; } = true;
-    public float NightLightsBrightness { get; set; } = 1.2f;
+    public float NightLightsBrightness { get; set; } = 1.7f;
 
     // Image style
-    public ImageStyle ImageStyle { get; set; } = ImageStyle.Topo;
+    public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
 
     // Multi-monitor
     public MultiMonitorMode MultiMonitorMode { get; set; } = MultiMonitorMode.SameForAll;
@@ -53,16 +54,16 @@ public class DisplayConfig
 {
     public string DeviceName { get; set; } = "";
     public DisplayMode DisplayMode { get; set; } = DisplayMode.Spherical;
-    public float ZoomLevel { get; set; } = 2.8f;
-    public float FieldOfView { get; set; } = 45.0f;
-    public float CameraTilt { get; set; } = 20.0f;
-    public float LongitudeOffset { get; set; } = -90.0f;
+    public float ZoomLevel { get; set; } = 1.15f;
+    public float FieldOfView { get; set; } = 20.0f;
+    public float CameraTilt { get; set; } = 42.0f;
+    public float LongitudeOffset { get; set; } = -100.0f;
     public bool NightLightsEnabled { get; set; } = true;
-    public float NightLightsBrightness { get; set; } = 1.2f;
+    public float NightLightsBrightness { get; set; } = 1.7f;
     public float AmbientLight { get; set; } = 0.15f;
     public float ImageOffsetX { get; set; } = 0.0f;
-    public float ImageOffsetY { get; set; } = 0.0f;
-    public ImageStyle ImageStyle { get; set; } = ImageStyle.Topo;
+    public float ImageOffsetY { get; set; } = -15.0f;
+    public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
 }
 
 public enum DisplayMode { Spherical, FlatMap, Moon }

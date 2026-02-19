@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <item>
-    <version>2.0.6</version>
-    <url>https://github.com/Lushkies/blue-marble-desktop/releases/download/v2.0.6/BlueMarbleDesktop-2.0.6-x64-setup.exe</url>
-    <changelog>https://github.com/Lushkies/blue-marble-desktop/releases/tag/v2.0.6</changelog>
+    <version>2.0.7</version>
+    <url>https://github.com/Lushkies/blue-marble-desktop/releases/download/v2.0.7/BlueMarbleDesktop-2.0.7-x64-setup.exe</url>
+    <changelog>https://github.com/Lushkies/blue-marble-desktop/releases/tag/v2.0.7</changelog>
     <mandatory>false</mandatory>
 </item>
