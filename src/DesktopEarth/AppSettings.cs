@@ -9,19 +9,19 @@ public class AppSettings
     public DisplayMode DisplayMode { get; set; } = DisplayMode.Spherical;
 
     // View controls — Zoom combines old ZoomLevel + FieldOfView into a single control
-    // Default: extreme close-up on US (zoom slider = 100)
-    public float ZoomLevel { get; set; } = 1.15f;
-    public float FieldOfView { get; set; } = 20.0f;
+    // Default: zoom slider 25 (full globe visible, nicely framed)
+    public float ZoomLevel { get; set; } = 3.94f;
+    public float FieldOfView { get; set; } = 50.3f;
 
     // Latitude (degrees north/south). Was "CameraTilt" — kept same JSON key for back-compat.
     public float CameraTilt { get; set; } = 42.0f;
 
-    // Longitude offset (degrees). Default -100 shows US Mountain/Central time zone
-    public float LongitudeOffset { get; set; } = -100.0f;
+    // Longitude offset (degrees). Default 88 = Chicago (negated geographic convention)
+    public float LongitudeOffset { get; set; } = 88.0f;
 
     // Image offset (percentage of screen, -25 to +25). Moves rendered image without affecting view.
     public float ImageOffsetX { get; set; } = 0.0f;
-    public float ImageOffsetY { get; set; } = -15.0f;
+    public float ImageOffsetY { get; set; } = 0.0f;
 
     // Night lights
     public bool NightLightsEnabled { get; set; } = true;
@@ -54,15 +54,15 @@ public class DisplayConfig
 {
     public string DeviceName { get; set; } = "";
     public DisplayMode DisplayMode { get; set; } = DisplayMode.Spherical;
-    public float ZoomLevel { get; set; } = 1.15f;
-    public float FieldOfView { get; set; } = 20.0f;
+    public float ZoomLevel { get; set; } = 3.94f;
+    public float FieldOfView { get; set; } = 50.3f;
     public float CameraTilt { get; set; } = 42.0f;
-    public float LongitudeOffset { get; set; } = -100.0f;
+    public float LongitudeOffset { get; set; } = 88.0f;
     public bool NightLightsEnabled { get; set; } = true;
     public float NightLightsBrightness { get; set; } = 1.7f;
     public float AmbientLight { get; set; } = 0.15f;
     public float ImageOffsetX { get; set; } = 0.0f;
-    public float ImageOffsetY { get; set; } = -15.0f;
+    public float ImageOffsetY { get; set; } = 0.0f;
     public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
 }
 

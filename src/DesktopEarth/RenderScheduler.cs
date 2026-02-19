@@ -27,6 +27,9 @@ public class RenderScheduler : IDisposable
         _settingsManager = settingsManager;
         _assets = assets;
         _wallpaperPath = Path.Combine(Path.GetTempPath(), "BlueMarbleDesktop_wallpaper.bmp");
+
+        // Re-render whenever settings change (belt-and-suspenders with SettingsForm.TriggerUpdate)
+        _settingsManager.SettingsChanged += TriggerUpdate;
     }
 
     public void Start()
@@ -101,7 +104,7 @@ public class RenderScheduler : IDisposable
             if (!firstRender && !signaled &&
                 (now - lastUpdate).TotalSeconds < settings.UpdateIntervalSeconds)
             {
-                Thread.Sleep(500);
+                Thread.Sleep(200);
                 return;
             }
 
@@ -194,13 +197,8 @@ public class RenderScheduler : IDisposable
 
         ReportStatus($"Rendering per-display ({screens.Length} monitors)...");
 
-        // Create composite image
-        using var composite = new SixLabors.ImageSharp.Image<Rgba32>(vdWidth, vdHeight);
-
-        // Fill with black
-        for (int y = 0; y < vdHeight; y++)
-            for (int x = 0; x < vdWidth; x++)
-                composite[x, y] = new Rgba32(0, 0, 0, 255);
+        // Create composite image (filled black)
+        using var composite = new SixLabors.ImageSharp.Image<Rgba32>(vdWidth, vdHeight, new Rgba32(0, 0, 0, 255));
 
         foreach (var screen in screens)
         {
@@ -242,24 +240,30 @@ public class RenderScheduler : IDisposable
                 _ => earthRenderer!.Render(sw, sh),
             };
 
-            // Place rendered pixels into composite at the correct position
+            // Place rendered pixels into composite at the correct position (row-span copy)
             int offsetX = screen.Bounds.Left - vdLeft;
             int offsetY = screen.Bounds.Top - vdTop;
 
-            for (int y = 0; y < sh; y++)
+            composite.ProcessPixelRows(accessor =>
             {
-                int srcRow = (sh - 1 - y) * sw * 4; // OpenGL is bottom-up
-                for (int x = 0; x < sw; x++)
+                for (int y = 0; y < sh; y++)
                 {
-                    int idx = srcRow + x * 4;
-                    int cx = offsetX + x;
                     int cy = offsetY + y;
-                    if (cx >= 0 && cx < vdWidth && cy >= 0 && cy < vdHeight)
+                    if (cy < 0 || cy >= vdHeight) continue;
+
+                    int srcRow = (sh - 1 - y) * sw * 4; // OpenGL is bottom-up
+                    var destRow = accessor.GetRowSpan(cy);
+
+                    int xStart = Math.Max(0, -offsetX);
+                    int xEnd = Math.Min(sw, vdWidth - offsetX);
+
+                    for (int x = xStart; x < xEnd; x++)
                     {
-                        composite[cx, cy] = new Rgba32(pixels[idx], pixels[idx + 1], pixels[idx + 2], 255);
+                        int idx = srcRow + x * 4;
+                        destRow[offsetX + x] = new Rgba32(pixels[idx], pixels[idx + 1], pixels[idx + 2], 255);
                     }
                 }
-            }
+            });
         }
 
         // Save composite and set as spanned wallpaper
@@ -315,20 +319,25 @@ public class RenderScheduler : IDisposable
     private static void SaveAsBmp(byte[] rgbaPixels, int width, int height, string path)
     {
         using var image = new SixLabors.ImageSharp.Image<Rgba32>(width, height);
-        for (int y = 0; y < height; y++)
+        image.ProcessPixelRows(accessor =>
         {
-            int srcRow = (height - 1 - y) * width * 4;
-            for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
             {
-                int idx = srcRow + x * 4;
-                image[x, y] = new Rgba32(rgbaPixels[idx], rgbaPixels[idx + 1], rgbaPixels[idx + 2], 255);
+                int srcRow = (height - 1 - y) * width * 4; // OpenGL is bottom-up
+                var destRow = accessor.GetRowSpan(y);
+                for (int x = 0; x < width; x++)
+                {
+                    int idx = srcRow + x * 4;
+                    destRow[x] = new Rgba32(rgbaPixels[idx], rgbaPixels[idx + 1], rgbaPixels[idx + 2], 255);
+                }
             }
-        }
+        });
         image.SaveAsBmp(path);
     }
 
     public void Dispose()
     {
+        _settingsManager.SettingsChanged -= TriggerUpdate;
         Stop();
         _renderNowSignal.Dispose();
     }

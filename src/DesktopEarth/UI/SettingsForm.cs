@@ -149,7 +149,7 @@ public class SettingsForm : Form
     /// Maps a zoom slider value (1-100) to camera distance and FoV.
     /// Higher slider = more zoomed in (closer camera, narrower FoV).
     /// Slider 1 = fully zoomed out, 100 = extreme close-up.
-    /// Default is 30 (globe fills ~60% of screen).
+    /// Default is 25 (full globe visible, nicely framed).
     /// </summary>
     private static (float distance, float fov) ZoomSliderToCamera(int sliderValue)
     {
@@ -739,16 +739,16 @@ public class SettingsForm : Form
 
         // Reset all appearance controls to the app's built-in defaults
         _displayModeCombo.SelectedIndex = (int)DisplayMode.Spherical;
-        _longitudeSlider.Value = -100;
-        _longitudeValue.Text = "-100\u00b0";
+        _longitudeSlider.Value = 88;
+        _longitudeValue.Text = "88\u00b0";
         _latitudeSlider.Value = 42;
         _latitudeValue.Text = "42\u00b0";
-        _zoomSlider.Value = 100;
-        _zoomValue.Text = "100";
+        _zoomSlider.Value = 25;
+        _zoomValue.Text = "25";
         _offsetXSlider.Value = 0;
         _offsetXValue.Text = "0";
-        _offsetYSlider.Value = -15;
-        _offsetYValue.Text = "-15";
+        _offsetYSlider.Value = 0;
+        _offsetYValue.Text = "0";
         _nightLightsCheck.Checked = true;
         _nightBrightnessSlider.Value = 17; // 1.7 * 10
         _nightBrightnessValue.Text = "1.7";
