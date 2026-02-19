@@ -27,6 +27,9 @@ lib/mesa3d/*.dll
 publish/
 installer/output/
 
+## Claude Code (conversation history, settings — never commit)
+.claude/
+
 ## Misc
 nul
 
