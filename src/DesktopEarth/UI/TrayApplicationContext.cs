@@ -1,6 +1,4 @@
 using System.Drawing;
-using System.Reflection;
-using AutoUpdaterDotNET;
 
 namespace DesktopEarth.UI;
 
@@ -10,9 +8,6 @@ public class TrayApplicationContext : ApplicationContext
     private readonly SettingsManager _settingsManager;
     private readonly RenderScheduler _renderScheduler;
     private SettingsForm? _settingsForm;
-
-    // Update manifest URL — change this when hosting the update feed
-    private const string UpdateUrl = "https://raw.githubusercontent.com/Lushkies/blue-marble-desktop/main/update.xml";
 
     public TrayApplicationContext(SettingsManager settingsManager, RenderScheduler renderScheduler)
     {
@@ -31,31 +26,6 @@ public class TrayApplicationContext : ApplicationContext
 
         _renderScheduler.StatusChanged += OnStatusChanged;
         _renderScheduler.Start();
-
-        // Check for updates silently after 10 second delay
-        ConfigureAutoUpdater();
-        var updateTimer = new System.Windows.Forms.Timer { Interval = 10000 };
-        updateTimer.Tick += (_, _) =>
-        {
-            updateTimer.Stop();
-            updateTimer.Dispose();
-            AutoUpdater.Start(UpdateUrl);
-        };
-        updateTimer.Start();
-    }
-
-    private static void ConfigureAutoUpdater()
-    {
-        AutoUpdater.ShowSkipButton = true;
-        AutoUpdater.ShowRemindLaterButton = true;
-        AutoUpdater.RunUpdateAsAdmin = false;
-        AutoUpdater.ReportErrors = false; // Silent on network errors
-        AutoUpdater.Synchronous = false;
-        AutoUpdater.AppTitle = "Blue Marble Desktop";
-
-        var version = Assembly.GetExecutingAssembly().GetName().Version;
-        if (version != null)
-            AutoUpdater.InstalledVersion = version;
     }
 
     private ContextMenuStrip BuildContextMenu()
@@ -68,14 +38,6 @@ public class TrayApplicationContext : ApplicationContext
         var settingsItem = new ToolStripMenuItem("Settings...");
         settingsItem.Click += (_, _) => ShowSettings();
 
-        var checkUpdatesItem = new ToolStripMenuItem("Check for Updates...");
-        checkUpdatesItem.Click += (_, _) =>
-        {
-            AutoUpdater.ReportErrors = true; // Show errors when manually checking
-            AutoUpdater.Start(UpdateUrl);
-            AutoUpdater.ReportErrors = false;
-        };
-
         var aboutItem = new ToolStripMenuItem("About Blue Marble Desktop");
         aboutItem.Click += (_, _) => ShowAbout();
 
@@ -85,7 +47,6 @@ public class TrayApplicationContext : ApplicationContext
         menu.Items.Add(updateNowItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(settingsItem);
-        menu.Items.Add(checkUpdatesItem);
         menu.Items.Add(aboutItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);

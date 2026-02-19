@@ -3,7 +3,6 @@ namespace DesktopEarth;
 public class AssetLocator
 {
     public string TexturesDir { get; }
-    public string AssetsDir { get; }
 
     public AssetLocator()
     {
@@ -27,7 +26,6 @@ public class AssetLocator
                 $"Could not find assets/textures directory. Searched from: {exeDir}");
 
         TexturesDir = candidate;
-        AssetsDir = Directory.GetParent(candidate)!.FullName;
     }
 
     public string GetDayTexturePath(ImageStyle style = ImageStyle.Topo)
@@ -35,6 +33,25 @@ public class AssetLocator
         int month = DateTime.UtcNow.Month;
         string monthStr = month.ToString("D2");
 
+        // Check for hi-res textures first
+        string? hdDir = HiResTextureManager.GetHiResTextureDir();
+        if (hdDir != null)
+        {
+            if (style == ImageStyle.TopoBathy)
+            {
+                string hdBathy = Path.Combine(hdDir, $"world.topo.bathy.2004{monthStr}.3x21600x10800.jpg");
+                if (File.Exists(hdBathy)) return hdBathy;
+            }
+
+            string hdTopo = Path.Combine(hdDir, $"world.topo.2004{monthStr}.3x21600x10800.jpg");
+            if (File.Exists(hdTopo)) return hdTopo;
+
+            // HD bathy fallback
+            string hdBathyFallback = Path.Combine(hdDir, $"world.topo.bathy.2004{monthStr}.3x21600x10800.jpg");
+            if (File.Exists(hdBathyFallback)) return hdBathyFallback;
+        }
+
+        // Standard resolution textures
         if (style == ImageStyle.TopoBathy)
         {
             string bathyPattern = $"world.topo.bathy.2004{monthStr}*";
@@ -60,7 +77,16 @@ public class AssetLocator
 
     public string GetNightTexturePath()
     {
-        string[] candidates = ["land_ocean_ice_lights_8192.jpg", "land_lights_8192.jpg", "nightearth_8192.jpg"];
+        // Check for hi-res Black Marble first
+        string? hdDir = HiResTextureManager.GetHiResTextureDir();
+        if (hdDir != null)
+        {
+            string hdNight = Path.Combine(hdDir, "BlackMarble_2016_3km.jpg");
+            if (File.Exists(hdNight)) return hdNight;
+        }
+
+        // Standard resolution: prefer land_lights (city lights only)
+        string[] candidates = ["land_lights_8192.jpg", "nightearth_8192.jpg", "land_ocean_ice_lights_8192.jpg"];
         foreach (var name in candidates)
         {
             string path = Path.Combine(TexturesDir, name);
@@ -73,11 +99,5 @@ public class AssetLocator
     {
         string path = Path.Combine(TexturesDir, "moon_8192.jpg");
         return File.Exists(path) ? path : throw new FileNotFoundException("No moon texture found");
-    }
-
-    public string? GetBathyMaskPath()
-    {
-        string path = Path.Combine(TexturesDir, "bathy_mask_8192.jpg");
-        return File.Exists(path) ? path : null;
     }
 }

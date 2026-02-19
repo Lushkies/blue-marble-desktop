@@ -8,37 +8,72 @@ public class SettingsForm : Form
     private readonly RenderScheduler _renderScheduler;
     private AppSettings _settings;
 
-    // General tab
-    private ComboBox _updateIntervalCombo = null!;
-    private CheckBox _runOnStartupCheck = null!;
+    // Debounce timer for live preview
+    private readonly System.Windows.Forms.Timer _debounceTimer;
+    private bool _isLoading; // Suppress events during load
+
+    // Layout constants
+    private const int LeftMargin = 20;
+    private const int RightValueX = 430;
+    private const int SliderWidth = 430;
+    private const int IndentMargin = 40;
+    private const int IndentSliderWidth = 410;
+    private const int LabelHeight = 20;
+    private const int SliderRowHeight = 30;
+    private const int RowGap = 8;
+
+    // Location presets: (Name, Longitude, Latitude)
+    private static readonly (string Name, float Lon, float Lat)[] LocationPresets =
+    [
+        ("Custom", 0, 0),               // placeholder for manual
+        ("New York", -74, 41),
+        ("Chicago", -88, 42),
+        ("Los Angeles", -118, 34),
+        ("London", 0, 52),
+        ("Paris", 2, 49),
+        ("Tokyo", 140, 36),
+        ("Hong Kong", 114, 22),
+        ("Sydney", 151, -34),
+        ("Dubai", 55, 25),
+        ("Sao Paulo", -47, -24),
+        ("Cape Town", 18, -34),
+        ("Mumbai", 73, 19),
+    ];
+
+    // Appearance tab controls
     private ComboBox _displayModeCombo = null!;
-
-    // View tab
+    private ComboBox _locationCombo = null!;
+    private Panel _sphericalPanel = null!;
+    private TrackBar _longitudeSlider = null!;
+    private Label _longitudeValue = null!;
+    private TrackBar _latitudeSlider = null!;
+    private Label _latitudeValue = null!;
     private TrackBar _zoomSlider = null!;
-    private TrackBar _fovSlider = null!;
-    private TrackBar _tiltSlider = null!;
     private Label _zoomValue = null!;
-    private Label _fovValue = null!;
-    private Label _tiltValue = null!;
-
-    // Lighting tab
     private CheckBox _nightLightsCheck = null!;
     private TrackBar _nightBrightnessSlider = null!;
-    private TrackBar _ambientSlider = null!;
-    private CheckBox _specularCheck = null!;
-    private TrackBar _specularIntensitySlider = null!;
     private Label _nightBrightnessValue = null!;
+    private TrackBar _ambientSlider = null!;
     private Label _ambientValue = null!;
-    private Label _specularIntensityValue = null!;
-
-    // Textures tab
+    private TrackBar _offsetXSlider = null!;
+    private Label _offsetXValue = null!;
+    private TrackBar _offsetYSlider = null!;
+    private Label _offsetYValue = null!;
     private RadioButton _topoRadio = null!;
     private RadioButton _topoBathyRadio = null!;
 
-    // Display tab
+    // System tab controls
+    private ComboBox _updateIntervalCombo = null!;
+    private CheckBox _runOnStartupCheck = null!;
     private RadioButton _sameForAllRadio = null!;
     private RadioButton _spanAcrossRadio = null!;
+    private RadioButton _perDisplayRadio = null!;
     private ComboBox _renderResCombo = null!;
+
+    // Per-display controls
+    private Panel _perDisplayPanel = null!;
+    private ComboBox _monitorSelectCombo = null!;
+    private string _selectedMonitorDevice = "";
 
     public SettingsForm(SettingsManager settingsManager, RenderScheduler renderScheduler)
     {
@@ -46,8 +81,125 @@ public class SettingsForm : Form
         _renderScheduler = renderScheduler;
         _settings = settingsManager.Settings;
 
+        _debounceTimer = new System.Windows.Forms.Timer { Interval = 300 };
+        _debounceTimer.Tick += (_, _) =>
+        {
+            _debounceTimer.Stop();
+            ApplyLivePreview();
+        };
+
+        _isLoading = true;
         InitializeForm();
         LoadCurrentSettings();
+        _isLoading = false;
+    }
+
+    private void SchedulePreview()
+    {
+        if (_isLoading) return;
+        _debounceTimer.Stop();
+        _debounceTimer.Start();
+    }
+
+    private void ApplyLivePreview()
+    {
+        _settingsManager.ApplyAndSave(s =>
+        {
+            SaveAppearanceToGlobalSettings(s);
+
+            if (_perDisplayRadio.Checked && !string.IsNullOrEmpty(_selectedMonitorDevice))
+            {
+                var config = GetOrCreateDisplayConfig(_selectedMonitorDevice);
+                SaveAppearanceToDisplayConfig(config);
+            }
+
+            s.UpdateIntervalSeconds = _updateIntervalCombo.SelectedIndex switch
+            {
+                0 => 60, 1 => 120, 2 => 300, 3 => 600,
+                4 => 900, 5 => 1800, 6 => 3600, _ => 600
+            };
+
+            if (_sameForAllRadio.Checked)
+                s.MultiMonitorMode = MultiMonitorMode.SameForAll;
+            else if (_spanAcrossRadio.Checked)
+                s.MultiMonitorMode = MultiMonitorMode.SpanAcross;
+            else
+                s.MultiMonitorMode = MultiMonitorMode.PerDisplay;
+
+            (s.RenderWidth, s.RenderHeight) = _renderResCombo.SelectedIndex switch
+            {
+                1 => (1920, 1080), 2 => (2560, 1440),
+                3 => (3840, 2160), 4 => (5120, 2880), _ => (0, 0)
+            };
+        });
+
+        StartupManager.SetRunOnStartup(_runOnStartupCheck.Checked);
+        _renderScheduler.TriggerUpdate();
+    }
+
+    /// <summary>
+    /// Maps a zoom slider value (1-100) to camera distance and FoV.
+    /// Higher slider = more zoomed in (closer camera, narrower FoV).
+    /// Slider 1 = fully zoomed out, 100 = extreme close-up.
+    /// Default is 30 (globe fills ~60% of screen).
+    /// </summary>
+    private static (float distance, float fov) ZoomSliderToCamera(int sliderValue)
+    {
+        // Normalize to 0..1 (slider is 1..100)
+        float t = (sliderValue - 1) / 99f;
+        // Distance: 6.0 (zoomed out) to 1.15 (zoomed in) — exponential curve
+        float distance = 6.0f * MathF.Pow(1.15f / 6.0f, t);
+        // FoV: 60° (zoomed out) to 20° (zoomed in) — linear
+        float fov = 60f - t * 40f;
+        return (distance, fov);
+    }
+
+    private void SaveAppearanceToGlobalSettings(AppSettings s)
+    {
+        s.DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex;
+        s.LongitudeOffset = _longitudeSlider.Value;
+        s.CameraTilt = _latitudeSlider.Value;
+
+        var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
+        s.ZoomLevel = distance;
+        s.FieldOfView = fov;
+
+        s.ImageOffsetX = _offsetXSlider.Value;
+        s.ImageOffsetY = _offsetYSlider.Value;
+
+        s.NightLightsEnabled = _nightLightsCheck.Checked;
+        s.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
+        s.AmbientLight = _ambientSlider.Value / 100f;
+        s.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
+    }
+
+    private void SaveAppearanceToDisplayConfig(DisplayConfig config)
+    {
+        config.DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex;
+        config.LongitudeOffset = _longitudeSlider.Value;
+        config.CameraTilt = _latitudeSlider.Value;
+
+        var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
+        config.ZoomLevel = distance;
+        config.FieldOfView = fov;
+
+        config.ImageOffsetX = _offsetXSlider.Value;
+        config.ImageOffsetY = _offsetYSlider.Value;
+
+        config.NightLightsEnabled = _nightLightsCheck.Checked;
+        config.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
+        config.AmbientLight = _ambientSlider.Value / 100f;
+        config.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
+    }
+
+    private DisplayConfig GetOrCreateDisplayConfig(string deviceName)
+    {
+        var existing = _settings.DisplayConfigs.Find(c => c.DeviceName == deviceName);
+        if (existing != null) return existing;
+
+        var config = new DisplayConfig { DeviceName = deviceName };
+        _settings.DisplayConfigs.Add(config);
+        return config;
     }
 
     private void InitializeForm()
@@ -56,7 +208,7 @@ public class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(460, 420);
+        Size = new Size(510, 840);
         ShowInTaskbar = true;
 
         var tabControl = new TabControl
@@ -65,412 +217,566 @@ public class SettingsForm : Form
             Padding = new Point(8, 4)
         };
 
-        tabControl.TabPages.Add(CreateGeneralTab());
-        tabControl.TabPages.Add(CreateViewTab());
-        tabControl.TabPages.Add(CreateLightingTab());
-        tabControl.TabPages.Add(CreateTexturesTab());
-        tabControl.TabPages.Add(CreateDisplayTab());
-
-        var bottomPanel = new Panel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 50,
-            Padding = new Padding(10)
-        };
-
-        var applyButton = new Button
-        {
-            Text = "Apply",
-            Size = new Size(80, 30),
-            Anchor = AnchorStyles.Bottom | AnchorStyles.Right
-        };
-        applyButton.Location = new Point(bottomPanel.Width - applyButton.Width - 190, 10);
-        applyButton.Click += (_, _) => ApplySettings();
-
-        var okButton = new Button
-        {
-            Text = "OK",
-            Size = new Size(80, 30),
-            Anchor = AnchorStyles.Bottom | AnchorStyles.Right
-        };
-        okButton.Location = new Point(bottomPanel.Width - okButton.Width - 100, 10);
-        okButton.Click += (_, _) =>
-        {
-            ApplySettings();
-            Close();
-        };
-
-        var cancelButton = new Button
-        {
-            Text = "Cancel",
-            Size = new Size(80, 30),
-            Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-            DialogResult = DialogResult.Cancel
-        };
-        cancelButton.Location = new Point(bottomPanel.Width - cancelButton.Width - 10, 10);
-
-        bottomPanel.Controls.AddRange([applyButton, okButton, cancelButton]);
-        CancelButton = cancelButton;
+        tabControl.TabPages.Add(CreateAppearanceTab());
+        tabControl.TabPages.Add(CreateSystemTab());
 
         Controls.Add(tabControl);
-        Controls.Add(bottomPanel);
     }
 
-    private TabPage CreateGeneralTab()
+    /// <summary>
+    /// Adds a label + value row, then a slider row below. Returns Y after the slider.
+    /// </summary>
+    private int AddSliderRow(Control parent, string labelText, string defaultValue,
+        int x, int y, int min, int max, int initial, int sliderWidth,
+        out TrackBar slider, out Label valueLabel, Action<TrackBar, Label> onScroll)
     {
-        var tab = new TabPage("General");
-        int y = 20;
+        parent.Controls.Add(MakeLabel(labelText, x, y));
+        valueLabel = MakeLabel(defaultValue, RightValueX, y);
+        parent.Controls.Add(valueLabel);
 
-        // Update interval
-        tab.Controls.Add(MakeLabel("Update every:", 20, y));
-        _updateIntervalCombo = new ComboBox
+        slider = MakeSlider(x, y + LabelHeight, min, max, initial, sliderWidth);
+        var sl = slider;
+        var vl = valueLabel;
+        slider.Scroll += (_, _) =>
         {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(160, y - 2),
-            Width = 200
+            onScroll(sl, vl);
+            SchedulePreview();
         };
-        _updateIntervalCombo.Items.AddRange([
-            "1 minute", "2 minutes", "5 minutes", "10 minutes",
-            "15 minutes", "30 minutes", "1 hour"
-        ]);
-        tab.Controls.Add(_updateIntervalCombo);
-        y += 40;
+        parent.Controls.Add(slider);
 
-        // Display mode
-        tab.Controls.Add(MakeLabel("Display mode:", 20, y));
+        return y + LabelHeight + SliderRowHeight + RowGap;
+    }
+
+    private TabPage CreateAppearanceTab()
+    {
+        var tab = new TabPage("Appearance");
+        tab.AutoScroll = false;
+        int y = 10;
+
+        // ── Display mode ──
+        tab.Controls.Add(MakeLabel("View:", LeftMargin, y + 3));
         _displayModeCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(160, y - 2),
-            Width = 200
+            Location = new Point(100, y),
+            Width = 150
         };
-        _displayModeCombo.Items.AddRange(["Spherical Globe", "Flat Map", "Moon"]);
-        tab.Controls.Add(_displayModeCombo);
-        y += 40;
-
-        // Run on startup
-        _runOnStartupCheck = new CheckBox
+        _displayModeCombo.Items.AddRange(["Globe", "Flat Map", "Moon"]);
+        _displayModeCombo.SelectedIndexChanged += (_, _) =>
         {
-            Text = "Run Blue Marble Desktop when Windows starts",
-            AutoSize = true,
-            Location = new Point(20, y)
+            UpdateModeVisibility();
+            SchedulePreview();
         };
-        tab.Controls.Add(_runOnStartupCheck);
+        tab.Controls.Add(_displayModeCombo);
 
-        return tab;
-    }
+        // ── Location preset ──
+        tab.Controls.Add(MakeLabel("Location:", 270, y + 3));
+        _locationCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(340, y),
+            Width = 120
+        };
+        foreach (var preset in LocationPresets)
+            _locationCombo.Items.Add(preset.Name);
+        _locationCombo.SelectedIndex = 0;
+        _locationCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (_isLoading || _locationCombo.SelectedIndex <= 0) return;
+            var preset = LocationPresets[_locationCombo.SelectedIndex];
+            _isLoading = true;
+            _longitudeSlider.Value = Math.Clamp((int)preset.Lon, -180, 180);
+            _longitudeValue.Text = preset.Lon.ToString("F0") + "\u00b0";
+            _latitudeSlider.Value = Math.Clamp((int)preset.Lat, -60, 60);
+            _latitudeValue.Text = preset.Lat.ToString("F0") + "\u00b0";
+            _isLoading = false;
+            SchedulePreview();
+        };
+        tab.Controls.Add(_locationCombo);
+        y += 30;
 
-    private TabPage CreateViewTab()
-    {
-        var tab = new TabPage("View");
-        int y = 20;
+        // ── Spherical panel (longitude + latitude — disabled in flat map mode) ──
+        _sphericalPanel = new Panel
+        {
+            Location = new Point(0, y),
+            Size = new Size(480, (LabelHeight + SliderRowHeight + RowGap) * 2),
+        };
+        int sy = 0;
 
-        // Zoom
-        tab.Controls.Add(MakeLabel("Zoom:", 20, y));
-        _zoomValue = MakeLabel("2.8", 370, y);
-        tab.Controls.Add(_zoomValue);
-        y += 22;
-        _zoomSlider = MakeSlider(20, y, 10, 60, 28); // 1.0 to 6.0, value * 10
-        _zoomSlider.Scroll += (_, _) =>
-            _zoomValue.Text = (_zoomSlider.Value / 10f).ToString("F1");
-        tab.Controls.Add(_zoomSlider);
-        y += 50;
+        // Longitude
+        _sphericalPanel.Controls.Add(MakeLabel("Longitude:", LeftMargin, sy));
+        _longitudeValue = MakeLabel("-90\u00b0", RightValueX, sy);
+        _sphericalPanel.Controls.Add(_longitudeValue);
+        sy += LabelHeight;
+        _longitudeSlider = MakeSlider(LeftMargin, sy, -180, 180, -90);
+        _longitudeSlider.Scroll += (_, _) =>
+        {
+            _longitudeValue.Text = _longitudeSlider.Value + "\u00b0";
+            _locationCombo.SelectedIndex = 0; // Switch to "Custom"
+            SchedulePreview();
+        };
+        _sphericalPanel.Controls.Add(_longitudeSlider);
+        sy += SliderRowHeight + RowGap;
 
-        // FOV
-        tab.Controls.Add(MakeLabel("Field of View:", 20, y));
-        _fovValue = MakeLabel("45", 370, y);
-        tab.Controls.Add(_fovValue);
-        y += 22;
-        _fovSlider = MakeSlider(20, y, 20, 90, 45);
-        _fovSlider.Scroll += (_, _) =>
-            _fovValue.Text = _fovSlider.Value.ToString();
-        tab.Controls.Add(_fovSlider);
-        y += 50;
+        // Latitude
+        _sphericalPanel.Controls.Add(MakeLabel("Latitude:", LeftMargin, sy));
+        _latitudeValue = MakeLabel("20\u00b0", RightValueX, sy);
+        _sphericalPanel.Controls.Add(_latitudeValue);
+        sy += LabelHeight;
+        _latitudeSlider = MakeSlider(LeftMargin, sy, -60, 60, 20);
+        _latitudeSlider.Scroll += (_, _) =>
+        {
+            _latitudeValue.Text = _latitudeSlider.Value + "\u00b0";
+            _locationCombo.SelectedIndex = 0; // Switch to "Custom"
+            SchedulePreview();
+        };
+        _sphericalPanel.Controls.Add(_latitudeSlider);
 
-        // Camera tilt
-        tab.Controls.Add(MakeLabel("Camera Tilt:", 20, y));
-        _tiltValue = MakeLabel("20", 370, y);
-        tab.Controls.Add(_tiltValue);
-        y += 22;
-        _tiltSlider = MakeSlider(20, y, -45, 45, 20);
-        _tiltSlider.Scroll += (_, _) =>
-            _tiltValue.Text = _tiltSlider.Value.ToString() + "\u00b0";
-        tab.Controls.Add(_tiltSlider);
+        tab.Controls.Add(_sphericalPanel);
+        y += _sphericalPanel.Height;
 
-        return tab;
-    }
+        // ── Zoom (combined distance + FoV) ──
+        // Slider 1..100, default 30. Higher = more zoomed in.
+        y = AddSliderRow(tab, "Zoom:", "30", LeftMargin, y, 1, 100, 30, SliderWidth,
+            out _zoomSlider, out _zoomValue,
+            (s, v) => v.Text = s.Value.ToString());
 
-    private TabPage CreateLightingTab()
-    {
-        var tab = new TabPage("Lighting");
-        int y = 20;
+        // ── Image offset X/Y (Globe + Moon only) ──
+        y = AddSliderRow(tab, "Horizontal offset:", "0", LeftMargin, y, -25, 25, 0, SliderWidth,
+            out _offsetXSlider, out _offsetXValue,
+            (s, v) => v.Text = s.Value.ToString());
 
-        // Night lights
+        y = AddSliderRow(tab, "Vertical offset:", "0", LeftMargin, y, -25, 25, 0, SliderWidth,
+            out _offsetYSlider, out _offsetYValue,
+            (s, v) => v.Text = s.Value.ToString());
+
+        // ── Night lights ──
         _nightLightsCheck = new CheckBox
         {
-            Text = "Show night lights",
+            Text = "City lights at night",
             AutoSize = true,
-            Location = new Point(20, y)
+            Location = new Point(LeftMargin, y)
         };
         _nightLightsCheck.CheckedChanged += (_, _) =>
+        {
             _nightBrightnessSlider.Enabled = _nightLightsCheck.Checked;
-        tab.Controls.Add(_nightLightsCheck);
-        y += 30;
-
-        tab.Controls.Add(MakeLabel("Night brightness:", 40, y));
-        _nightBrightnessValue = MakeLabel("1.2", 370, y);
-        tab.Controls.Add(_nightBrightnessValue);
-        y += 22;
-        _nightBrightnessSlider = MakeSlider(40, y, 1, 30, 12); // 0.1 to 3.0, value * 10
-        _nightBrightnessSlider.Scroll += (_, _) =>
-            _nightBrightnessValue.Text = (_nightBrightnessSlider.Value / 10f).ToString("F1");
-        tab.Controls.Add(_nightBrightnessSlider);
-        y += 50;
-
-        // Ambient light
-        tab.Controls.Add(MakeLabel("Ambient light:", 20, y));
-        _ambientValue = MakeLabel("0.15", 370, y);
-        tab.Controls.Add(_ambientValue);
-        y += 22;
-        _ambientSlider = MakeSlider(20, y, 0, 50, 15); // 0.00 to 0.50, value / 100
-        _ambientSlider.Scroll += (_, _) =>
-            _ambientValue.Text = (_ambientSlider.Value / 100f).ToString("F2");
-        tab.Controls.Add(_ambientSlider);
-        y += 50;
-
-        // Specular
-        _specularCheck = new CheckBox
-        {
-            Text = "Sun specular reflection on water",
-            AutoSize = true,
-            Location = new Point(20, y)
+            SchedulePreview();
         };
-        _specularCheck.CheckedChanged += (_, _) =>
-            _specularIntensitySlider.Enabled = _specularCheck.Checked;
-        tab.Controls.Add(_specularCheck);
-        y += 30;
+        tab.Controls.Add(_nightLightsCheck);
+        y += 24;
 
-        tab.Controls.Add(MakeLabel("Specular intensity:", 40, y));
-        _specularIntensityValue = MakeLabel("0.5", 370, y);
-        tab.Controls.Add(_specularIntensityValue);
-        y += 22;
-        _specularIntensitySlider = MakeSlider(40, y, 0, 20, 5); // 0.0 to 2.0, value * 10
-        _specularIntensitySlider.Scroll += (_, _) =>
-            _specularIntensityValue.Text = (_specularIntensitySlider.Value / 10f).ToString("F1");
-        tab.Controls.Add(_specularIntensitySlider);
+        y = AddSliderRow(tab, "Brightness:", "1.2", IndentMargin, y, 1, 30, 12, IndentSliderWidth,
+            out _nightBrightnessSlider, out _nightBrightnessValue,
+            (s, v) => v.Text = (s.Value / 10f).ToString("F1"));
 
-        return tab;
-    }
+        // ── Ambient light ──
+        y = AddSliderRow(tab, "Ambient light:", "0.15", LeftMargin, y, 0, 50, 15, SliderWidth,
+            out _ambientSlider, out _ambientValue,
+            (s, v) => v.Text = (s.Value / 100f).ToString("F2"));
 
-    private TabPage CreateTexturesTab()
-    {
-        var tab = new TabPage("Textures");
-        int y = 20;
-
-        var groupBox = new GroupBox
+        // ── Earth image style ──
+        var styleGroup = new GroupBox
         {
-            Text = "Earth Image Style",
-            Location = new Point(20, y),
-            Size = new Size(380, 100)
+            Text = "Earth image style",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(440, 65)
         };
 
         _topoRadio = new RadioButton
         {
             Text = "Topographic (land only)",
             AutoSize = true,
-            Location = new Point(20, 30)
+            Location = new Point(15, 20)
         };
+        _topoRadio.CheckedChanged += (_, _) => SchedulePreview();
 
         _topoBathyRadio = new RadioButton
         {
             Text = "Topographic + Bathymetry (land + ocean floor)",
             AutoSize = true,
-            Location = new Point(20, 58)
+            Location = new Point(15, 42)
         };
+        _topoBathyRadio.CheckedChanged += (_, _) => SchedulePreview();
 
-        groupBox.Controls.AddRange([_topoRadio, _topoBathyRadio]);
-        tab.Controls.Add(groupBox);
-
-        y += 120;
-
-        var noteLabel = new Label
-        {
-            Text = "Note: Changing texture style requires a wallpaper refresh.\nClick Apply, then use 'Update Now' from the tray menu.",
-            Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.Gray,
-            AutoSize = true,
-            Location = new Point(22, y)
-        };
-        tab.Controls.Add(noteLabel);
+        styleGroup.Controls.AddRange([_topoRadio, _topoBathyRadio]);
+        tab.Controls.Add(styleGroup);
 
         return tab;
     }
 
-    private TabPage CreateDisplayTab()
+    private TabPage CreateSystemTab()
     {
-        var tab = new TabPage("Display");
-        int y = 20;
+        var tab = new TabPage("System");
+        int y = 15;
+
+        // Update interval
+        tab.Controls.Add(MakeLabel("Update every:", LeftMargin, y + 3));
+        _updateIntervalCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(180, y),
+            Width = 270
+        };
+        _updateIntervalCombo.Items.AddRange([
+            "1 minute", "2 minutes", "5 minutes", "10 minutes",
+            "15 minutes", "30 minutes", "1 hour"
+        ]);
+        _updateIntervalCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
+        tab.Controls.Add(_updateIntervalCombo);
+        y += 35;
+
+        // Run on startup
+        _runOnStartupCheck = new CheckBox
+        {
+            Text = "Run Blue Marble Desktop when Windows starts",
+            AutoSize = true,
+            Location = new Point(LeftMargin, y)
+        };
+        _runOnStartupCheck.CheckedChanged += (_, _) => SchedulePreview();
+        tab.Controls.Add(_runOnStartupCheck);
+        y += 35;
 
         // Multi-monitor
         var monitorGroup = new GroupBox
         {
-            Text = "Multi-Monitor",
-            Location = new Point(20, y),
-            Size = new Size(380, 90)
+            Text = "Multi-Display Mode",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(440, 105)
         };
 
         _sameForAllRadio = new RadioButton
         {
-            Text = "Same wallpaper on all monitors",
+            Text = "Same wallpaper on all displays",
             AutoSize = true,
-            Location = new Point(20, 28)
+            Location = new Point(15, 22)
+        };
+        _sameForAllRadio.CheckedChanged += (_, _) =>
+        {
+            UpdatePerDisplayVisibility();
+            SchedulePreview();
         };
 
         _spanAcrossRadio = new RadioButton
         {
-            Text = "Span wallpaper across all monitors",
+            Text = "Span wallpaper across all displays",
             AutoSize = true,
-            Location = new Point(20, 56)
+            Location = new Point(15, 45)
+        };
+        _spanAcrossRadio.CheckedChanged += (_, _) =>
+        {
+            UpdatePerDisplayVisibility();
+            SchedulePreview();
         };
 
-        monitorGroup.Controls.AddRange([_sameForAllRadio, _spanAcrossRadio]);
-        tab.Controls.Add(monitorGroup);
+        _perDisplayRadio = new RadioButton
+        {
+            Text = "Per display (independent settings)",
+            AutoSize = true,
+            Location = new Point(15, 68)
+        };
+        _perDisplayRadio.CheckedChanged += (_, _) =>
+        {
+            UpdatePerDisplayVisibility();
+            SchedulePreview();
+        };
 
-        y += 110;
+        monitorGroup.Controls.AddRange([_sameForAllRadio, _spanAcrossRadio, _perDisplayRadio]);
+        tab.Controls.Add(monitorGroup);
+        y += 115;
+
+        // Per-display panel (hidden by default)
+        _perDisplayPanel = new Panel
+        {
+            Location = new Point(LeftMargin, y),
+            Size = new Size(440, 40),
+            Visible = false
+        };
+
+        _perDisplayPanel.Controls.Add(MakeLabel("Configure:", 0, 5));
+        _monitorSelectCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(80, 2),
+            Width = 350
+        };
+
+        // Populate monitors with real model names
+        var screens = MonitorManager.GetAllScreens();
+        var friendlyNames = MonitorNameHelper.GetMonitorFriendlyNames();
+
+        for (int i = 0; i < screens.Length; i++)
+        {
+            var s = screens[i];
+            string deviceName = s.DeviceName.TrimEnd('\0');
+            string monitorName = friendlyNames.TryGetValue(deviceName, out var name)
+                ? name
+                : deviceName;
+            string primary = s.Primary ? " [Primary]" : "";
+            _monitorSelectCombo.Items.Add(
+                $"Display {i + 1}: {monitorName} ({s.Bounds.Width}x{s.Bounds.Height}){primary}");
+        }
+        if (_monitorSelectCombo.Items.Count > 0)
+            _monitorSelectCombo.SelectedIndex = 0;
+
+        _monitorSelectCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (_monitorSelectCombo.SelectedIndex >= 0 && _monitorSelectCombo.SelectedIndex < screens.Length)
+            {
+                _selectedMonitorDevice = screens[_monitorSelectCombo.SelectedIndex].DeviceName;
+                LoadAppearanceFromDisplayConfig(_selectedMonitorDevice);
+            }
+        };
+
+        if (screens.Length > 0)
+            _selectedMonitorDevice = screens[0].DeviceName;
+
+        _perDisplayPanel.Controls.Add(_monitorSelectCombo);
+        tab.Controls.Add(_perDisplayPanel);
+        y += 50;
 
         // Render resolution
-        tab.Controls.Add(MakeLabel("Render resolution:", 20, y));
+        tab.Controls.Add(MakeLabel("Render resolution:", LeftMargin, y + 3));
         _renderResCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(160, y - 2),
-            Width = 200
+            Location = new Point(180, y),
+            Width = 270
         };
         _renderResCombo.Items.AddRange([
-            "Auto (match monitor)",
+            "Auto (match display)",
             "1920 x 1080",
             "2560 x 1440",
             "3840 x 2160",
             "5120 x 2880"
         ]);
+        _renderResCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
         tab.Controls.Add(_renderResCombo);
+        y += 40;
+
+        // HD Textures section
+        var hdGroup = new GroupBox
+        {
+            Text = "HD Textures (NASA)",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(440, 90)
+        };
+
+        bool hdAvailable = HiResTextureManager.AreHiResTexturesAvailable();
+        var hdStatusLabel = new Label
+        {
+            Text = hdAvailable
+                ? "✓ HD textures installed (21600×10800 day, Black Marble night)"
+                : $"Standard textures in use. Download ~{HiResTextureManager.GetEstimatedDownloadSizeMB()} MB for HD quality.",
+            AutoSize = true,
+            Location = new Point(15, 22),
+            Font = new Font("Segoe UI", 8.5f)
+        };
+        hdGroup.Controls.Add(hdStatusLabel);
+
+        var hdProgressLabel = new Label
+        {
+            Text = "",
+            AutoSize = true,
+            Location = new Point(15, 42),
+            Font = new Font("Segoe UI", 8.5f),
+            Visible = false
+        };
+        hdGroup.Controls.Add(hdProgressLabel);
+
+        var hdButton = new Button
+        {
+            Text = hdAvailable ? "Re-download HD Textures" : "Download HD Textures",
+            Location = new Point(15, 58),
+            Width = 200,
+            Height = 26
+        };
+
+        var hdManager = new HiResTextureManager();
+
+        hdManager.ProgressChanged += (progress, message) =>
+        {
+            if (hdProgressLabel.InvokeRequired)
+                hdProgressLabel.Invoke(() => { hdProgressLabel.Text = message; hdProgressLabel.Visible = true; });
+            else
+            {
+                hdProgressLabel.Text = message;
+                hdProgressLabel.Visible = true;
+            }
+        };
+
+        hdManager.DownloadCompleted += (success, message) =>
+        {
+            void UpdateUI()
+            {
+                hdProgressLabel.Text = message;
+                hdButton.Enabled = true;
+                hdButton.Text = success ? "Re-download HD Textures" : "Retry Download";
+                if (success)
+                {
+                    hdStatusLabel.Text = "✓ HD textures installed! Restart app or change a setting to use them.";
+                    _renderScheduler.TriggerUpdate();
+                }
+            }
+
+            if (hdButton.InvokeRequired)
+                hdButton.Invoke(UpdateUI);
+            else
+                UpdateUI();
+        };
+
+        hdButton.Click += (_, _) =>
+        {
+            if (hdManager.IsDownloading)
+            {
+                hdManager.CancelDownload();
+                hdButton.Text = "Download HD Textures";
+                hdProgressLabel.Visible = false;
+            }
+            else
+            {
+                hdManager.StartDownload();
+                hdButton.Text = "Cancel Download";
+                hdButton.Enabled = true;
+            }
+        };
+
+        hdGroup.Controls.Add(hdButton);
+        tab.Controls.Add(hdGroup);
 
         return tab;
     }
 
-    private void LoadCurrentSettings()
+    private void UpdateModeVisibility()
     {
-        // General
-        _updateIntervalCombo.SelectedIndex = _settings.UpdateIntervalSeconds switch
+        bool isFlatMap = _displayModeCombo.SelectedIndex == 1;
+
+        // In flat map mode: disable controls that don't apply
+        _sphericalPanel.Enabled = !isFlatMap;
+        _zoomSlider.Enabled = !isFlatMap;
+        _offsetXSlider.Enabled = !isFlatMap;
+        _offsetYSlider.Enabled = !isFlatMap;
+    }
+
+    private void UpdatePerDisplayVisibility()
+    {
+        _perDisplayPanel.Visible = _perDisplayRadio.Checked;
+    }
+
+    private static int CameraToZoomSlider(float distance)
+    {
+        // Reverse of ZoomSliderToCamera: t = log(distance/6.0) / log(1.15/6.0)
+        if (distance <= 1.15f) return 100;
+        if (distance >= 6.0f) return 1;
+        float t = MathF.Log(distance / 6.0f) / MathF.Log(1.15f / 6.0f);
+        return Math.Clamp((int)(t * 99f + 1), 1, 100);
+    }
+
+    private void LoadAppearanceFromDisplayConfig(string deviceName)
+    {
+        var config = _settings.DisplayConfigs.Find(c => c.DeviceName == deviceName);
+        if (config == null)
         {
-            60 => 0,
-            120 => 1,
-            300 => 2,
-            600 => 3,
-            900 => 4,
-            1800 => 5,
-            3600 => 6,
-            _ => 3
-        };
+            LoadAppearanceFromGlobalSettings();
+            return;
+        }
+
+        _isLoading = true;
+
+        _displayModeCombo.SelectedIndex = (int)config.DisplayMode;
+        _longitudeSlider.Value = Math.Clamp((int)config.LongitudeOffset, -180, 180);
+        _longitudeValue.Text = config.LongitudeOffset.ToString("F0") + "\u00b0";
+        _latitudeSlider.Value = Math.Clamp((int)config.CameraTilt, -60, 60);
+        _latitudeValue.Text = config.CameraTilt.ToString("F0") + "\u00b0";
+        _zoomSlider.Value = CameraToZoomSlider(config.ZoomLevel);
+        _zoomValue.Text = _zoomSlider.Value.ToString();
+        _offsetXSlider.Value = Math.Clamp((int)config.ImageOffsetX, -25, 25);
+        _offsetXValue.Text = config.ImageOffsetX.ToString("F0");
+        _offsetYSlider.Value = Math.Clamp((int)config.ImageOffsetY, -25, 25);
+        _offsetYValue.Text = config.ImageOffsetY.ToString("F0");
+        _nightLightsCheck.Checked = config.NightLightsEnabled;
+        _nightBrightnessSlider.Value = Math.Clamp((int)(config.NightLightsBrightness * 10), _nightBrightnessSlider.Minimum, _nightBrightnessSlider.Maximum);
+        _nightBrightnessValue.Text = config.NightLightsBrightness.ToString("F1");
+        _nightBrightnessSlider.Enabled = config.NightLightsEnabled;
+        _ambientSlider.Value = Math.Clamp((int)(config.AmbientLight * 100), _ambientSlider.Minimum, _ambientSlider.Maximum);
+        _ambientValue.Text = config.AmbientLight.ToString("F2");
+        if (config.ImageStyle == ImageStyle.TopoBathy)
+            _topoBathyRadio.Checked = true;
+        else
+            _topoRadio.Checked = true;
+
+        _locationCombo.SelectedIndex = 0; // Custom
+        UpdateModeVisibility();
+        _isLoading = false;
+    }
+
+    private void LoadAppearanceFromGlobalSettings()
+    {
+        _isLoading = true;
 
         _displayModeCombo.SelectedIndex = (int)_settings.DisplayMode;
-        _runOnStartupCheck.Checked = StartupManager.IsRunOnStartup();
-
-        // View
-        _zoomSlider.Value = Math.Clamp((int)(_settings.ZoomLevel * 10), _zoomSlider.Minimum, _zoomSlider.Maximum);
-        _zoomValue.Text = _settings.ZoomLevel.ToString("F1");
-        _fovSlider.Value = Math.Clamp((int)_settings.FieldOfView, _fovSlider.Minimum, _fovSlider.Maximum);
-        _fovValue.Text = _settings.FieldOfView.ToString("F0");
-        _tiltSlider.Value = Math.Clamp((int)_settings.CameraTilt, _tiltSlider.Minimum, _tiltSlider.Maximum);
-        _tiltValue.Text = _settings.CameraTilt.ToString("F0") + "\u00b0";
-
-        // Lighting
+        _longitudeSlider.Value = Math.Clamp((int)_settings.LongitudeOffset, -180, 180);
+        _longitudeValue.Text = _settings.LongitudeOffset.ToString("F0") + "\u00b0";
+        _latitudeSlider.Value = Math.Clamp((int)_settings.CameraTilt, -60, 60);
+        _latitudeValue.Text = _settings.CameraTilt.ToString("F0") + "\u00b0";
+        _zoomSlider.Value = CameraToZoomSlider(_settings.ZoomLevel);
+        _zoomValue.Text = _zoomSlider.Value.ToString();
+        _offsetXSlider.Value = Math.Clamp((int)_settings.ImageOffsetX, -25, 25);
+        _offsetXValue.Text = _settings.ImageOffsetX.ToString("F0");
+        _offsetYSlider.Value = Math.Clamp((int)_settings.ImageOffsetY, -25, 25);
+        _offsetYValue.Text = _settings.ImageOffsetY.ToString("F0");
         _nightLightsCheck.Checked = _settings.NightLightsEnabled;
         _nightBrightnessSlider.Value = Math.Clamp((int)(_settings.NightLightsBrightness * 10), _nightBrightnessSlider.Minimum, _nightBrightnessSlider.Maximum);
         _nightBrightnessValue.Text = _settings.NightLightsBrightness.ToString("F1");
         _nightBrightnessSlider.Enabled = _settings.NightLightsEnabled;
         _ambientSlider.Value = Math.Clamp((int)(_settings.AmbientLight * 100), _ambientSlider.Minimum, _ambientSlider.Maximum);
         _ambientValue.Text = _settings.AmbientLight.ToString("F2");
-        _specularCheck.Checked = _settings.SunSpecularIntensity > 0;
-        _specularIntensitySlider.Value = Math.Clamp((int)(_settings.SunSpecularIntensity * 10), _specularIntensitySlider.Minimum, _specularIntensitySlider.Maximum);
-        _specularIntensityValue.Text = _settings.SunSpecularIntensity.ToString("F1");
-        _specularIntensitySlider.Enabled = _settings.SunSpecularIntensity > 0;
-
-        // Textures
         if (_settings.ImageStyle == ImageStyle.TopoBathy)
             _topoBathyRadio.Checked = true;
         else
             _topoRadio.Checked = true;
 
-        // Display
-        if (_settings.MultiMonitorMode == MultiMonitorMode.SpanAcross)
-            _spanAcrossRadio.Checked = true;
-        else
-            _sameForAllRadio.Checked = true;
+        _locationCombo.SelectedIndex = 0; // Custom
+        UpdateModeVisibility();
+        _isLoading = false;
+    }
+
+    private void LoadCurrentSettings()
+    {
+        LoadAppearanceFromGlobalSettings();
+
+        _isLoading = true;
+
+        _updateIntervalCombo.SelectedIndex = _settings.UpdateIntervalSeconds switch
+        {
+            60 => 0, 120 => 1, 300 => 2, 600 => 3,
+            900 => 4, 1800 => 5, 3600 => 6, _ => 3
+        };
+
+        _runOnStartupCheck.Checked = StartupManager.IsRunOnStartup();
+
+        switch (_settings.MultiMonitorMode)
+        {
+            case MultiMonitorMode.SpanAcross:
+                _spanAcrossRadio.Checked = true;
+                break;
+            case MultiMonitorMode.PerDisplay:
+                _perDisplayRadio.Checked = true;
+                break;
+            default:
+                _sameForAllRadio.Checked = true;
+                break;
+        }
 
         _renderResCombo.SelectedIndex = (_settings.RenderWidth, _settings.RenderHeight) switch
         {
-            (1920, 1080) => 1,
-            (2560, 1440) => 2,
-            (3840, 2160) => 3,
-            (5120, 2880) => 4,
-            _ => 0
+            (1920, 1080) => 1, (2560, 1440) => 2,
+            (3840, 2160) => 3, (5120, 2880) => 4, _ => 0
         };
+
+        UpdatePerDisplayVisibility();
+        _isLoading = false;
     }
 
-    private void ApplySettings()
-    {
-        _settingsManager.ApplyAndSave(s =>
-        {
-            // General
-            s.UpdateIntervalSeconds = _updateIntervalCombo.SelectedIndex switch
-            {
-                0 => 60,
-                1 => 120,
-                2 => 300,
-                3 => 600,
-                4 => 900,
-                5 => 1800,
-                6 => 3600,
-                _ => 600
-            };
-
-            s.DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex;
-
-            // View
-            s.ZoomLevel = _zoomSlider.Value / 10f;
-            s.FieldOfView = _fovSlider.Value;
-            s.CameraTilt = _tiltSlider.Value;
-
-            // Lighting
-            s.NightLightsEnabled = _nightLightsCheck.Checked;
-            s.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
-            s.AmbientLight = _ambientSlider.Value / 100f;
-            s.SunSpecularIntensity = _specularCheck.Checked ? _specularIntensitySlider.Value / 10f : 0.0f;
-
-            // Textures
-            s.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
-
-            // Display
-            s.MultiMonitorMode = _spanAcrossRadio.Checked
-                ? MultiMonitorMode.SpanAcross
-                : MultiMonitorMode.SameForAll;
-
-            (s.RenderWidth, s.RenderHeight) = _renderResCombo.SelectedIndex switch
-            {
-                1 => (1920, 1080),
-                2 => (2560, 1440),
-                3 => (3840, 2160),
-                4 => (5120, 2880),
-                _ => (0, 0)
-            };
-        });
-
-        // Apply startup setting separately (registry)
-        StartupManager.SetRunOnStartup(_runOnStartupCheck.Checked);
-    }
-
-    // Helper methods
     private static Label MakeLabel(string text, int x, int y) => new()
     {
         Text = text,
@@ -479,13 +785,25 @@ public class SettingsForm : Form
         Font = new Font("Segoe UI", 9)
     };
 
-    private static TrackBar MakeSlider(int x, int y, int min, int max, int value) => new()
+    private static TrackBar MakeSlider(int x, int y, int min, int max, int value, int width = SliderWidth) => new()
     {
         Location = new Point(x, y),
-        Width = 340,
+        Width = width,
         Minimum = min,
         Maximum = max,
         Value = Math.Clamp(value, min, max),
-        TickStyle = TickStyle.None
+        TickStyle = TickStyle.None,
+        AutoSize = false,
+        Height = 25
     };
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _debounceTimer.Stop();
+            _debounceTimer.Dispose();
+        }
+        base.Dispose(disposing);
+    }
 }

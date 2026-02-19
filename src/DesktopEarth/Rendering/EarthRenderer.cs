@@ -12,27 +12,28 @@ public class EarthRenderer : IDisposable
     private TextureManager? _textures;
     private ShaderProgram? _earthShader;
     private ShaderProgram? _atmosShader;
+    private ShaderProgram? _starsShader;
+    private uint _starsVao;
+    private uint _starsVbo;
     private uint _framebuffer;
     private uint _renderTexture;
     private uint _depthRenderbuffer;
     private int _fbWidth;
     private int _fbHeight;
-    private bool _hasBathyMask;
-
     public EarthRenderer(AppSettings settings)
     {
         _settings = settings;
     }
 
-    public void Initialize(GL gl, string dayTexPath, string nightTexPath, string? bathyMaskPath)
+    public void Initialize(GL gl, string dayTexPath, string nightTexPath)
     {
         _gl = gl;
         _gl.Enable(EnableCap.DepthTest);
         _gl.Enable(EnableCap.CullFace);
         _gl.CullFace(TriangleFace.Back);
 
-        // Create meshes
-        _globe = new GlobeMesh(_gl, 64, 128);
+        // Create meshes — 128x256 for smooth edges
+        _globe = new GlobeMesh(_gl, 128, 256);
         _atmosphereMesh = new GlobeMesh(_gl, 32, 64);
 
         // Load textures
@@ -40,15 +41,40 @@ public class EarthRenderer : IDisposable
         _textures.LoadTexture(dayTexPath, "day");
         _textures.LoadTexture(nightTexPath, "night");
 
-        if (bathyMaskPath != null)
-        {
-            _textures.LoadTexture(bathyMaskPath, "bathyMask");
-            _hasBathyMask = true;
-        }
-
         // Create shaders
         _earthShader = new ShaderProgram(_gl, Shaders.EarthVertex, Shaders.EarthFragment);
         _atmosShader = new ShaderProgram(_gl, Shaders.AtmosphereVertex, Shaders.AtmosphereFragment);
+        _starsShader = new ShaderProgram(_gl, Shaders.StarsVertex, Shaders.StarsFragment);
+
+        // Create fullscreen quad for stars
+        float[] quadVerts =
+        [
+            -1f, -1f,
+             1f, -1f,
+             1f,  1f,
+            -1f, -1f,
+             1f,  1f,
+            -1f,  1f,
+        ];
+
+        _starsVao = _gl.GenVertexArray();
+        _gl.BindVertexArray(_starsVao);
+
+        _starsVbo = _gl.GenBuffer();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _starsVbo);
+        unsafe
+        {
+            fixed (float* ptr = quadVerts)
+            {
+                _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(quadVerts.Length * sizeof(float)),
+                    ptr, BufferUsageARB.StaticDraw);
+            }
+        }
+
+        _gl.EnableVertexAttribArray(0);
+        unsafe { _gl.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), (void*)0); }
+
+        _gl.BindVertexArray(0);
     }
 
     public void EnsureFramebuffer(int width, int height)
@@ -56,7 +82,6 @@ public class EarthRenderer : IDisposable
         if (_fbWidth == width && _fbHeight == height && _framebuffer != 0)
             return;
 
-        // Clean up old framebuffer
         if (_framebuffer != 0) _gl.DeleteFramebuffer(_framebuffer);
         if (_renderTexture != 0) _gl.DeleteTexture(_renderTexture);
         if (_depthRenderbuffer != 0) _gl.DeleteRenderbuffer(_depthRenderbuffer);
@@ -102,29 +127,67 @@ public class EarthRenderer : IDisposable
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _framebuffer);
         _gl.Viewport(0, 0, (uint)width, (uint)height);
-        _gl.ClearColor(0.0f, 0.0f, 0.02f, 1.0f);
+        _gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+
+        // --- Draw stars background ---
+        if (_starsShader != null)
+        {
+            _gl.Disable(EnableCap.DepthTest);
+            _starsShader.Use();
+            _starsShader.SetUniform("uResolution", new Vector3(width, height, 0.0f));
+            _gl.BindVertexArray(_starsVao);
+            _gl.DrawArrays(PrimitiveType.Triangles, 0, 6);
+            _gl.BindVertexArray(0);
+            _gl.Enable(EnableCap.DepthTest);
+        }
 
         var now = DateTime.UtcNow;
 
-        // Camera from settings
+        // === Sun position ===
+        // GetSubsolarPoint returns the lat/lon on Earth where the sun is directly overhead.
+        // This already encodes the current time of day (via GMST/right ascension).
+        var (sunLat, sunLon) = SunPosition.GetSubsolarPoint(now);
+        float sunLatRad = (float)(sunLat * Math.PI / 180.0);
+        float sunLonRad = (float)(sunLon * Math.PI / 180.0);
+
+        // === Globe orientation ===
+        // The model matrix rotates the globe so the user's chosen longitude faces the camera.
+        // In the mesh, theta=0 (u=0) maps to +X axis. Longitude 0° is at theta=0.
+        // To center a given longitude toward the camera (+Z), we rotate by -(lon + 90°).
+        float lonOffsetRad = -(_settings.LongitudeOffset + 90.0f) * MathF.PI / 180.0f;
+        float latitudeRad = _settings.CameraTilt * MathF.PI / 180.0f;
+
+        var model = Matrix4x4.CreateRotationY(lonOffsetRad) *
+                    Matrix4x4.CreateRotationX(-latitudeRad);
+
+        // === Sun direction in model space ===
+        // The mesh maps geographic point (lat, lon) to:
+        //   x = -cos(lat)*cos(lon), y = sin(lat), z = -cos(lat)*sin(lon)
+        // (because u=0 is lon=-180° at +X, so lon=0° maps to -X)
+        // The sun shines FROM its subsolar point direction, so we need:
+        var sunMeshSpace = new Vector3(
+            -MathF.Cos(sunLatRad) * MathF.Cos(sunLonRad),
+            MathF.Sin(sunLatRad),
+            -MathF.Cos(sunLatRad) * MathF.Sin(sunLonRad)
+        );
+        // Transform by model matrix to account for globe rotation/tilt
+        var sunDirection = Vector3.TransformNormal(sunMeshSpace, model);
+        sunDirection = Vector3.Normalize(sunDirection);
+
+        // Camera setup
         float fov = _settings.FieldOfView * MathF.PI / 180.0f;
         float aspect = (float)width / height;
         var projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, 0.1f, 100.0f);
-        var cameraPos = new Vector3(0.0f, 0.0f, _settings.ZoomLevel);
-        var view = Matrix4x4.CreateLookAt(cameraPos, Vector3.Zero, Vector3.UnitY);
 
-        // Sun direction
-        var sunDir3 = SunPosition.GetSunDirection(now);
-        var sunDirection = new Vector3(sunDir3.X, sunDir3.Y, sunDir3.Z);
-
-        // Earth rotation
-        float hoursUtc = (float)now.TimeOfDay.TotalHours;
-        float earthRotation = -(hoursUtc / 24.0f) * 2.0f * MathF.PI;
-        float tiltAngle = _settings.CameraTilt * MathF.PI / 180.0f;
-
-        var model = Matrix4x4.CreateRotationY(earthRotation) *
-                    Matrix4x4.CreateRotationX(-tiltAngle);
+        // Image offset: shift camera laterally to slide the image on screen.
+        // OffsetX/Y are -25..+25 (percentage). Convert to world units based on view size.
+        float viewHeight = 2.0f * _settings.ZoomLevel * MathF.Tan(fov * 0.5f);
+        float offsetX = (_settings.ImageOffsetX / 100.0f) * viewHeight * aspect;
+        float offsetY = (_settings.ImageOffsetY / 100.0f) * viewHeight;
+        var cameraPos = new Vector3(offsetX, offsetY, _settings.ZoomLevel);
+        var cameraTarget = new Vector3(offsetX, offsetY, 0.0f);
+        var view = Matrix4x4.CreateLookAt(cameraPos, cameraTarget, Vector3.UnitY);
 
         // Draw Earth
         _earthShader.Use();
@@ -132,14 +195,10 @@ public class EarthRenderer : IDisposable
         _earthShader.SetUniform("uView", view);
         _earthShader.SetUniform("uProjection", projection);
         _earthShader.SetUniform("uSunDirection", sunDirection);
-        _earthShader.SetUniform("uCameraPos", cameraPos);
         _earthShader.SetUniform("uAmbient", _settings.AmbientLight);
 
         float nightBrightness = _settings.NightLightsEnabled ? _settings.NightLightsBrightness : 0.0f;
         _earthShader.SetUniform("uNightBrightness", nightBrightness);
-        _earthShader.SetUniform("uSpecularIntensity", _settings.SunSpecularIntensity);
-        _earthShader.SetUniform("uSpecularPower", _settings.SunSpecularPower);
-        _earthShader.SetUniform("uHasBathyMask", _hasBathyMask ? 1 : 0);
 
         int texUnit = 0;
 
@@ -150,13 +209,6 @@ public class EarthRenderer : IDisposable
         _gl.ActiveTexture(TextureUnit.Texture0 + texUnit);
         _gl.BindTexture(TextureTarget.Texture2D, _textures.GetTexture("night"));
         _earthShader.SetUniform("uNightTexture", texUnit++);
-
-        if (_hasBathyMask)
-        {
-            _gl.ActiveTexture(TextureUnit.Texture0 + texUnit);
-            _gl.BindTexture(TextureTarget.Texture2D, _textures.GetTexture("bathyMask"));
-            _earthShader.SetUniform("uBathyMask", texUnit++);
-        }
 
         _globe.Draw();
 
@@ -204,7 +256,10 @@ public class EarthRenderer : IDisposable
         _textures?.Dispose();
         _earthShader?.Dispose();
         _atmosShader?.Dispose();
+        _starsShader?.Dispose();
 
+        if (_starsVao != 0) _gl.DeleteVertexArray(_starsVao);
+        if (_starsVbo != 0) _gl.DeleteBuffer(_starsVbo);
         if (_framebuffer != 0) _gl.DeleteFramebuffer(_framebuffer);
         if (_renderTexture != 0) _gl.DeleteTexture(_renderTexture);
         if (_depthRenderbuffer != 0) _gl.DeleteRenderbuffer(_depthRenderbuffer);

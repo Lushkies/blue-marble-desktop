@@ -72,6 +72,7 @@ public class RenderScheduler : IDisposable
         FlatMapRenderer? flatMapRenderer = null;
         MoonRenderer? moonRenderer = null;
         DisplayMode currentMode = settings.DisplayMode;
+        ImageStyle currentImageStyle = settings.ImageStyle;
 
         DateTime lastUpdate = DateTime.MinValue;
         bool firstRender = true;
@@ -111,33 +112,46 @@ public class RenderScheduler : IDisposable
             {
                 // Re-read settings
                 settings = _settingsManager.Settings;
-                (renderWidth, renderHeight) = MonitorManager.GetRenderResolution(settings);
 
-                // Re-initialize renderers if display mode changed
-                if (settings.DisplayMode != currentMode)
+                if (settings.MultiMonitorMode == MultiMonitorMode.PerDisplay)
                 {
-                    currentMode = settings.DisplayMode;
-                    DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
-                    InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+                    // Per-display rendering: render each monitor independently
+                    RenderPerDisplay(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer,
+                        ref currentMode, ref currentImageStyle);
+                }
+                else
+                {
+                    // Standard rendering: single image for all monitors
+                    (renderWidth, renderHeight) = MonitorManager.GetRenderResolution(settings);
+
+                    // Re-initialize renderers if display mode or image style changed
+                    if (settings.DisplayMode != currentMode || settings.ImageStyle != currentImageStyle)
+                    {
+                        currentMode = settings.DisplayMode;
+                        currentImageStyle = settings.ImageStyle;
+                        DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+                        InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+                    }
+
+                    string modeName = settings.DisplayMode switch
+                    {
+                        DisplayMode.FlatMap => "flat map",
+                        DisplayMode.Moon => "moon",
+                        _ => "earth"
+                    };
+                    ReportStatus($"Rendering {modeName}...");
+
+                    byte[] pixels = settings.DisplayMode switch
+                    {
+                        DisplayMode.FlatMap => flatMapRenderer!.Render(renderWidth, renderHeight),
+                        DisplayMode.Moon => moonRenderer!.Render(renderWidth, renderHeight),
+                        _ => earthRenderer!.Render(renderWidth, renderHeight),
+                    };
+
+                    SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
+                    WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
                 }
 
-                string modeName = settings.DisplayMode switch
-                {
-                    DisplayMode.FlatMap => "flat map",
-                    DisplayMode.Moon => "moon",
-                    _ => "earth"
-                };
-                ReportStatus($"Rendering {modeName}...");
-
-                byte[] pixels = settings.DisplayMode switch
-                {
-                    DisplayMode.FlatMap => flatMapRenderer!.Render(renderWidth, renderHeight),
-                    DisplayMode.Moon => moonRenderer!.Render(renderWidth, renderHeight),
-                    _ => earthRenderer!.Render(renderWidth, renderHeight),
-                };
-
-                SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
-                WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
                 lastUpdate = DateTime.UtcNow;
                 ReportStatus($"Wallpaper updated at {DateTime.Now:HH:mm:ss}");
             }
@@ -162,12 +176,102 @@ public class RenderScheduler : IDisposable
         }
     }
 
+    private void RenderPerDisplay(GL gl, AppSettings settings,
+        ref EarthRenderer? earthRenderer, ref FlatMapRenderer? flatMapRenderer, ref MoonRenderer? moonRenderer,
+        ref DisplayMode currentMode, ref ImageStyle currentImageStyle)
+    {
+        var screens = MonitorManager.GetAllScreens();
+        if (screens.Length == 0) return;
+
+        // Get virtual desktop bounds for composite
+        var (vdWidth, vdHeight) = MonitorManager.GetVirtualDesktopSize();
+        int vdLeft = int.MaxValue, vdTop = int.MaxValue;
+        foreach (var screen in screens)
+        {
+            if (screen.Bounds.Left < vdLeft) vdLeft = screen.Bounds.Left;
+            if (screen.Bounds.Top < vdTop) vdTop = screen.Bounds.Top;
+        }
+
+        ReportStatus($"Rendering per-display ({screens.Length} monitors)...");
+
+        // Create composite image
+        using var composite = new SixLabors.ImageSharp.Image<Rgba32>(vdWidth, vdHeight);
+
+        // Fill with black
+        for (int y = 0; y < vdHeight; y++)
+            for (int x = 0; x < vdWidth; x++)
+                composite[x, y] = new Rgba32(0, 0, 0, 255);
+
+        foreach (var screen in screens)
+        {
+            int sw = screen.Bounds.Width;
+            int sh = screen.Bounds.Height;
+
+            // Find per-display config or use global defaults
+            var displayConfig = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
+
+            // Create temporary settings for this display
+            var displaySettings = new AppSettings
+            {
+                DisplayMode = displayConfig?.DisplayMode ?? settings.DisplayMode,
+                ZoomLevel = displayConfig?.ZoomLevel ?? settings.ZoomLevel,
+                FieldOfView = displayConfig?.FieldOfView ?? settings.FieldOfView,
+                CameraTilt = displayConfig?.CameraTilt ?? settings.CameraTilt,
+                LongitudeOffset = displayConfig?.LongitudeOffset ?? settings.LongitudeOffset,
+                ImageOffsetX = displayConfig?.ImageOffsetX ?? settings.ImageOffsetX,
+                ImageOffsetY = displayConfig?.ImageOffsetY ?? settings.ImageOffsetY,
+                NightLightsEnabled = displayConfig?.NightLightsEnabled ?? settings.NightLightsEnabled,
+                NightLightsBrightness = displayConfig?.NightLightsBrightness ?? settings.NightLightsBrightness,
+                AmbientLight = displayConfig?.AmbientLight ?? settings.AmbientLight,
+                ImageStyle = displayConfig?.ImageStyle ?? settings.ImageStyle,
+            };
+
+            // Always create fresh renderers for each display so each gets
+            // its own settings (zoom, longitude, etc.). Renderers store a
+            // reference to settings at construction time.
+            DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+            currentMode = displaySettings.DisplayMode;
+            currentImageStyle = displaySettings.ImageStyle;
+            InitializeRenderers(gl, displaySettings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+
+            // Render this display
+            byte[] pixels = displaySettings.DisplayMode switch
+            {
+                DisplayMode.FlatMap => flatMapRenderer!.Render(sw, sh),
+                DisplayMode.Moon => moonRenderer!.Render(sw, sh),
+                _ => earthRenderer!.Render(sw, sh),
+            };
+
+            // Place rendered pixels into composite at the correct position
+            int offsetX = screen.Bounds.Left - vdLeft;
+            int offsetY = screen.Bounds.Top - vdTop;
+
+            for (int y = 0; y < sh; y++)
+            {
+                int srcRow = (sh - 1 - y) * sw * 4; // OpenGL is bottom-up
+                for (int x = 0; x < sw; x++)
+                {
+                    int idx = srcRow + x * 4;
+                    int cx = offsetX + x;
+                    int cy = offsetY + y;
+                    if (cx >= 0 && cx < vdWidth && cy >= 0 && cy < vdHeight)
+                    {
+                        composite[cx, cy] = new Rgba32(pixels[idx], pixels[idx + 1], pixels[idx + 2], 255);
+                    }
+                }
+            }
+        }
+
+        // Save composite and set as spanned wallpaper
+        composite.SaveAsBmp(_wallpaperPath);
+        WallpaperSetter.SetWallpaper(_wallpaperPath, MultiMonitorMode.SpanAcross);
+    }
+
     private void InitializeRenderers(GL gl, AppSettings settings,
         ref EarthRenderer? earthRenderer, ref FlatMapRenderer? flatMapRenderer, ref MoonRenderer? moonRenderer)
     {
         string dayTexPath = _assets.GetDayTexturePath(settings.ImageStyle);
         string nightTexPath = _assets.GetNightTexturePath();
-        string? bathyMaskPath = _assets.GetBathyMaskPath();
 
         switch (settings.DisplayMode)
         {
@@ -180,18 +284,18 @@ public class RenderScheduler : IDisposable
                 {
                     string moonTexPath = _assets.GetMoonTexturePath();
                     moonRenderer = new MoonRenderer(settings);
-                    moonRenderer.Initialize(gl, moonTexPath);
+                    moonRenderer.Initialize(gl, moonTexPath, dayTexPath, nightTexPath);
                 }
                 catch (FileNotFoundException)
                 {
                     ReportStatus("Moon texture not found, falling back to globe.");
                     earthRenderer = new EarthRenderer(settings);
-                    earthRenderer.Initialize(gl, dayTexPath, nightTexPath, bathyMaskPath);
+                    earthRenderer.Initialize(gl, dayTexPath, nightTexPath);
                 }
                 break;
             default:
                 earthRenderer = new EarthRenderer(settings);
-                earthRenderer.Initialize(gl, dayTexPath, nightTexPath, bathyMaskPath);
+                earthRenderer.Initialize(gl, dayTexPath, nightTexPath);
                 break;
         }
     }
