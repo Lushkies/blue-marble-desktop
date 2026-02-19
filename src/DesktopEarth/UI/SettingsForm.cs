@@ -107,12 +107,18 @@ public class SettingsForm : Form
     {
         _settingsManager.ApplyAndSave(s =>
         {
-            SaveAppearanceToGlobalSettings(s);
-
             if (_perDisplayRadio.Checked && !string.IsNullOrEmpty(_selectedMonitorDevice))
             {
+                // Per-display mode: save ONLY to the selected display's config.
+                // Do NOT overwrite global settings — other displays without their
+                // own config fall back to global, and we don't want them changing.
                 var config = GetOrCreateDisplayConfig(_selectedMonitorDevice);
                 SaveAppearanceToDisplayConfig(config);
+            }
+            else
+            {
+                // Same-for-all or Span: save to global settings as before
+                SaveAppearanceToGlobalSettings(s);
             }
 
             s.UpdateIntervalSeconds = _updateIntervalCombo.SelectedIndex switch

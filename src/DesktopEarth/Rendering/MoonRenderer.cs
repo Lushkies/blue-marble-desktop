@@ -172,14 +172,13 @@ public class MoonRenderer : IDisposable
         // --- Draw mini Earth in background (upper-right of the moon) ---
         if (_hasEarthTextures && _earthShader != null && _miniEarthGlobe != null)
         {
-            float earthScale = 0.35f; // Visible earth
-            // Position to the upper-right of the moon, further back
-            var earthTranslation = new Vector3(1.5f, 0.8f, -2.5f);
+            float earthScale = 0.55f; // Large enough to be clearly visible
+            // Position further right and back so the full globe is visible beside the moon
+            var earthTranslation = new Vector3(2.2f, 0.5f, -3.0f);
 
-            // Rotate globe so the Americas face camera (lon -90°)
-            // Mesh theta=0 at +X, so to center lon=-90° toward +Z: rotate by -(-90+90)=0
-            // For a more interesting default, show a slight rotation:
-            float earthLonOffset = (-90.0f + 90.0f) * MathF.PI / 180.0f;
+            // Show the night side of Earth by default (rotate 180° from sun-facing side).
+            // Uses the same negated longitude convention as EarthRenderer for consistency.
+            float earthLonOffset = (180.0f) * MathF.PI / 180.0f;
 
             var earthRotationMatrix = Matrix4x4.CreateRotationY(earthLonOffset);
             var earthModel = Matrix4x4.CreateScale(earthScale) *
@@ -220,9 +219,11 @@ public class MoonRenderer : IDisposable
         }
 
         // --- Draw Moon ---
-        // Moon rotates much slower than earth (synchronous rotation)
+        // Apply both latitude (tilt) and longitude rotation so the slider works
         float latitudeRad = _settings.CameraTilt * MathF.PI / 180.0f;
-        var model = Matrix4x4.CreateRotationX(-latitudeRad);
+        float lonOffsetRad = (-_settings.LongitudeOffset - 90.0f) * MathF.PI / 180.0f;
+        var model = Matrix4x4.CreateRotationX(-latitudeRad) *
+                    Matrix4x4.CreateRotationY(lonOffsetRad);
 
         _shader.Use();
         _shader.SetUniform("uModel", model);
