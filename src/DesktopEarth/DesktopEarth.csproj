@@ -17,6 +17,7 @@
     <Company>Blue Marble Desktop</Company>
     <Authors>Alex and Claude (Anthropic)</Authors>
     <Description>Dynamic wallpaper showing a 3D Earth with real-time day/night illumination</Description>
+    <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

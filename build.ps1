@@ -21,14 +21,11 @@ function Build-Target($rid, $outputDir) {
         Remove-Item -Recurse -Force $publishDir
     }
 
-    # Publish self-contained
+    # Publish self-contained (not single-file — Silk.NET native libs need to be alongside the exe)
     dotnet publish $ProjectPath `
         -c $Configuration `
         -r "win-$rid" `
         --self-contained `
-        -p:PublishSingleFile=true `
-        -p:IncludeNativeLibrariesForSelfExtract=true `
-        -p:EnableCompressionInSingleFile=true `
         -o $publishDir
 
     if ($LASTEXITCODE -ne 0) {

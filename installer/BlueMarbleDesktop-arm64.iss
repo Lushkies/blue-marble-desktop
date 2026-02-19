@@ -4,7 +4,7 @@
 #define MyAppName "Blue Marble Desktop"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Blue Marble Desktop"
-#define MyAppURL "https://github.com/youruser/blue-marble-desktop"
+#define MyAppURL "https://github.com/Lushkies/blue-marble-desktop"
 #define MyAppExeName "BlueMarbleDesktop.exe"
 
 [Setup]
@@ -40,8 +40,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startupentry"; Description: "Run Blue Marble Desktop when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
-; Main application (self-contained single file)
-Source: "..\publish\arm64\BlueMarbleDesktop.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Application and all runtime dependencies (self-contained, not single-file)
+Source: "..\publish\arm64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 ; Mesa3D software renderer fallback (required for ARM64 without native OpenGL)
 Source: "..\lib\mesa3d\opengl32.dll"; DestDir: "{app}"; Flags: ignoreversion

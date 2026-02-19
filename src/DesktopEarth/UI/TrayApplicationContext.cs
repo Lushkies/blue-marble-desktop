@@ -12,7 +12,7 @@ public class TrayApplicationContext : ApplicationContext
     private SettingsForm? _settingsForm;
 
     // Update manifest URL — change this when hosting the update feed
-    private const string UpdateUrl = "https://raw.githubusercontent.com/youruser/blue-marble-desktop/main/update.xml";
+    private const string UpdateUrl = "https://raw.githubusercontent.com/Lushkies/blue-marble-desktop/main/update.xml";
 
     public TrayApplicationContext(SettingsManager settingsManager, RenderScheduler renderScheduler)
     {

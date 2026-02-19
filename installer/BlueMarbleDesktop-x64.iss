@@ -4,7 +4,7 @@
 #define MyAppName "Blue Marble Desktop"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Blue Marble Desktop"
-#define MyAppURL "https://github.com/youruser/blue-marble-desktop"
+#define MyAppURL "https://github.com/Lushkies/blue-marble-desktop"
 #define MyAppExeName "BlueMarbleDesktop.exe"
 
 [Setup]
@@ -40,8 +40,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startupentry"; Description: "Run Blue Marble Desktop when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
-; Main application (self-contained single file)
-Source: "..\publish\x64\BlueMarbleDesktop.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Application and all runtime dependencies (self-contained, not single-file)
+Source: "..\publish\x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 ; Assets
 Source: "..\assets\textures\*"; DestDir: "{app}\assets\textures"; Flags: ignoreversion recursesubdirs
