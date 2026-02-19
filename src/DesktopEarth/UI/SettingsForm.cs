@@ -23,21 +23,23 @@ public class SettingsForm : Form
     private const int RowGap = 8;
 
     // Location presets: (Name, Longitude, Latitude)
+    // Longitude values are negated from geographic convention to match the
+    // renderer's coordinate system (row-major → column-major transpose).
     private static readonly (string Name, float Lon, float Lat)[] LocationPresets =
     [
         ("Custom", 0, 0),               // placeholder for manual
-        ("New York", -74, 41),
-        ("Chicago", -88, 42),
-        ("Los Angeles", -118, 34),
+        ("New York", 74, 41),
+        ("Chicago", 88, 42),
+        ("Los Angeles", 118, 34),
         ("London", 0, 52),
-        ("Paris", 2, 49),
-        ("Tokyo", 140, 36),
-        ("Hong Kong", 114, 22),
-        ("Sydney", 151, -34),
-        ("Dubai", 55, 25),
-        ("Sao Paulo", -47, -24),
-        ("Cape Town", 18, -34),
-        ("Mumbai", 73, 19),
+        ("Paris", -2, 49),
+        ("Tokyo", -140, 36),
+        ("Hong Kong", -114, 22),
+        ("Sydney", -151, -34),
+        ("Dubai", -55, 25),
+        ("Sao Paulo", 47, -24),
+        ("Cape Town", -18, -34),
+        ("Mumbai", -73, 19),
     ];
 
     // Appearance tab controls
