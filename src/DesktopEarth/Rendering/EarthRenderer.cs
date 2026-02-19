@@ -153,10 +153,10 @@ public class EarthRenderer : IDisposable
 
         // === Globe orientation ===
         // The model matrix rotates the globe so the user's chosen longitude faces the camera.
-        // In the mesh, lon=-90° is at +Z (facing camera). To center longitude L,
-        // rotate by (L + 90°). System.Numerics row-major → OpenGL column-major
-        // transpose preserves the rotation angle for orthogonal matrices.
-        float lonOffsetRad = (_settings.LongitudeOffset + 90.0f) * MathF.PI / 180.0f;
+        // The mesh has lon=-90° at +Z (facing camera). System.Numerics row-major data is
+        // read as column-major by OpenGL, effectively transposing (= inverting) the rotation.
+        // To compensate, we negate: rotate by (-L - 90°) so the transpose gives (L + 90°).
+        float lonOffsetRad = (-_settings.LongitudeOffset - 90.0f) * MathF.PI / 180.0f;
         float latitudeRad = _settings.CameraTilt * MathF.PI / 180.0f;
 
         var model = Matrix4x4.CreateRotationY(lonOffsetRad) *
