@@ -42,7 +42,7 @@ g.FillEllipse(highlightBrush, 55, 35, 90, 65);
 
 // Save ICO
 string outPath = args.Length > 0 ? args[0] :
-    Path.Combine(AppContext.BaseDirectory, "desktopearth.ico");
+    Path.Combine(AppContext.BaseDirectory, "bluemarbledesktop.ico");
 
 int[] sizes = [16, 32, 48, 256];
 using var ms = new MemoryStream();

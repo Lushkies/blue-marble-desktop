@@ -24,6 +24,30 @@ public static class MonitorManager
     }
 
     /// <summary>
+    /// Gets the highest resolution among all connected monitors.
+    /// This ensures the rendered wallpaper looks sharp on every display,
+    /// even in mixed-resolution setups (e.g. 1080p + 1440p).
+    /// </summary>
+    public static (int Width, int Height) GetHighestMonitorResolution()
+    {
+        var screens = System.Windows.Forms.Screen.AllScreens;
+        if (screens.Length == 0)
+            return (1920, 1080);
+
+        int maxWidth = 0;
+        int maxHeight = 0;
+        foreach (var screen in screens)
+        {
+            if (screen.Bounds.Width > maxWidth)
+                maxWidth = screen.Bounds.Width;
+            if (screen.Bounds.Height > maxHeight)
+                maxHeight = screen.Bounds.Height;
+        }
+
+        return (maxWidth > 0 ? maxWidth : 1920, maxHeight > 0 ? maxHeight : 1080);
+    }
+
+    /// <summary>
     /// Gets all connected monitors.
     /// </summary>
     public static System.Windows.Forms.Screen[] GetAllScreens()
@@ -33,6 +57,8 @@ public static class MonitorManager
 
     /// <summary>
     /// Determines the render resolution based on settings and multi-monitor mode.
+    /// For SameForAll mode, uses the highest monitor resolution to avoid
+    /// black bars or blurriness on higher-res displays in mixed setups.
     /// </summary>
     public static (int Width, int Height) GetRenderResolution(AppSettings settings)
     {
@@ -44,7 +70,7 @@ public static class MonitorManager
         return settings.MultiMonitorMode switch
         {
             MultiMonitorMode.SpanAcross => GetVirtualDesktopSize(),
-            _ => GetPrimaryMonitorSize()
+            _ => GetHighestMonitorResolution()
         };
     }
 

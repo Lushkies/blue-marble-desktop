@@ -1,4 +1,4 @@
-# Desktop Earth - Windows 11 Revival Project
+# Blue Marble Desktop
 
 ## Overview
 A 3D Earth visualization wallpaper app for Windows 11. Renders a real-time globe with day/night lighting and sets it as your desktop wallpaper.
@@ -32,14 +32,14 @@ Or use `.\build.ps1 -Target all`
 src/DesktopEarth/
   Program.cs               # WinForms entry point, single-instance mutex
   AppSettings.cs            # Settings data model + enums
-  SettingsManager.cs        # JSON load/save to %AppData%/DesktopEarth/
+  SettingsManager.cs        # JSON load/save to %AppData%/BlueMarbleDesktop/
   AssetLocator.cs           # Texture path discovery
   RenderScheduler.cs        # Background thread: GLFW/OpenGL render loop
-  MonitorManager.cs         # Multi-monitor detection
+  MonitorManager.cs         # Multi-monitor detection (per-monitor resolution)
   WallpaperSetter.cs        # Windows API wallpaper setter with style support
   StartupManager.cs         # Windows startup registry management
   Resources/
-    desktopearth.ico        # Multi-size app icon (16/32/48/256)
+    bluemarbledesktop.ico   # Multi-size app icon (16/32/48/256)
   Rendering/
     EarthRenderer.cs        # 3D globe renderer (specular, night lights, bathy mask)
     FlatMapRenderer.cs      # 2D equirectangular projection
@@ -77,10 +77,13 @@ lib/
 - Atmospheric glow, specular reflection on oceans
 - Flat map and moon view modes
 - System tray with settings dialog
-- Multi-monitor support (fill / span)
+- Multi-monitor support (fill / span) with per-monitor resolution rendering
 - Auto-selects monthly texture (12 months of topo data)
 - Single-instance enforcement
 - Settings persisted as JSON in %AppData%
+
+## Authors
+Created by Alex and Claude (Anthropic)
 
 ## User Context
 - The user is new to coding — keep things approachable

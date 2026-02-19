@@ -26,7 +26,7 @@ public class RenderScheduler : IDisposable
     {
         _settingsManager = settingsManager;
         _assets = assets;
-        _wallpaperPath = Path.Combine(Path.GetTempPath(), "DesktopEarth_wallpaper.bmp");
+        _wallpaperPath = Path.Combine(Path.GetTempPath(), "BlueMarbleDesktop_wallpaper.bmp");
     }
 
     public void Start()
@@ -36,7 +36,7 @@ public class RenderScheduler : IDisposable
         _stopRequested = false;
         _renderThread = new Thread(RenderLoop)
         {
-            Name = "DesktopEarth-Render",
+            Name = "BlueMarbleDesktop-Render",
             IsBackground = true
         };
         _renderThread.Start();
@@ -62,7 +62,7 @@ public class RenderScheduler : IDisposable
 
         var options = WindowOptions.Default;
         options.Size = new Vector2D<int>(renderWidth, renderHeight);
-        options.Title = "Desktop Earth";
+        options.Title = "Blue Marble Desktop";
         options.IsVisible = false;
         options.VSync = false;
         options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(3, 3));

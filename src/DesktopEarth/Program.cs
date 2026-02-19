@@ -2,15 +2,15 @@ using DesktopEarth;
 using DesktopEarth.UI;
 
 // ─── Single instance check ───
-const string mutexName = "DesktopEarth-SingleInstance-Mutex";
+const string mutexName = "BlueMarbleDesktop-SingleInstance-Mutex";
 using var mutex = new Mutex(true, mutexName, out bool isNewInstance);
 
 if (!isNewInstance)
 {
     // Another instance is already running
     MessageBox.Show(
-        "Desktop Earth is already running.\nCheck the system tray for its icon.",
-        "Desktop Earth",
+        "Blue Marble Desktop is already running.\nCheck the system tray for its icon.",
+        "Blue Marble Desktop",
         MessageBoxButtons.OK,
         MessageBoxIcon.Information);
     return;
@@ -30,7 +30,7 @@ catch (DirectoryNotFoundException ex)
 {
     MessageBox.Show(
         $"Could not find texture files:\n{ex.Message}\n\nMake sure the 'assets/textures' folder is present.",
-        "Desktop Earth - Missing Assets",
+        "Blue Marble Desktop - Missing Assets",
         MessageBoxButtons.OK,
         MessageBoxIcon.Error);
     return;

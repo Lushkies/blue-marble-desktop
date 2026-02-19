@@ -37,7 +37,7 @@ public static class GraphicsCapabilityDetector
         if (IsArm64 && !IsMesaAvailable())
         {
             lines.Add("WARNING: Running on ARM64 without Mesa3D fallback.");
-            lines.Add("  If rendering fails, place opengl32.dll (Mesa3D) next to DesktopEarth.exe");
+            lines.Add("  If rendering fails, place opengl32.dll (Mesa3D) next to BlueMarbleDesktop.exe");
         }
 
         return string.Join(Environment.NewLine, lines);

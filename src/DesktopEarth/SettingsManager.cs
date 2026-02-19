@@ -6,7 +6,7 @@ namespace DesktopEarth;
 public class SettingsManager
 {
     private static readonly string SettingsDir =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopEarth");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BlueMarbleDesktop");
     private static readonly string SettingsPath = Path.Combine(SettingsDir, "settings.json");
 
     private static readonly JsonSerializerOptions JsonOptions = new()

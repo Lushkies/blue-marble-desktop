@@ -1,4 +1,4 @@
-# Desktop Earth Build Script
+# Blue Marble Desktop Build Script
 # Builds self-contained executables for x64 and ARM64
 
 param(
@@ -49,7 +49,7 @@ function Build-Target($rid, $outputDir) {
     if (!(Test-Path $targetResources)) {
         New-Item -ItemType Directory -Path $targetResources | Out-Null
     }
-    Copy-Item "src\DesktopEarth\Resources\desktopearth.ico" "$targetResources\desktopearth.ico"
+    Copy-Item "src\DesktopEarth\Resources\bluemarbledesktop.ico" "$targetResources\bluemarbledesktop.ico"
 
     # For ARM64, copy Mesa3D if available
     if ($rid -eq "arm64") {
@@ -64,7 +64,7 @@ function Build-Target($rid, $outputDir) {
     }
 
     # Report size
-    $exePath = Join-Path $publishDir "DesktopEarth.exe"
+    $exePath = Join-Path $publishDir "BlueMarbleDesktop.exe"
     if (Test-Path $exePath) {
         $size = (Get-Item $exePath).Length / 1MB
         Write-Host "Build complete: $exePath ({0:N1} MB)" -f $size -ForegroundColor Green
@@ -77,8 +77,8 @@ function Build-Target($rid, $outputDir) {
 }
 
 # Main
-Write-Host "Desktop Earth Build" -ForegroundColor White
-Write-Host "===================" -ForegroundColor White
+Write-Host "Blue Marble Desktop Build" -ForegroundColor White
+Write-Host "=========================" -ForegroundColor White
 
 switch ($Target) {
     "x64"   { Build-Target "x64" }

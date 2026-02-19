@@ -8,19 +8,19 @@ public class AboutForm : Form
 {
     public AboutForm()
     {
-        Text = "About Desktop Earth";
+        Text = "About Blue Marble Desktop";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(380, 240);
+        Size = new Size(400, 280);
         ShowInTaskbar = false;
 
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
 
         var titleLabel = new Label
         {
-            Text = "Desktop Earth",
+            Text = "Blue Marble Desktop",
             Font = new Font("Segoe UI", 16, FontStyle.Bold),
             AutoSize = true,
             Location = new Point(20, 20)
@@ -42,13 +42,21 @@ public class AboutForm : Form
             Location = new Point(22, 85)
         };
 
+        var authorLabel = new Label
+        {
+            Text = "Created by Alex and Claude (Anthropic)",
+            Font = new Font("Segoe UI", 9),
+            AutoSize = true,
+            Location = new Point(22, 120)
+        };
+
         var creditLabel = new Label
         {
             Text = "Built with .NET 8 and OpenGL.\nEarth textures courtesy of NASA (public domain).",
             Font = new Font("Segoe UI", 8),
             ForeColor = Color.Gray,
             AutoSize = true,
-            Location = new Point(22, 130)
+            Location = new Point(22, 150)
         };
 
         var okButton = new Button
@@ -56,10 +64,10 @@ public class AboutForm : Form
             Text = "OK",
             DialogResult = DialogResult.OK,
             Size = new Size(80, 30),
-            Location = new Point(270, 165)
+            Location = new Point(290, 205)
         };
         AcceptButton = okButton;
 
-        Controls.AddRange([titleLabel, versionLabel, descLabel, creditLabel, okButton]);
+        Controls.AddRange([titleLabel, versionLabel, descLabel, authorLabel, creditLabel, okButton]);
     }
 }

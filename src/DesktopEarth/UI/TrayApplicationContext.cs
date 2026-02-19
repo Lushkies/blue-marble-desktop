@@ -12,7 +12,7 @@ public class TrayApplicationContext : ApplicationContext
     private SettingsForm? _settingsForm;
 
     // Update manifest URL — change this when hosting the update feed
-    private const string UpdateUrl = "https://raw.githubusercontent.com/youruser/desktop-earth/main/update.xml";
+    private const string UpdateUrl = "https://raw.githubusercontent.com/youruser/blue-marble-desktop/main/update.xml";
 
     public TrayApplicationContext(SettingsManager settingsManager, RenderScheduler renderScheduler)
     {
@@ -22,7 +22,7 @@ public class TrayApplicationContext : ApplicationContext
         _trayIcon = new NotifyIcon
         {
             Icon = LoadAppIcon(),
-            Text = "Desktop Earth",
+            Text = "Blue Marble Desktop",
             Visible = true,
             ContextMenuStrip = BuildContextMenu()
         };
@@ -51,7 +51,7 @@ public class TrayApplicationContext : ApplicationContext
         AutoUpdater.RunUpdateAsAdmin = false;
         AutoUpdater.ReportErrors = false; // Silent on network errors
         AutoUpdater.Synchronous = false;
-        AutoUpdater.AppTitle = "Desktop Earth";
+        AutoUpdater.AppTitle = "Blue Marble Desktop";
 
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         if (version != null)
@@ -76,7 +76,7 @@ public class TrayApplicationContext : ApplicationContext
             AutoUpdater.ReportErrors = false;
         };
 
-        var aboutItem = new ToolStripMenuItem("About Desktop Earth");
+        var aboutItem = new ToolStripMenuItem("About Blue Marble Desktop");
         aboutItem.Click += (_, _) => ShowAbout();
 
         var exitItem = new ToolStripMenuItem("Exit");
@@ -124,7 +124,7 @@ public class TrayApplicationContext : ApplicationContext
     {
         try
         {
-            string text = $"Desktop Earth - {status}";
+            string text = $"Blue Marble Desktop - {status}";
             if (text.Length > 63) text = text[..63];
             _trayIcon.Text = text;
         }
@@ -133,7 +133,7 @@ public class TrayApplicationContext : ApplicationContext
 
     private static Icon LoadAppIcon()
     {
-        string iconPath = Path.Combine(AppContext.BaseDirectory, "Resources", "desktopearth.ico");
+        string iconPath = Path.Combine(AppContext.BaseDirectory, "Resources", "bluemarbledesktop.ico");
         if (File.Exists(iconPath))
         {
             try { return new Icon(iconPath); }
@@ -143,8 +143,8 @@ public class TrayApplicationContext : ApplicationContext
         string exeDir = AppContext.BaseDirectory;
         string[] searchPaths =
         [
-            Path.Combine(exeDir, "desktopearth.ico"),
-            Path.Combine(exeDir, "..", "..", "..", "Resources", "desktopearth.ico"),
+            Path.Combine(exeDir, "bluemarbledesktop.ico"),
+            Path.Combine(exeDir, "..", "..", "..", "Resources", "bluemarbledesktop.ico"),
         ];
         foreach (var path in searchPaths)
         {

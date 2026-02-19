@@ -5,7 +5,7 @@ namespace DesktopEarth;
 public static class StartupManager
 {
     private const string RegistryKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
-    private const string AppName = "DesktopEarth";
+    private const string AppName = "BlueMarbleDesktop";
 
     public static bool IsRunOnStartup()
     {

@@ -52,7 +52,7 @@ public class SettingsForm : Form
 
     private void InitializeForm()
     {
-        Text = "Desktop Earth Settings";
+        Text = "Blue Marble Desktop Settings";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -151,7 +151,7 @@ public class SettingsForm : Form
         // Run on startup
         _runOnStartupCheck = new CheckBox
         {
-            Text = "Run Desktop Earth when Windows starts",
+            Text = "Run Blue Marble Desktop when Windows starts",
             AutoSize = true,
             Location = new Point(20, y)
         };
