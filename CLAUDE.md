@@ -200,7 +200,7 @@ lib/
 - NPS photos often include people (park rangers, visitors, buildings) rather than nature landscapes -- no API-level filter exists for this
 - Smithsonian search results depend on the art_design category -- some terms work better than others
 - EPIC images are sometimes delayed 24-48 hours from NASA
-- The SettingsForm is one large file (~2400 lines) -- could benefit from being split into partial classes or user controls if it grows further
+- The SettingsForm is one large file (~2800 lines) -- could benefit from being split into partial classes or user controls if it grows further
 
 ### Potential Future Features
 - Filter NPS results to exclude photos with people (would need image analysis or metadata heuristics)
