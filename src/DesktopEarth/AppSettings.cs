@@ -49,6 +49,43 @@ public class AppSettings
     public string EpicSelectedDate { get; set; } = "";
     public string EpicSelectedImage { get; set; } = "";
 
+    // NASA APOD settings
+    public bool ApodUseLatest { get; set; } = true;
+    public string ApodSelectedDate { get; set; } = "";
+    public string ApodSelectedImageId { get; set; } = "";
+    public string ApodSelectedImageUrl { get; set; } = "";
+
+    // National Park Service settings
+    public string NpsSearchQuery { get; set; } = "";
+    public string NpsSelectedParkCode { get; set; } = "";
+    public string NpsSelectedImageId { get; set; } = "";
+    public string NpsSelectedImageUrl { get; set; } = "";
+
+    // Unsplash settings
+    public string UnsplashTopic { get; set; } = "nature";
+    public string UnsplashSearchQuery { get; set; } = "";
+    public string UnsplashSelectedImageId { get; set; } = "";
+    public string UnsplashSelectedImageUrl { get; set; } = "";
+    public string UnsplashPhotographerName { get; set; } = "";
+
+    // Smithsonian settings
+    public string SmithsonianSearchQuery { get; set; } = "nature";
+    public string SmithsonianSelectedId { get; set; } = "";
+    public string SmithsonianSelectedImageUrl { get; set; } = "";
+
+    // API keys (stored per-user, not shared)
+    public string NasaApiKey { get; set; } = "DEMO_KEY";
+    public string NpsApiKey { get; set; } = "";
+    public string UnsplashAccessKey { get; set; } = "";
+    public string SmithsonianApiKey { get; set; } = "";
+
+    // Random rotation
+    public bool RandomRotationEnabled { get; set; } = false;
+    public bool RandomFromFavoritesOnly { get; set; } = false;
+
+    // Favorites
+    public List<FavoriteImage> Favorites { get; set; } = new();
+
     // Per-display configurations (used when MultiMonitorMode == PerDisplay)
     public List<DisplayConfig> DisplayConfigs { get; set; } = new();
 }
@@ -76,9 +113,50 @@ public class DisplayConfig
     public bool EpicUseLatest { get; set; } = true;
     public string EpicSelectedDate { get; set; } = "";
     public string EpicSelectedImage { get; set; } = "";
+
+    // NASA APOD settings
+    public bool ApodUseLatest { get; set; } = true;
+    public string ApodSelectedDate { get; set; } = "";
+    public string ApodSelectedImageId { get; set; } = "";
+    public string ApodSelectedImageUrl { get; set; } = "";
+
+    // National Park Service settings
+    public string NpsSearchQuery { get; set; } = "";
+    public string NpsSelectedParkCode { get; set; } = "";
+    public string NpsSelectedImageId { get; set; } = "";
+    public string NpsSelectedImageUrl { get; set; } = "";
+
+    // Unsplash settings
+    public string UnsplashTopic { get; set; } = "nature";
+    public string UnsplashSearchQuery { get; set; } = "";
+    public string UnsplashSelectedImageId { get; set; } = "";
+    public string UnsplashSelectedImageUrl { get; set; } = "";
+    public string UnsplashPhotographerName { get; set; } = "";
+
+    // Smithsonian settings
+    public string SmithsonianSearchQuery { get; set; } = "nature";
+    public string SmithsonianSelectedId { get; set; } = "";
+    public string SmithsonianSelectedImageUrl { get; set; } = "";
+
+    // Random rotation
+    public bool RandomRotationEnabled { get; set; } = false;
+    public bool RandomFromFavoritesOnly { get; set; } = false;
 }
 
-public enum DisplayMode { Spherical, FlatMap, Moon, NasaEpic }
+/// <summary>
+/// A user-favorited image from any source.
+/// </summary>
+public class FavoriteImage
+{
+    public DisplayMode Source { get; set; }
+    public string ImageId { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string ThumbnailUrl { get; set; } = "";
+    public string FullImageUrl { get; set; } = "";
+    public string LocalCachePath { get; set; } = "";
+}
+
+public enum DisplayMode { Spherical, FlatMap, Moon, NasaEpic, NasaApod, NationalParks, Unsplash, Smithsonian }
 public enum ImageStyle { Topo, TopoBathy }
 public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
 public enum EpicImageType { Natural, Enhanced }
