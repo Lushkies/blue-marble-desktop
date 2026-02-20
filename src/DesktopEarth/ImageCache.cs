@@ -1,7 +1,7 @@
 namespace DesktopEarth;
 
 /// <summary>
-/// Unified file cache for all image sources (APOD, NPS, Unsplash, Smithsonian).
+/// Unified file cache for all image sources (APOD, NPS, Smithsonian).
 /// Structure: %AppData%/BlueMarbleDesktop/image_cache/{source}/{imageId}.jpg
 /// Thumbnails: %AppData%/BlueMarbleDesktop/image_cache/thumbnails/{source}/{imageId}.jpg
 /// EPIC images continue to use the separate EpicImageCache for backward compatibility.
@@ -14,7 +14,7 @@ public class ImageCache
 
     private static readonly string ThumbCacheDir = Path.Combine(CacheDir, "thumbnails");
 
-    private const int MaxCachedDays = 14;
+    private const int MaxCachedDays = 30;
 
     private static readonly HttpClient Http = new()
     {
@@ -24,7 +24,7 @@ public class ImageCache
     /// <summary>
     /// Get the cache path for a full-size image.
     /// </summary>
-    public string GetCachePath(DisplayMode source, string imageId, string extension = ".jpg")
+    public string GetCachePath(ImageSource source, string imageId, string extension = ".jpg")
     {
         string sourceDir = SourceDirName(source);
         string safeId = SanitizeFileName(imageId);
@@ -34,7 +34,7 @@ public class ImageCache
     /// <summary>
     /// Get the cache path for a thumbnail image.
     /// </summary>
-    public string GetThumbCachePath(DisplayMode source, string imageId)
+    public string GetThumbCachePath(ImageSource source, string imageId)
     {
         string sourceDir = SourceDirName(source);
         string safeId = SanitizeFileName(imageId);
@@ -44,7 +44,7 @@ public class ImageCache
     /// <summary>
     /// Check if a full-size image is cached (exists and > 50KB).
     /// </summary>
-    public bool IsCached(DisplayMode source, string imageId, string extension = ".jpg")
+    public bool IsCached(ImageSource source, string imageId, string extension = ".jpg")
     {
         var path = GetCachePath(source, imageId, extension);
         if (!File.Exists(path)) return false;
@@ -54,7 +54,7 @@ public class ImageCache
     /// <summary>
     /// Check if a thumbnail is cached.
     /// </summary>
-    public bool IsThumbCached(DisplayMode source, string imageId)
+    public bool IsThumbCached(ImageSource source, string imageId)
     {
         var path = GetThumbCachePath(source, imageId);
         return File.Exists(path) && new FileInfo(path).Length > 1024;
@@ -66,7 +66,7 @@ public class ImageCache
     /// Returns local file path on success, null on failure.
     /// </summary>
     public async Task<string?> DownloadToCache(
-        DisplayMode source, string imageId, string url,
+        ImageSource source, string imageId, string url,
         string extension = ".jpg", CancellationToken ct = default)
     {
         try
@@ -106,7 +106,7 @@ public class ImageCache
     /// Returns local file path on success, null on failure.
     /// </summary>
     public async Task<string?> DownloadThumbnail(
-        DisplayMode source, string imageId, string thumbnailUrl,
+        ImageSource source, string imageId, string thumbnailUrl,
         CancellationToken ct = default)
     {
         try
@@ -141,7 +141,7 @@ public class ImageCache
     /// <summary>
     /// Get the most recent cached image for a source (offline fallback).
     /// </summary>
-    public string? GetLatestCachedImagePath(DisplayMode source)
+    public string? GetLatestCachedImagePath(ImageSource source)
     {
         try
         {
@@ -163,7 +163,7 @@ public class ImageCache
     /// <summary>
     /// Get all cached image paths for a source (for random rotation).
     /// </summary>
-    public List<string> GetAllCachedImagePaths(DisplayMode source)
+    public List<string> GetAllCachedImagePaths(ImageSource source)
     {
         try
         {
@@ -183,8 +183,9 @@ public class ImageCache
 
     /// <summary>
     /// Delete cached files older than MaxCachedDays.
+    /// Protects favorited images and always keeps the most recent image per source.
     /// </summary>
-    public void CleanOldCache()
+    public void CleanOldCache(HashSet<string>? protectedIds = null)
     {
         try
         {
@@ -196,10 +197,30 @@ public class ImageCache
             {
                 if (Path.GetFileName(dir) == "thumbnails") continue; // Skip thumb dir
 
-                foreach (var file in Directory.GetFiles(dir))
+                var files = Directory.GetFiles(dir)
+                    .Where(f => !f.EndsWith(".tmp"))
+                    .OrderByDescending(f => File.GetLastWriteTime(f))
+                    .ToList();
+
+                // Always keep at least the most recent file (offline safety)
+                bool keptOne = false;
+
+                foreach (var file in files)
                 {
                     try
                     {
+                        // Always keep the most recent file per source
+                        if (!keptOne)
+                        {
+                            keptOne = true;
+                            continue;
+                        }
+
+                        // Never delete favorited images
+                        var fileId = Path.GetFileNameWithoutExtension(file);
+                        if (protectedIds != null && protectedIds.Contains(fileId))
+                            continue;
+
                         if (File.GetLastWriteTime(file) < cutoff)
                             File.Delete(file);
                     }
@@ -207,7 +228,7 @@ public class ImageCache
                 }
             }
 
-            // Clean old thumbnails too
+            // Clean old thumbnails too (but don't need to protect them)
             if (Directory.Exists(ThumbCacheDir))
             {
                 foreach (var dir in Directory.GetDirectories(ThumbCacheDir))
@@ -230,16 +251,15 @@ public class ImageCache
         }
     }
 
-    private static string SourceDirName(DisplayMode source) => source switch
+    private static string SourceDirName(ImageSource source) => source switch
     {
-        DisplayMode.NasaApod => "nasaapod",
-        DisplayMode.NationalParks => "nationalparks",
-        DisplayMode.Unsplash => "unsplash",
-        DisplayMode.Smithsonian => "smithsonian",
+        ImageSource.NasaApod => "nasaapod",
+        ImageSource.NationalParks => "nationalparks",
+        ImageSource.Smithsonian => "smithsonian",
         _ => "other"
     };
 
-    private static string SanitizeFileName(string name)
+    public static string SanitizeFileName(string name)
     {
         var invalid = Path.GetInvalidFileNameChars();
         var sanitized = new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());

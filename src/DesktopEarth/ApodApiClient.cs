@@ -45,7 +45,7 @@ public class ApodApiClient
                 .OrderByDescending(i => i.Date)
                 .Select(i => new ImageSourceInfo
                 {
-                    Source = DisplayMode.NasaApod,
+                    Source = ImageSource.NasaApod,
                     Id = i.Date ?? "",
                     Title = i.Title ?? "Untitled",
                     Description = i.Explanation ?? "",
@@ -81,7 +81,7 @@ public class ApodApiClient
 
             return new ImageSourceInfo
             {
-                Source = DisplayMode.NasaApod,
+                Source = ImageSource.NasaApod,
                 Id = item.Date ?? "",
                 Title = item.Title ?? "Untitled",
                 Description = item.Explanation ?? "",

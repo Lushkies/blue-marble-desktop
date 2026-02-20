@@ -12,7 +12,7 @@ public class EpicImageCache
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "BlueMarbleDesktop", "epic_images");
 
-    private const int MaxCachedDays = 7;
+    private const int MaxCachedDays = 14;
 
     /// <summary>
     /// Get the expected local file path for an EPIC image.

@@ -101,9 +101,10 @@ public class RenderScheduler : IDisposable
             gl = GL.GetApi(window);
             InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
             ReportStatus("Renderer initialized.");
-            // Clean old caches on startup
+            // Clean old caches on startup (protect favorited images)
             _epicCache.CleanOldCache();
-            _imageCache.CleanOldCache();
+            var protectedIds = GetProtectedImageIds(settings);
+            _imageCache.CleanOldCache(protectedIds);
         };
 
         window.Render += (_) =>
@@ -152,34 +153,27 @@ public class RenderScheduler : IDisposable
                         InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
                     }
 
-                    // Handle random rotation for image sources
-                    if (IsImageSourceMode(settings.DisplayMode) && settings.RandomRotationEnabled)
+                    // Handle random rotation for still image sources
+                    if (settings.DisplayMode == DisplayMode.StillImage && settings.RandomRotationEnabled)
                     {
-                        PickRandomImage(settings, settings.DisplayMode);
+                        PickRandomImage(settings, settings.StillImageSource);
                     }
 
-                    string modeName = settings.DisplayMode switch
-                    {
-                        DisplayMode.FlatMap => "flat map",
-                        DisplayMode.Moon => "moon",
-                        DisplayMode.NasaEpic => "NASA EPIC",
-                        DisplayMode.NasaApod => "NASA APOD",
-                        DisplayMode.NationalParks => "National Parks",
-                        DisplayMode.Unsplash => "Unsplash",
-                        DisplayMode.Smithsonian => "Smithsonian",
-                        _ => "earth"
-                    };
+                    string modeName = GetModeName(settings);
                     ReportStatus($"Rendering {modeName}...");
 
                     byte[] pixels;
-                    if (settings.DisplayMode == DisplayMode.NasaEpic)
+                    if (settings.DisplayMode == DisplayMode.StillImage)
                     {
-                        pixels = RenderEpicImage(gl, settings, ref stillImageRenderer, renderWidth, renderHeight);
-                    }
-                    else if (IsImageSourceMode(settings.DisplayMode))
-                    {
-                        pixels = RenderImageSource(gl, settings, settings.DisplayMode,
-                            ref stillImageRenderer, renderWidth, renderHeight);
+                        if (settings.StillImageSource == ImageSource.NasaEpic)
+                        {
+                            pixels = RenderEpicImage(gl, settings, ref stillImageRenderer, renderWidth, renderHeight);
+                        }
+                        else
+                        {
+                            pixels = RenderImageSource(gl, settings, settings.StillImageSource,
+                                ref stillImageRenderer, renderWidth, renderHeight);
+                        }
                     }
                     else
                     {
@@ -219,6 +213,21 @@ public class RenderScheduler : IDisposable
         }
     }
 
+    private static string GetModeName(AppSettings settings) => settings.DisplayMode switch
+    {
+        DisplayMode.FlatMap => "flat map",
+        DisplayMode.Moon => "moon",
+        DisplayMode.StillImage => settings.StillImageSource switch
+        {
+            ImageSource.NasaEpic => "NASA EPIC",
+            ImageSource.NasaApod => "NASA APOD",
+            ImageSource.NationalParks => "National Parks",
+            ImageSource.Smithsonian => "Smithsonian",
+            _ => "still image"
+        },
+        _ => "earth"
+    };
+
     private void RenderPerDisplay(GL gl, AppSettings settings,
         ref EarthRenderer? earthRenderer, ref FlatMapRenderer? flatMapRenderer, ref MoonRenderer? moonRenderer,
         ref StillImageRenderer? stillImageRenderer,
@@ -253,6 +262,7 @@ public class RenderScheduler : IDisposable
             var displaySettings = new AppSettings
             {
                 DisplayMode = displayConfig?.DisplayMode ?? settings.DisplayMode,
+                StillImageSource = displayConfig?.StillImageSource ?? settings.StillImageSource,
                 ZoomLevel = displayConfig?.ZoomLevel ?? settings.ZoomLevel,
                 FieldOfView = displayConfig?.FieldOfView ?? settings.FieldOfView,
                 CameraTilt = displayConfig?.CameraTilt ?? settings.CameraTilt,
@@ -277,51 +287,43 @@ public class RenderScheduler : IDisposable
                 NpsSelectedParkCode = displayConfig?.NpsSelectedParkCode ?? settings.NpsSelectedParkCode,
                 NpsSelectedImageId = displayConfig?.NpsSelectedImageId ?? settings.NpsSelectedImageId,
                 NpsSelectedImageUrl = displayConfig?.NpsSelectedImageUrl ?? settings.NpsSelectedImageUrl,
-                // Unsplash per-display
-                UnsplashTopic = displayConfig?.UnsplashTopic ?? settings.UnsplashTopic,
-                UnsplashSearchQuery = displayConfig?.UnsplashSearchQuery ?? settings.UnsplashSearchQuery,
-                UnsplashSelectedImageId = displayConfig?.UnsplashSelectedImageId ?? settings.UnsplashSelectedImageId,
-                UnsplashSelectedImageUrl = displayConfig?.UnsplashSelectedImageUrl ?? settings.UnsplashSelectedImageUrl,
-                UnsplashPhotographerName = displayConfig?.UnsplashPhotographerName ?? settings.UnsplashPhotographerName,
                 // Smithsonian per-display
                 SmithsonianSearchQuery = displayConfig?.SmithsonianSearchQuery ?? settings.SmithsonianSearchQuery,
                 SmithsonianSelectedId = displayConfig?.SmithsonianSelectedId ?? settings.SmithsonianSelectedId,
                 SmithsonianSelectedImageUrl = displayConfig?.SmithsonianSelectedImageUrl ?? settings.SmithsonianSelectedImageUrl,
-                // API keys (always from global settings)
-                NasaApiKey = settings.NasaApiKey,
-                NpsApiKey = settings.NpsApiKey,
-                UnsplashAccessKey = settings.UnsplashAccessKey,
-                SmithsonianApiKey = settings.SmithsonianApiKey,
+                // API key (always from global settings)
+                ApiDataGovKey = settings.ApiDataGovKey,
                 // Random rotation per-display
                 RandomRotationEnabled = displayConfig?.RandomRotationEnabled ?? settings.RandomRotationEnabled,
                 RandomFromFavoritesOnly = displayConfig?.RandomFromFavoritesOnly ?? settings.RandomFromFavoritesOnly,
                 Favorites = settings.Favorites, // Favorites are always global
             };
 
-            // Always create fresh renderers for each display so each gets
-            // its own settings (zoom, longitude, etc.). Renderers store a
-            // reference to settings at construction time.
+            // Always create fresh renderers for each display
             DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
             currentMode = displaySettings.DisplayMode;
             currentImageStyle = displaySettings.ImageStyle;
             InitializeRenderers(gl, displaySettings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
 
             // Handle random rotation for this display
-            if (IsImageSourceMode(displaySettings.DisplayMode) && displaySettings.RandomRotationEnabled)
+            if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled)
             {
-                PickRandomImage(displaySettings, displaySettings.DisplayMode);
+                PickRandomImage(displaySettings, displaySettings.StillImageSource);
             }
 
             // Render this display
             byte[] pixels;
-            if (displaySettings.DisplayMode == DisplayMode.NasaEpic)
+            if (displaySettings.DisplayMode == DisplayMode.StillImage)
             {
-                pixels = RenderEpicImage(gl, displaySettings, ref stillImageRenderer, sw, sh);
-            }
-            else if (IsImageSourceMode(displaySettings.DisplayMode))
-            {
-                pixels = RenderImageSource(gl, displaySettings, displaySettings.DisplayMode,
-                    ref stillImageRenderer, sw, sh);
+                if (displaySettings.StillImageSource == ImageSource.NasaEpic)
+                {
+                    pixels = RenderEpicImage(gl, displaySettings, ref stillImageRenderer, sw, sh);
+                }
+                else
+                {
+                    pixels = RenderImageSource(gl, displaySettings, displaySettings.StillImageSource,
+                        ref stillImageRenderer, sw, sh);
+                }
             }
             else
             {
@@ -333,7 +335,7 @@ public class RenderScheduler : IDisposable
                 };
             }
 
-            // Place rendered pixels into composite at the correct position (row-span copy)
+            // Place rendered pixels into composite at the correct position
             int offsetX = screen.Bounds.Left - vdLeft;
             int offsetY = screen.Bounds.Top - vdTop;
 
@@ -391,14 +393,9 @@ public class RenderScheduler : IDisposable
                     earthRenderer.Initialize(gl, dayTexPath, nightTexPath);
                 }
                 break;
-            case DisplayMode.NasaEpic:
-            case DisplayMode.NasaApod:
-            case DisplayMode.NationalParks:
-            case DisplayMode.Unsplash:
-            case DisplayMode.Smithsonian:
+            case DisplayMode.StillImage:
                 stillImageRenderer = new StillImageRenderer(settings);
                 stillImageRenderer.Initialize(gl);
-                // Image will be loaded later in the render methods
                 break;
             default:
                 earthRenderer = new EarthRenderer(settings);
@@ -408,17 +405,10 @@ public class RenderScheduler : IDisposable
     }
 
     /// <summary>
-    /// Check if a DisplayMode is one of the new image source modes (not EPIC, not globe/flat/moon).
-    /// </summary>
-    private static bool IsImageSourceMode(DisplayMode mode) =>
-        mode is DisplayMode.NasaApod or DisplayMode.NationalParks
-            or DisplayMode.Unsplash or DisplayMode.Smithsonian;
-
-    /// <summary>
-    /// Render an image from any of the new image sources (APOD, NPS, Unsplash, Smithsonian).
+    /// Render an image from a non-EPIC image source (APOD, NPS, Smithsonian).
     /// Downloads to cache if needed, falls back to cached images on error.
     /// </summary>
-    private byte[] RenderImageSource(GL gl, AppSettings settings, DisplayMode source,
+    private byte[] RenderImageSource(GL gl, AppSettings settings, ImageSource source,
         ref StillImageRenderer? renderer, int width, int height)
     {
         // Ensure renderer exists
@@ -469,7 +459,6 @@ public class RenderScheduler : IDisposable
             }
             else
             {
-                // Download synchronously (we're on the render background thread)
                 imagePath = _imageCache.DownloadToCache(source, imageId, imageUrl)
                     .GetAwaiter().GetResult();
             }
@@ -499,40 +488,36 @@ public class RenderScheduler : IDisposable
     }
 
     /// <summary>
-    /// Get the selected image URL for a given source mode from settings.
-    /// Prefers HD URLs for 4K+ resolution.
+    /// Get the selected image URL for a given source from settings.
     /// </summary>
-    private static string? GetSelectedImageUrl(AppSettings settings, DisplayMode source) => source switch
+    private static string? GetSelectedImageUrl(AppSettings settings, ImageSource source) => source switch
     {
-        DisplayMode.NasaApod => settings.ApodSelectedImageUrl,
-        DisplayMode.NationalParks => settings.NpsSelectedImageUrl,
-        DisplayMode.Unsplash => settings.UnsplashSelectedImageUrl,
-        DisplayMode.Smithsonian => settings.SmithsonianSelectedImageUrl,
+        ImageSource.NasaApod => settings.ApodSelectedImageUrl,
+        ImageSource.NationalParks => settings.NpsSelectedImageUrl,
+        ImageSource.Smithsonian => settings.SmithsonianSelectedImageUrl,
         _ => null
     };
 
     /// <summary>
-    /// Get the selected image ID for a given source mode from settings.
+    /// Get the selected image ID for a given source from settings.
     /// </summary>
-    private static string? GetSelectedImageId(AppSettings settings, DisplayMode source) => source switch
+    private static string? GetSelectedImageId(AppSettings settings, ImageSource source) => source switch
     {
-        DisplayMode.NasaApod => settings.ApodSelectedImageId,
-        DisplayMode.NationalParks => settings.NpsSelectedImageId,
-        DisplayMode.Unsplash => settings.UnsplashSelectedImageId,
-        DisplayMode.Smithsonian => settings.SmithsonianSelectedId,
+        ImageSource.NasaApod => settings.ApodSelectedImageId,
+        ImageSource.NationalParks => settings.NpsSelectedImageId,
+        ImageSource.Smithsonian => settings.SmithsonianSelectedId,
         _ => null
     };
 
     /// <summary>
     /// Pick a random image for rotation. Sets _randomImageOverride to a local file path.
     /// </summary>
-    private void PickRandomImage(AppSettings settings, DisplayMode source)
+    private void PickRandomImage(AppSettings settings, ImageSource source)
     {
         try
         {
             if (settings.RandomFromFavoritesOnly)
             {
-                // Only rotate through favorites for this source
                 var sourceFavs = settings.Favorites
                     .Where(f => f.Source == source).ToList();
 
@@ -540,14 +525,12 @@ public class RenderScheduler : IDisposable
                 {
                     var pick = sourceFavs[_random.Next(sourceFavs.Count)];
 
-                    // Try to use local cache path if available
                     if (!string.IsNullOrEmpty(pick.LocalCachePath) && File.Exists(pick.LocalCachePath))
                     {
                         _randomImageOverride = pick.LocalCachePath;
                         return;
                     }
 
-                    // Try downloading to cache
                     if (!string.IsNullOrEmpty(pick.FullImageUrl))
                     {
                         var path = _imageCache.DownloadToCache(source, pick.ImageId, pick.FullImageUrl)
@@ -575,20 +558,26 @@ public class RenderScheduler : IDisposable
     }
 
     /// <summary>
+    /// Build set of sanitized favorite image IDs for cache protection.
+    /// </summary>
+    private static HashSet<string> GetProtectedImageIds(AppSettings settings)
+    {
+        return new HashSet<string>(
+            settings.Favorites.Select(f => ImageCache.SanitizeFileName(f.ImageId)));
+    }
+
+    /// <summary>
     /// Fetch (or use cached) EPIC image and render it via the StillImageRenderer.
-    /// Returns pixel data for the wallpaper. Falls back to cached images on network errors.
     /// </summary>
     private byte[] RenderEpicImage(GL gl, AppSettings settings, ref StillImageRenderer? renderer,
         int width, int height)
     {
-        // Ensure renderer exists
         if (renderer == null)
         {
             renderer = new StillImageRenderer(settings);
             renderer.Initialize(gl);
         }
 
-        // Try to get an image to display
         string? imagePath = ResolveEpicImage(settings);
 
         if (imagePath != null)
@@ -597,13 +586,11 @@ public class RenderScheduler : IDisposable
             return renderer.Render(width, height);
         }
 
-        // No image available — return black screen
         return new byte[width * height * 4];
     }
 
     /// <summary>
-    /// Resolve which EPIC image file to use: download latest, use specific date, or fall back to cache.
-    /// Returns local file path or null if nothing available.
+    /// Resolve which EPIC image file to use.
     /// </summary>
     private string? ResolveEpicImage(AppSettings settings)
     {
@@ -613,20 +600,17 @@ public class RenderScheduler : IDisposable
 
             if (settings.EpicUseLatest)
             {
-                // Get the latest images from the API
                 images = _epicApi.GetLatestImagesAsync(settings.EpicImageType)
                     .GetAwaiter().GetResult();
             }
             else if (!string.IsNullOrEmpty(settings.EpicSelectedDate))
             {
-                // Get images for the selected date
                 images = _epicApi.GetImagesByDateAsync(settings.EpicImageType, settings.EpicSelectedDate)
                     .GetAwaiter().GetResult();
             }
 
             if (images != null && images.Count > 0)
             {
-                // If a specific image is selected, find it; otherwise use the first one
                 EpicImageInfo selectedImage;
                 if (!string.IsNullOrEmpty(settings.EpicSelectedImage))
                 {
@@ -637,7 +621,6 @@ public class RenderScheduler : IDisposable
                     selectedImage = images[0];
                 }
 
-                // Download (or use cache)
                 var path = _epicApi.DownloadImageAsync(selectedImage, settings.EpicImageType, _epicCache)
                     .GetAwaiter().GetResult();
 
@@ -648,7 +631,6 @@ public class RenderScheduler : IDisposable
                 }
             }
 
-            // API failed or no images — try cached fallback
             if (_lastEpicImagePath != null && File.Exists(_lastEpicImagePath))
             {
                 ReportStatus("EPIC: Using previously loaded image (offline)");
@@ -670,7 +652,6 @@ public class RenderScheduler : IDisposable
         {
             Console.WriteLine($"EPIC resolve error: {ex.Message}");
 
-            // Fall back to any cached image
             if (_lastEpicImagePath != null && File.Exists(_lastEpicImagePath))
                 return _lastEpicImagePath;
 

@@ -56,7 +56,7 @@ public class NpsApiClient
 
                     images.Add(new ImageSourceInfo
                     {
-                        Source = DisplayMode.NationalParks,
+                        Source = ImageSource.NationalParks,
                         Id = $"{park.ParkCode}_{images.Count}",
                         Title = $"{park.FullName}: {img.Caption ?? img.AltText ?? "Photo"}",
                         Description = img.Caption ?? "",
@@ -111,7 +111,7 @@ public class NpsApiClient
 
                     images.Add(new ImageSourceInfo
                     {
-                        Source = DisplayMode.NationalParks,
+                        Source = ImageSource.NationalParks,
                         Id = $"{parkCode}_{idx++}",
                         Title = img.Caption ?? img.AltText ?? $"{park.FullName} Photo",
                         Description = img.Caption ?? "",

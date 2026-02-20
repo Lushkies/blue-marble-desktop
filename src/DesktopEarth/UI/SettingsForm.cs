@@ -64,11 +64,16 @@ public class SettingsForm : Form
 
     // Mode panels
     private Panel _globeControlsPanel = null!;
-    private Panel _epicPanel = null!;
-    private Panel _apodPanel = null!;
-    private Panel _npsPanel = null!;
-    private Panel _unsplashPanel = null!;
-    private Panel _smithsonianPanel = null!;
+    private Panel _stillImagePanel = null!;
+
+    // Still Image source sub-dropdown
+    private ComboBox _stillImageSourceCombo = null!;
+
+    // Sub-panels inside still image panel (toggled by source dropdown)
+    private Panel _epicSubPanel = null!;
+    private Panel _apodSubPanel = null!;
+    private Panel _npsSubPanel = null!;
+    private Panel _smithsonianSubPanel = null!;
 
     // EPIC controls
     private ComboBox _epicTypeCombo = null!;
@@ -96,22 +101,15 @@ public class SettingsForm : Form
     private ThumbnailGridPanel _npsGrid = null!;
     private Label _npsStatusLabel = null!;
     private Button _npsSearchButton = null!;
+    private FlowLayoutPanel _npsChipsPanel = null!;
     private readonly NpsApiClient _npsApi = new();
-
-    // Unsplash controls
-    private ComboBox _unsplashTopicCombo = null!;
-    private TextBox _unsplashSearchBox = null!;
-    private ThumbnailGridPanel _unsplashGrid = null!;
-    private Label _unsplashStatusLabel = null!;
-    private Label _unsplashAttributionLabel = null!;
-    private Button _unsplashSearchButton = null!;
-    private readonly UnsplashApiClient _unsplashApi = new();
 
     // Smithsonian controls
     private TextBox _smithsonianSearchBox = null!;
     private ThumbnailGridPanel _smithsonianGrid = null!;
     private Label _smithsonianStatusLabel = null!;
     private Button _smithsonianSearchButton = null!;
+    private FlowLayoutPanel _smithsonianChipsPanel = null!;
     private readonly SmithsonianApiClient _smithsonianApi = new();
 
     // Unified image cache for new sources
@@ -129,16 +127,13 @@ public class SettingsForm : Form
     private RadioButton _perDisplayRadio = null!;
     private ComboBox _renderResCombo = null!;
 
-    // Per-display controls
-    private Panel _perDisplayPanel = null!;
+    // Per-display controls (merged into GroupBox)
     private ComboBox _monitorSelectCombo = null!;
+    private Label _monitorSelectLabel = null!;
     private string _selectedMonitorDevice = "";
 
     // API Keys tab controls
-    private TextBox _nasaApiKeyBox = null!;
-    private TextBox _npsApiKeyBox = null!;
-    private TextBox _unsplashKeyBox = null!;
-    private TextBox _smithsonianKeyBox = null!;
+    private TextBox _apiKeyBox = null!;
 
     // Shared Reset button
     private Button _resetButton = null!;
@@ -202,11 +197,8 @@ public class SettingsForm : Form
                 3 => (3840, 2160), 4 => (5120, 2880), _ => (0, 0)
             };
 
-            // API keys
-            s.NasaApiKey = _nasaApiKeyBox.Text.Trim();
-            s.NpsApiKey = _npsApiKeyBox.Text.Trim();
-            s.UnsplashAccessKey = _unsplashKeyBox.Text.Trim();
-            s.SmithsonianApiKey = _smithsonianKeyBox.Text.Trim();
+            // API key
+            s.ApiDataGovKey = _apiKeyBox.Text.Trim();
         });
 
         StartupManager.SetRunOnStartup(_runOnStartupCheck.Checked);
@@ -224,6 +216,7 @@ public class SettingsForm : Form
     private void SaveAppearanceToGlobalSettings(AppSettings s)
     {
         s.DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex;
+        s.StillImageSource = (ImageSource)_stillImageSourceCombo.SelectedIndex;
         s.LongitudeOffset = _longitudeSlider.Value;
         s.CameraTilt = _latitudeSlider.Value;
 
@@ -263,16 +256,6 @@ public class SettingsForm : Form
             s.NpsSelectedImageUrl = _npsGrid.SelectedImage.HdImageUrl;
         }
 
-        // Unsplash
-        s.UnsplashTopic = GetUnsplashTopicSlug();
-        s.UnsplashSearchQuery = _unsplashSearchBox.Text;
-        if (_unsplashGrid.SelectedImage != null)
-        {
-            s.UnsplashSelectedImageId = _unsplashGrid.SelectedImage.Id;
-            s.UnsplashSelectedImageUrl = _unsplashGrid.SelectedImage.HdImageUrl;
-            s.UnsplashPhotographerName = _unsplashGrid.SelectedImage.PhotographerName;
-        }
-
         // Smithsonian
         s.SmithsonianSearchQuery = _smithsonianSearchBox.Text;
         if (_smithsonianGrid.SelectedImage != null)
@@ -289,6 +272,7 @@ public class SettingsForm : Form
     private void SaveAppearanceToDisplayConfig(DisplayConfig config)
     {
         config.DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex;
+        config.StillImageSource = (ImageSource)_stillImageSourceCombo.SelectedIndex;
         config.LongitudeOffset = _longitudeSlider.Value;
         config.CameraTilt = _latitudeSlider.Value;
 
@@ -326,16 +310,6 @@ public class SettingsForm : Form
         {
             config.NpsSelectedImageId = _npsGrid.SelectedImage.Id;
             config.NpsSelectedImageUrl = _npsGrid.SelectedImage.HdImageUrl;
-        }
-
-        // Unsplash
-        config.UnsplashTopic = GetUnsplashTopicSlug();
-        config.UnsplashSearchQuery = _unsplashSearchBox.Text;
-        if (_unsplashGrid.SelectedImage != null)
-        {
-            config.UnsplashSelectedImageId = _unsplashGrid.SelectedImage.Id;
-            config.UnsplashSelectedImageUrl = _unsplashGrid.SelectedImage.HdImageUrl;
-            config.UnsplashPhotographerName = _unsplashGrid.SelectedImage.PhotographerName;
         }
 
         // Smithsonian
@@ -408,12 +382,12 @@ public class SettingsForm : Form
         var tab = new TabPage("Appearance");
         int y = 10;
 
-        // ── MULTI-DISPLAY MODE ──
+        // -- MULTI-DISPLAY MODE (with monitor selector merged inside) --
         var monitorGroup = new GroupBox
         {
             Text = "Multi-Display Mode",
             Location = new Point(LeftMargin, y),
-            Size = new Size(490, 95)
+            Size = new Size(490, 115)
         };
 
         _sameForAllRadio = new RadioButton
@@ -440,24 +414,16 @@ public class SettingsForm : Form
         };
         _perDisplayRadio.CheckedChanged += (_, _) => { UpdatePerDisplayVisibility(); SchedulePreview(); };
 
-        monitorGroup.Controls.AddRange([_sameForAllRadio, _spanAcrossRadio, _perDisplayRadio]);
-        tab.Controls.Add(monitorGroup);
-        y += 100;
+        // Monitor selector (inside GroupBox, toggled by per-display radio)
+        _monitorSelectLabel = MakeLabel("Configure:", 30, 84);
+        _monitorSelectLabel.Visible = false;
 
-        // Per-display panel
-        _perDisplayPanel = new Panel
-        {
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 30),
-            Visible = false
-        };
-
-        _perDisplayPanel.Controls.Add(MakeLabel("Configure:", 0, 5));
         _monitorSelectCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(80, 2),
-            Width = 400
+            Location = new Point(105, 81),
+            Width = 370,
+            Visible = false
         };
 
         var screens = MonitorManager.GetAllScreens();
@@ -482,11 +448,12 @@ public class SettingsForm : Form
         };
         if (screens.Length > 0) _selectedMonitorDevice = screens[0].DeviceName;
 
-        _perDisplayPanel.Controls.Add(_monitorSelectCombo);
-        tab.Controls.Add(_perDisplayPanel);
-        y += 35;
+        monitorGroup.Controls.AddRange([_sameForAllRadio, _spanAcrossRadio, _perDisplayRadio,
+            _monitorSelectLabel, _monitorSelectCombo]);
+        tab.Controls.Add(monitorGroup);
+        y += 120;
 
-        // ── VIEW MODE ──
+        // -- VIEW MODE --
         tab.Controls.Add(MakeLabel("View:", LeftMargin, y + 3));
         _displayModeCombo = new ComboBox
         {
@@ -494,15 +461,12 @@ public class SettingsForm : Form
             Location = new Point(100, y),
             Width = 170
         };
-        _displayModeCombo.Items.AddRange([
-            "Globe", "Flat Map", "Moon", "NASA EPIC",
-            "NASA APOD", "National Parks", "Unsplash", "Smithsonian"
-        ]);
+        _displayModeCombo.Items.AddRange(["Globe", "Flat Map", "Moon", "Still Image"]);
         _displayModeCombo.SelectedIndexChanged += (_, _) => { UpdateModeVisibility(); SchedulePreview(); };
         tab.Controls.Add(_displayModeCombo);
         y += 30;
 
-        // ── RANDOM ROTATION (visible for image sources only) ──
+        // -- RANDOM ROTATION (visible for still image mode only) --
         _randomRotationCheck = new CheckBox
         {
             Text = "Rotate randomly each update",
@@ -512,7 +476,7 @@ public class SettingsForm : Form
         };
         _randomRotationCheck.CheckedChanged += (_, _) =>
         {
-            _randomFavoritesOnlyCheck.Visible = _randomRotationCheck.Visible && _randomRotationCheck.Checked;
+            _randomFavoritesOnlyCheck.Enabled = _randomRotationCheck.Checked;
             SchedulePreview();
         };
         tab.Controls.Add(_randomRotationCheck);
@@ -522,34 +486,23 @@ public class SettingsForm : Form
             Text = "Favorites only",
             AutoSize = true,
             Location = new Point(250, y),
-            Visible = false
+            Visible = false,
+            Enabled = false
         };
         _randomFavoritesOnlyCheck.CheckedChanged += (_, _) => SchedulePreview();
         tab.Controls.Add(_randomFavoritesOnlyCheck);
         y += 25;
 
-        // ── MODE PANELS (all start at same Y, only one visible at a time) ──
+        // -- MODE PANELS (all start at same Y, only one visible at a time) --
         int panelY = y;
 
         _globeControlsPanel = CreateGlobePanel(panelY);
         tab.Controls.Add(_globeControlsPanel);
 
-        _epicPanel = CreateEpicPanel(panelY);
-        tab.Controls.Add(_epicPanel);
+        _stillImagePanel = CreateStillImagePanel(panelY);
+        tab.Controls.Add(_stillImagePanel);
 
-        _apodPanel = CreateApodPanel(panelY);
-        tab.Controls.Add(_apodPanel);
-
-        _npsPanel = CreateNpsPanel(panelY);
-        tab.Controls.Add(_npsPanel);
-
-        _unsplashPanel = CreateUnsplashPanel(panelY);
-        tab.Controls.Add(_unsplashPanel);
-
-        _smithsonianPanel = CreateSmithsonianPanel(panelY);
-        tab.Controls.Add(_smithsonianPanel);
-
-        // ── SHARED RESET BUTTON ──
+        // -- SHARED RESET BUTTON --
         _resetButton = new Button
         {
             Text = "Reset to Defaults",
@@ -691,9 +644,53 @@ public class SettingsForm : Form
         return panel;
     }
 
-    private Panel CreateEpicPanel(int y)
+    // -- COMBINED STILL IMAGE PANEL --
+    // Contains a source sub-dropdown and sub-panels for each source
+
+    private Panel CreateStillImagePanel(int y)
     {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 420), Visible = false };
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 430), Visible = false };
+        int py = 0;
+
+        // Source sub-dropdown
+        panel.Controls.Add(MakeLabel("Source:", LeftMargin, py + 3));
+        _stillImageSourceCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(85, py),
+            Width = 180
+        };
+        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian"]);
+        _stillImageSourceCombo.SelectedIndex = 0;
+        _stillImageSourceCombo.SelectedIndexChanged += (_, _) =>
+        {
+            UpdateStillImageSubPanel();
+            SchedulePreview();
+        };
+        panel.Controls.Add(_stillImageSourceCombo);
+        py += 30;
+
+        // Sub-panels (all start at same Y inside the still image panel)
+        int subPanelY = py;
+
+        _epicSubPanel = CreateEpicSubPanel(subPanelY);
+        panel.Controls.Add(_epicSubPanel);
+
+        _apodSubPanel = CreateApodSubPanel(subPanelY);
+        panel.Controls.Add(_apodSubPanel);
+
+        _npsSubPanel = CreateNpsSubPanel(subPanelY);
+        panel.Controls.Add(_npsSubPanel);
+
+        _smithsonianSubPanel = CreateSmithsonianSubPanel(subPanelY);
+        panel.Controls.Add(_smithsonianSubPanel);
+
+        return panel;
+    }
+
+    private Panel CreateEpicSubPanel(int y)
+    {
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = true };
         int ey = 0;
 
         panel.Controls.Add(MakeLabel("Image type:", LeftMargin, ey + 3));
@@ -757,11 +754,10 @@ public class SettingsForm : Form
         panel.Controls.Add(_epicDatePicker);
         ey += 30;
 
-        // Thumbnail grid instead of ListBox
         _epicGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, ey),
-            Size = new Size(490, 250)
+            Size = new Size(490, 220)
         };
         _epicGrid.ImageSelected += (_, img) =>
         {
@@ -769,11 +765,11 @@ public class SettingsForm : Form
         };
         _epicGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_epicGrid);
-        ey += 255;
+        ey += 225;
 
         _epicStatusLabel = new Label
         {
-            Text = "Select NASA EPIC view to load satellite images.",
+            Text = "Select NASA EPIC source to load satellite images.",
             Location = new Point(LeftMargin, ey),
             Size = new Size(490, 20),
             Font = new Font("Segoe UI", 8.5f),
@@ -801,14 +797,14 @@ public class SettingsForm : Form
         return panel;
     }
 
-    private Panel CreateApodPanel(int y)
+    private Panel CreateApodSubPanel(int y)
     {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 420), Visible = false };
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
         int py = 0;
 
         _apodLatestRadio = new RadioButton
         {
-            Text = "Show latest week", AutoSize = true,
+            Text = "Show latest 14 days", AutoSize = true,
             Location = new Point(LeftMargin, py), Checked = true
         };
         _apodLatestRadio.CheckedChanged += (_, _) =>
@@ -853,16 +849,16 @@ public class SettingsForm : Form
         _apodGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 280)
+            Size = new Size(490, 250)
         };
         _apodGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _apodGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_apodGrid);
-        py += 285;
+        py += 255;
 
         _apodStatusLabel = new Label
         {
-            Text = "Select NASA APOD view to load images.",
+            Text = "Select NASA APOD source to load images.",
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 20),
             Font = new Font("Segoe UI", 8.5f),
@@ -885,9 +881,9 @@ public class SettingsForm : Form
         return panel;
     }
 
-    private Panel CreateNpsPanel(int y)
+    private Panel CreateNpsSubPanel(int y)
     {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 420), Visible = false };
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
         int py = 0;
 
         panel.Controls.Add(MakeLabel("Search parks:", LeftMargin, py + 3));
@@ -905,21 +901,58 @@ public class SettingsForm : Form
         };
         _npsSearchButton.Click += (_, _) => RefreshNpsImages();
         panel.Controls.Add(_npsSearchButton);
-        py += 30;
+        py += 28;
+
+        // Suggestion chips
+        _npsChipsPanel = new FlowLayoutPanel
+        {
+            Location = new Point(LeftMargin, py),
+            Size = new Size(490, 28),
+            WrapContents = false,
+            AutoScroll = false
+        };
+        string[] npsChips = ["Yosemite", "Grand Canyon", "Yellowstone", "Glacier", "Zion",
+            "Rocky Mountain", "Acadia", "Olympic", "Grand Teton", "Denali"];
+        foreach (var chip in npsChips)
+        {
+            var btn = new Button
+            {
+                Text = chip,
+                AutoSize = true,
+                Height = 24,
+                Padding = new Padding(2, 0, 2, 0),
+                Margin = new Padding(0, 0, 4, 0),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 7.5f),
+                BackColor = Color.FromArgb(235, 240, 250),
+                ForeColor = Color.FromArgb(40, 60, 100),
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderColor = Color.FromArgb(180, 195, 220);
+            btn.FlatAppearance.BorderSize = 1;
+            btn.Click += (_, _) =>
+            {
+                _npsSearchBox.Text = chip;
+                RefreshNpsImages();
+            };
+            _npsChipsPanel.Controls.Add(btn);
+        }
+        panel.Controls.Add(_npsChipsPanel);
+        py += 32;
 
         _npsGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 300)
+            Size = new Size(490, 245)
         };
         _npsGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _npsGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_npsGrid);
-        py += 305;
+        py += 250;
 
         _npsStatusLabel = new Label
         {
-            Text = "Enter a park name and click Search. Requires NPS API key (see API Keys tab).",
+            Text = "Enter a park name or click a suggestion. Requires API key (see API Keys tab).",
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 35),
             Font = new Font("Segoe UI", 8.5f),
@@ -930,92 +963,16 @@ public class SettingsForm : Form
         return panel;
     }
 
-    private Panel CreateUnsplashPanel(int y)
+    private Panel CreateSmithsonianSubPanel(int y)
     {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 420), Visible = false };
-        int py = 0;
-
-        panel.Controls.Add(MakeLabel("Topic:", LeftMargin, py + 3));
-        _unsplashTopicCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(80, py), Width = 130
-        };
-        _unsplashTopicCombo.Items.AddRange(["Nature", "Wallpapers", "Travel", "Animals", "Architecture"]);
-        _unsplashTopicCombo.SelectedIndex = 0;
-        _unsplashTopicCombo.SelectedIndexChanged += (_, _) =>
-        {
-            if (!_isLoading) RefreshUnsplashImages();
-        };
-        panel.Controls.Add(_unsplashTopicCombo);
-
-        panel.Controls.Add(MakeLabel("or search:", 225, py + 3));
-        _unsplashSearchBox = new TextBox
-        {
-            Location = new Point(295, py), Width = 135
-        };
-        _unsplashSearchBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) RefreshUnsplashImages(); };
-        panel.Controls.Add(_unsplashSearchBox);
-
-        _unsplashSearchButton = new Button
-        {
-            Text = "Go", Location = new Point(440, py), Width = 50, Height = 24
-        };
-        _unsplashSearchButton.Click += (_, _) => RefreshUnsplashImages();
-        panel.Controls.Add(_unsplashSearchButton);
-        py += 30;
-
-        _unsplashGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 280)
-        };
-        _unsplashGrid.ImageSelected += (_, img) =>
-        {
-            if (!_isLoading)
-            {
-                _unsplashAttributionLabel.Text = img.SourceAttribution;
-                SchedulePreview();
-            }
-        };
-        _unsplashGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
-        panel.Controls.Add(_unsplashGrid);
-        py += 285;
-
-        _unsplashAttributionLabel = new Label
-        {
-            Text = "",
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 18),
-            Font = new Font("Segoe UI", 8f, FontStyle.Italic),
-            ForeColor = Color.FromArgb(80, 80, 80)
-        };
-        panel.Controls.Add(_unsplashAttributionLabel);
-        py += 20;
-
-        _unsplashStatusLabel = new Label
-        {
-            Text = "Requires Unsplash API key (see API Keys tab).",
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 20),
-            Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.Gray
-        };
-        panel.Controls.Add(_unsplashStatusLabel);
-
-        return panel;
-    }
-
-    private Panel CreateSmithsonianPanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 420), Visible = false };
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
         int py = 0;
 
         panel.Controls.Add(MakeLabel("Search:", LeftMargin, py + 3));
         _smithsonianSearchBox = new TextBox
         {
             Location = new Point(80, py), Width = 320,
-            Text = "nature"
+            Text = "landscape painting"
         };
         _smithsonianSearchBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) RefreshSmithsonianImages(); };
         panel.Controls.Add(_smithsonianSearchBox);
@@ -1026,21 +983,58 @@ public class SettingsForm : Form
         };
         _smithsonianSearchButton.Click += (_, _) => RefreshSmithsonianImages();
         panel.Controls.Add(_smithsonianSearchButton);
-        py += 30;
+        py += 28;
+
+        // Suggestion chips
+        _smithsonianChipsPanel = new FlowLayoutPanel
+        {
+            Location = new Point(LeftMargin, py),
+            Size = new Size(490, 28),
+            WrapContents = false,
+            AutoScroll = false
+        };
+        string[] smithChips = ["Landscape Painting", "Butterfly", "Mineral", "Fossil",
+            "Ocean", "Galaxy", "Moon", "Mars", "Volcano", "Parthenon", "Sunset"];
+        foreach (var chip in smithChips)
+        {
+            var btn = new Button
+            {
+                Text = chip,
+                AutoSize = true,
+                Height = 24,
+                Padding = new Padding(2, 0, 2, 0),
+                Margin = new Padding(0, 0, 4, 0),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 7.5f),
+                BackColor = Color.FromArgb(240, 235, 225),
+                ForeColor = Color.FromArgb(80, 60, 30),
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderColor = Color.FromArgb(210, 195, 170);
+            btn.FlatAppearance.BorderSize = 1;
+            btn.Click += (_, _) =>
+            {
+                _smithsonianSearchBox.Text = chip;
+                RefreshSmithsonianImages();
+            };
+            _smithsonianChipsPanel.Controls.Add(btn);
+        }
+        panel.Controls.Add(_smithsonianChipsPanel);
+        py += 32;
 
         _smithsonianGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 300)
+            Size = new Size(490, 245)
         };
         _smithsonianGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _smithsonianGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_smithsonianGrid);
-        py += 305;
+        py += 250;
 
         _smithsonianStatusLabel = new Label
         {
-            Text = "Requires Smithsonian API key (see API Keys tab).",
+            Text = "Search the Smithsonian collection. Requires API key (see API Keys tab).",
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 35),
             Font = new Font("Segoe UI", 8.5f),
@@ -1178,96 +1172,172 @@ public class SettingsForm : Form
 
         var infoLabel = new Label
         {
-            Text = "Enter API keys for image sources. All keys are free to obtain. Leave blank to disable a source.",
+            Text = "All image sources (NASA APOD, National Parks, Smithsonian) use a single free\n" +
+                   "api.data.gov API key. The default DEMO_KEY has a 50 requests/day limit.",
             Location = new Point(LeftMargin, y),
-            Size = new Size(490, 35),
+            Size = new Size(490, 40),
             Font = new Font("Segoe UI", 9f)
         };
         tab.Controls.Add(infoLabel);
+        y += 48;
+
+        // Unified API key
+        tab.Controls.Add(MakeLabel("API Key:", LeftMargin, y + 3));
+        _apiKeyBox = new TextBox { Location = new Point(100, y), Width = 380 };
+        _apiKeyBox.TextChanged += (_, _) =>
+        {
+            // Auto-trim trailing whitespace
+            var text = _apiKeyBox.Text;
+            if (text != text.TrimEnd())
+            {
+                var pos = _apiKeyBox.SelectionStart;
+                _apiKeyBox.Text = text.TrimEnd();
+                _apiKeyBox.SelectionStart = Math.Min(pos, _apiKeyBox.Text.Length);
+            }
+        };
+        tab.Controls.Add(_apiKeyBox);
+        y += 30;
+
+        var keyNote = new Label
+        {
+            Text = "Used for NASA APOD, National Parks (NPS), and Smithsonian Open Access.",
+            Location = new Point(100, y),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.Gray
+        };
+        tab.Controls.Add(keyNote);
+        y += 22;
+
+        // Signup link
+        var signupLink = new LinkLabel
+        {
+            Text = "Get a free API key at: https://api.data.gov/signup/",
+            Location = new Point(100, y),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8.5f)
+        };
+        signupLink.LinkClicked += (_, _) =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    "https://api.data.gov/signup/") { UseShellExecute = true });
+            }
+            catch { }
+        };
+        tab.Controls.Add(signupLink);
+        y += 28;
+
+        // Verify button
+        var verifyButton = new Button
+        {
+            Text = "Verify Key",
+            Location = new Point(100, y),
+            Width = 100,
+            Height = 28
+        };
+        var verifyStatus = new Label
+        {
+            Text = "",
+            Location = new Point(210, y + 4),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8.5f)
+        };
+        tab.Controls.Add(verifyStatus);
+
+        verifyButton.Click += (_, _) =>
+        {
+            var key = _apiKeyBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                verifyStatus.Text = "Please enter an API key first.";
+                verifyStatus.ForeColor = Color.FromArgb(180, 80, 80);
+                return;
+            }
+
+            verifyButton.Enabled = false;
+            verifyStatus.Text = "Verifying...";
+            verifyStatus.ForeColor = Color.Gray;
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    // Quick test with APOD
+                    var result = await _apodApi.GetByDateAsync(key, DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd"));
+
+                    if (IsDisposed) return;
+                    try
+                    {
+                        Invoke(() =>
+                        {
+                            verifyButton.Enabled = true;
+                            if (result != null)
+                            {
+                                verifyStatus.Text = "API key is valid!";
+                                verifyStatus.ForeColor = Color.FromArgb(60, 130, 60);
+                            }
+                            else
+                            {
+                                verifyStatus.Text = "Key may be invalid or rate-limited.";
+                                verifyStatus.ForeColor = Color.FromArgb(180, 120, 0);
+                            }
+                        });
+                    }
+                    catch (ObjectDisposedException) { }
+                }
+                catch (Exception ex)
+                {
+                    if (IsDisposed) return;
+                    try
+                    {
+                        Invoke(() =>
+                        {
+                            verifyButton.Enabled = true;
+                            verifyStatus.Text = $"Error: {ex.Message}";
+                            verifyStatus.ForeColor = Color.FromArgb(180, 80, 80);
+                        });
+                    }
+                    catch (ObjectDisposedException) { }
+                }
+            });
+        };
+        tab.Controls.Add(verifyButton);
         y += 40;
 
-        // NASA API Key
-        tab.Controls.Add(MakeLabel("NASA API Key:", LeftMargin, y + 3));
-        _nasaApiKeyBox = new TextBox { Location = new Point(170, y), Width = 310 };
-        tab.Controls.Add(_nasaApiKeyBox);
-        y += 26;
-        var nasaNote = new Label
+        // OK button to apply and close focus
+        var okButton = new Button
         {
-            Text = "Used for APOD. Default: DEMO_KEY (50 req/day). Get key: api.nasa.gov",
-            Location = new Point(170, y),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
+            Text = "OK",
+            Location = new Point(100, y),
+            Width = 80,
+            Height = 28
         };
-        tab.Controls.Add(nasaNote);
-        y += 30;
-
-        // NPS API Key
-        tab.Controls.Add(MakeLabel("NPS API Key:", LeftMargin, y + 3));
-        _npsApiKeyBox = new TextBox { Location = new Point(170, y), Width = 310 };
-        tab.Controls.Add(_npsApiKeyBox);
-        y += 26;
-        var npsNote = new Label
+        okButton.Click += (_, _) =>
         {
-            Text = "Required. Register free at: developer.nps.gov",
-            Location = new Point(170, y),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
+            SchedulePreview();
+            // Move focus away from the text box
+            okButton.Focus();
         };
-        tab.Controls.Add(npsNote);
-        y += 30;
-
-        // Unsplash Access Key
-        tab.Controls.Add(MakeLabel("Unsplash Key:", LeftMargin, y + 3));
-        _unsplashKeyBox = new TextBox { Location = new Point(170, y), Width = 310 };
-        tab.Controls.Add(_unsplashKeyBox);
-        y += 26;
-        var unsplashNote = new Label
-        {
-            Text = "Required. Register free at: unsplash.com/developers",
-            Location = new Point(170, y),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
-        };
-        tab.Controls.Add(unsplashNote);
-        y += 30;
-
-        // Smithsonian API Key
-        tab.Controls.Add(MakeLabel("Smithsonian Key:", LeftMargin, y + 3));
-        _smithsonianKeyBox = new TextBox { Location = new Point(170, y), Width = 310 };
-        tab.Controls.Add(_smithsonianKeyBox);
-        y += 26;
-        var smithNote = new Label
-        {
-            Text = "Required. Register free at: api.data.gov",
-            Location = new Point(170, y),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
-        };
-        tab.Controls.Add(smithNote);
+        tab.Controls.Add(okButton);
 
         return tab;
     }
 
-    // ── MODE VISIBILITY ──
+    // -- MODE VISIBILITY --
 
     private void UpdateModeVisibility()
     {
         int mode = _displayModeCombo.SelectedIndex;
 
         _globeControlsPanel.Visible = mode <= 2;
-        _epicPanel.Visible = mode == 3;
-        _apodPanel.Visible = mode == 4;
-        _npsPanel.Visible = mode == 5;
-        _unsplashPanel.Visible = mode == 6;
-        _smithsonianPanel.Visible = mode == 7;
+        _stillImagePanel.Visible = mode == 3;
 
-        // Random rotation visible for image sources (3+)
-        _randomRotationCheck.Visible = mode >= 3;
-        _randomFavoritesOnlyCheck.Visible = mode >= 3 && _randomRotationCheck.Checked;
+        // Random rotation visible for still image mode (always visible, greyed out when not checked)
+        _randomRotationCheck.Visible = mode == 3;
+        _randomFavoritesOnlyCheck.Visible = mode == 3;
+        _randomFavoritesOnlyCheck.Enabled = _randomRotationCheck.Checked;
 
         // Globe-specific logic
         if (mode <= 2)
@@ -1281,17 +1351,35 @@ public class SettingsForm : Form
             _locationCombo.Enabled = !isFlatMap && !isMoon;
         }
 
-        // Auto-load content on first switch
-        if (mode == 3 && _epicGrid.SelectedImage == null) RefreshEpicImages();
-        if (mode == 4 && _apodGrid.SelectedImage == null) RefreshApodImages();
+        // Auto-load content when switching to still image
+        if (mode == 3)
+        {
+            UpdateStillImageSubPanel();
+        }
+    }
+
+    private void UpdateStillImageSubPanel()
+    {
+        int source = _stillImageSourceCombo.SelectedIndex;
+
+        _epicSubPanel.Visible = source == 0;
+        _apodSubPanel.Visible = source == 1;
+        _npsSubPanel.Visible = source == 2;
+        _smithsonianSubPanel.Visible = source == 3;
+
+        // Auto-load on first view
+        if (source == 0 && _epicGrid.SelectedImage == null) RefreshEpicImages();
+        if (source == 1 && _apodGrid.SelectedImage == null) RefreshApodImages();
     }
 
     private void UpdatePerDisplayVisibility()
     {
-        _perDisplayPanel.Visible = _perDisplayRadio.Checked;
+        bool perDisplay = _perDisplayRadio.Checked;
+        _monitorSelectLabel.Visible = perDisplay;
+        _monitorSelectCombo.Visible = perDisplay;
     }
 
-    // ── REFRESH METHODS ──
+    // -- REFRESH METHODS --
 
     private void RefreshEpicImages()
     {
@@ -1341,7 +1429,7 @@ public class SettingsForm : Form
 
                         return new ImageSourceInfo
                         {
-                            Source = DisplayMode.NasaEpic,
+                            Source = ImageSource.NasaEpic,
                             Id = img.Image,
                             Title = $"{dt:HH:mm UTC} - {dt:MMM dd}",
                             Date = img.Date,
@@ -1349,7 +1437,7 @@ public class SettingsForm : Form
                             FullImageUrl = $"https://epic.gsfc.nasa.gov/archive/{collection}/{yyyy}/{mm}/{dd}/jpg/{img.Image}.jpg",
                             HdImageUrl = $"https://epic.gsfc.nasa.gov/archive/{collection}/{yyyy}/{mm}/{dd}/png/{img.Image}.png",
                             SourceAttribution = "NASA EPIC / DSCOVR",
-                            IsFavorited = _settings.Favorites.Any(f => f.Source == DisplayMode.NasaEpic && f.ImageId == img.Image)
+                            IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NasaEpic && f.ImageId == img.Image)
                         };
                     }).ToList();
 
@@ -1369,7 +1457,7 @@ public class SettingsForm : Form
         _apodStatusLabel.ForeColor = Color.Gray;
         _apodRefreshButton.Enabled = false;
 
-        var apiKey = _settings.NasaApiKey;
+        var apiKey = _settings.ApiDataGovKey;
         bool useLatest = _apodLatestRadio.Checked;
         string date = _apodDatePicker.Value.ToString("yyyy-MM-dd");
 
@@ -1377,7 +1465,7 @@ public class SettingsForm : Form
         {
             List<ImageSourceInfo>? images;
             if (useLatest)
-                images = await _apodApi.GetRecentAsync(apiKey, 7);
+                images = await _apodApi.GetRecentAsync(apiKey, 14);
             else
             {
                 var single = await _apodApi.GetByDateAsync(apiKey, date);
@@ -1404,7 +1492,7 @@ public class SettingsForm : Form
 
                     // Mark favorites
                     foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == DisplayMode.NasaApod && f.ImageId == img.Id);
+                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NasaApod && f.ImageId == img.Id);
 
                     _apodGrid.SetImages(images);
                     _apodStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} loaded.";
@@ -1420,12 +1508,19 @@ public class SettingsForm : Form
         var query = _npsSearchBox.Text.Trim();
         if (string.IsNullOrEmpty(query)) return;
 
-        var apiKey = _settings.NpsApiKey;
-        if (string.IsNullOrWhiteSpace(apiKey))
+        var apiKey = _settings.ApiDataGovKey;
+        if (string.IsNullOrWhiteSpace(apiKey) || apiKey == "DEMO_KEY")
         {
-            _npsStatusLabel.Text = "NPS API key required. Add it in the API Keys tab.";
-            _npsStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
-            return;
+            if (apiKey == "DEMO_KEY")
+            {
+                // DEMO_KEY works but with rate limits — allow it
+            }
+            else
+            {
+                _npsStatusLabel.Text = "API key required. Add it in the API Keys tab.";
+                _npsStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                return;
+            }
         }
 
         _npsStatusLabel.Text = $"Searching parks for \"{query}\"...";
@@ -1453,7 +1548,7 @@ public class SettingsForm : Form
                     }
 
                     foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == DisplayMode.NationalParks && f.ImageId == img.Id);
+                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NationalParks && f.ImageId == img.Id);
 
                     _npsGrid.SetImages(images);
                     _npsStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
@@ -1464,66 +1559,15 @@ public class SettingsForm : Form
         });
     }
 
-    private void RefreshUnsplashImages()
-    {
-        var accessKey = _settings.UnsplashAccessKey;
-        if (string.IsNullOrWhiteSpace(accessKey))
-        {
-            _unsplashStatusLabel.Text = "Unsplash access key required. Add it in the API Keys tab.";
-            _unsplashStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
-            return;
-        }
-
-        var searchQuery = _unsplashSearchBox.Text.Trim();
-        var topicSlug = GetUnsplashTopicSlug();
-
-        _unsplashStatusLabel.Text = "Loading Unsplash photos...";
-        _unsplashStatusLabel.ForeColor = Color.Gray;
-
-        Task.Run(async () =>
-        {
-            List<ImageSourceInfo>? images;
-            if (!string.IsNullOrEmpty(searchQuery))
-                images = await _unsplashApi.SearchPhotosAsync(accessKey, searchQuery);
-            else
-                images = await _unsplashApi.GetTopicPhotosAsync(accessKey, topicSlug);
-
-            if (IsDisposed) return;
-            try
-            {
-                Invoke(() =>
-                {
-                    if (images == null || images.Count == 0)
-                    {
-                        _unsplashStatusLabel.Text = images == null
-                            ? "Could not connect to Unsplash. Check access key."
-                            : "No photos found.";
-                        _unsplashStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
-                        _unsplashGrid.SetImages(new List<ImageSourceInfo>());
-                        return;
-                    }
-
-                    foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == DisplayMode.Unsplash && f.ImageId == img.Id);
-
-                    _unsplashGrid.SetImages(images);
-                    _unsplashStatusLabel.Text = $"{images.Count} photo{(images.Count != 1 ? "s" : "")} loaded.";
-                    _unsplashStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
-                });
-            }
-            catch (ObjectDisposedException) { }
-        });
-    }
-
     private void RefreshSmithsonianImages()
     {
         var query = _smithsonianSearchBox.Text.Trim();
-        if (string.IsNullOrEmpty(query)) query = "nature";
+        if (string.IsNullOrEmpty(query)) query = "landscape painting";
 
-        var apiKey = _settings.SmithsonianApiKey;
+        var apiKey = _settings.ApiDataGovKey;
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            _smithsonianStatusLabel.Text = "Smithsonian API key required. Add it in the API Keys tab.";
+            _smithsonianStatusLabel.Text = "API key required. Add it in the API Keys tab.";
             _smithsonianStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
             return;
         }
@@ -1546,14 +1590,14 @@ public class SettingsForm : Form
                     {
                         _smithsonianStatusLabel.Text = images == null
                             ? "Could not connect to Smithsonian. Check API key."
-                            : "No images found. Try a different search.";
+                            : "No images found. Try a different search or click a suggestion.";
                         _smithsonianStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
                         _smithsonianGrid.SetImages(new List<ImageSourceInfo>());
                         return;
                     }
 
                     foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == DisplayMode.Smithsonian && f.ImageId == img.Id);
+                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.Smithsonian && f.ImageId == img.Id);
 
                     _smithsonianGrid.SetImages(images);
                     _smithsonianStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
@@ -1564,7 +1608,7 @@ public class SettingsForm : Form
         });
     }
 
-    // ── FAVORITES ──
+    // -- FAVORITES --
 
     private void ToggleFavorite(ImageSourceInfo img)
     {
@@ -1589,20 +1633,7 @@ public class SettingsForm : Form
         SchedulePreview(); // Persist
     }
 
-    // ── HELPERS ──
-
-    private string GetUnsplashTopicSlug()
-    {
-        return _unsplashTopicCombo.SelectedIndex switch
-        {
-            0 => "nature",
-            1 => "wallpapers",
-            2 => "travel",
-            3 => "animals",
-            4 => "architecture",
-            _ => "nature"
-        };
-    }
+    // -- HELPERS --
 
     private static int CameraToZoomSlider(float distance)
     {
@@ -1624,6 +1655,7 @@ public class SettingsForm : Form
         _isLoading = true;
 
         _displayModeCombo.SelectedIndex = Math.Min((int)config.DisplayMode, _displayModeCombo.Items.Count - 1);
+        _stillImageSourceCombo.SelectedIndex = Math.Min((int)config.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
         _longitudeSlider.Value = Math.Clamp((int)config.LongitudeOffset, -180, 180);
         _longitudeValue.Text = config.LongitudeOffset.ToString("F0") + "\u00b0";
         _latitudeSlider.Value = Math.Clamp((int)config.CameraTilt, -60, 60);
@@ -1664,6 +1696,7 @@ public class SettingsForm : Form
         _isLoading = true;
 
         _displayModeCombo.SelectedIndex = (int)DisplayMode.Spherical;
+        _stillImageSourceCombo.SelectedIndex = (int)ImageSource.NasaEpic;
         _longitudeSlider.Value = 88;
         _longitudeValue.Text = "88\u00b0";
         _latitudeSlider.Value = 42;
@@ -1698,6 +1731,7 @@ public class SettingsForm : Form
         _isLoading = true;
 
         _displayModeCombo.SelectedIndex = Math.Min((int)_settings.DisplayMode, _displayModeCombo.Items.Count - 1);
+        _stillImageSourceCombo.SelectedIndex = Math.Min((int)_settings.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
         _longitudeSlider.Value = Math.Clamp((int)_settings.LongitudeOffset, -180, 180);
         _longitudeValue.Text = _settings.LongitudeOffset.ToString("F0") + "\u00b0";
         _latitudeSlider.Value = Math.Clamp((int)_settings.CameraTilt, -60, 60);
@@ -1724,15 +1758,20 @@ public class SettingsForm : Form
         if (!string.IsNullOrEmpty(_settings.EpicSelectedDate) && DateTime.TryParse(_settings.EpicSelectedDate, out var epicDate))
             _epicDatePicker.Value = epicDate;
 
-        // API keys
-        _nasaApiKeyBox.Text = _settings.NasaApiKey;
-        _npsApiKeyBox.Text = _settings.NpsApiKey;
-        _unsplashKeyBox.Text = _settings.UnsplashAccessKey;
-        _smithsonianKeyBox.Text = _settings.SmithsonianApiKey;
+        // API key
+        _apiKeyBox.Text = _settings.ApiDataGovKey;
 
         // Rotation
         _randomRotationCheck.Checked = _settings.RandomRotationEnabled;
         _randomFavoritesOnlyCheck.Checked = _settings.RandomFromFavoritesOnly;
+
+        // NPS search query
+        if (!string.IsNullOrEmpty(_settings.NpsSearchQuery))
+            _npsSearchBox.Text = _settings.NpsSearchQuery;
+
+        // Smithsonian search query
+        if (!string.IsNullOrEmpty(_settings.SmithsonianSearchQuery))
+            _smithsonianSearchBox.Text = _settings.SmithsonianSearchQuery;
 
         _locationCombo.SelectedIndex = 0;
         UpdateModeVisibility();

@@ -2,7 +2,7 @@
 ; Produces a standard Windows installer for x64 systems
 
 #define MyAppName "Blue Marble Desktop"
-#define MyAppVersion "4.0.0"
+#define MyAppVersion "4.1.0"
 #define MyAppPublisher "Blue Marble Desktop"
 #define MyAppURL "https://github.com/Lushkies/blue-marble-desktop"
 #define MyAppExeName "BlueMarbleDesktop.exe"

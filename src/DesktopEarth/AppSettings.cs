@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace DesktopEarth;
 
 public class AppSettings
@@ -5,8 +8,11 @@ public class AppSettings
     // Update frequency in seconds
     public int UpdateIntervalSeconds { get; set; } = 600; // 10 minutes
 
-    // Display mode
+    // Display mode (simplified: Globe, FlatMap, Moon, StillImage)
     public DisplayMode DisplayMode { get; set; } = DisplayMode.Spherical;
+
+    // Still image source (which service to use when DisplayMode == StillImage)
+    public ImageSource StillImageSource { get; set; } = ImageSource.NasaEpic;
 
     // View controls — Zoom combines old ZoomLevel + FieldOfView into a single control
     // Default: zoom slider 25 (full globe visible, nicely framed)
@@ -61,23 +67,13 @@ public class AppSettings
     public string NpsSelectedImageId { get; set; } = "";
     public string NpsSelectedImageUrl { get; set; } = "";
 
-    // Unsplash settings
-    public string UnsplashTopic { get; set; } = "nature";
-    public string UnsplashSearchQuery { get; set; } = "";
-    public string UnsplashSelectedImageId { get; set; } = "";
-    public string UnsplashSelectedImageUrl { get; set; } = "";
-    public string UnsplashPhotographerName { get; set; } = "";
-
     // Smithsonian settings
-    public string SmithsonianSearchQuery { get; set; } = "nature";
+    public string SmithsonianSearchQuery { get; set; } = "landscape painting";
     public string SmithsonianSelectedId { get; set; } = "";
     public string SmithsonianSelectedImageUrl { get; set; } = "";
 
-    // API keys (stored per-user, not shared)
-    public string NasaApiKey { get; set; } = "DEMO_KEY";
-    public string NpsApiKey { get; set; } = "";
-    public string UnsplashAccessKey { get; set; } = "";
-    public string SmithsonianApiKey { get; set; } = "";
+    // Unified api.data.gov API key (works for NASA APOD, NPS, and Smithsonian)
+    public string ApiDataGovKey { get; set; } = "DEMO_KEY";
 
     // Random rotation
     public bool RandomRotationEnabled { get; set; } = false;
@@ -88,6 +84,10 @@ public class AppSettings
 
     // Per-display configurations (used when MultiMonitorMode == PerDisplay)
     public List<DisplayConfig> DisplayConfigs { get; set; } = new();
+
+    // Captures unknown JSON properties during deserialization (used for backward compat migration)
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }
 
 /// <summary>
@@ -97,6 +97,7 @@ public class DisplayConfig
 {
     public string DeviceName { get; set; } = "";
     public DisplayMode DisplayMode { get; set; } = DisplayMode.Spherical;
+    public ImageSource StillImageSource { get; set; } = ImageSource.NasaEpic;
     public float ZoomLevel { get; set; } = 3.94f;
     public float FieldOfView { get; set; } = 50.3f;
     public float CameraTilt { get; set; } = 42.0f;
@@ -126,15 +127,8 @@ public class DisplayConfig
     public string NpsSelectedImageId { get; set; } = "";
     public string NpsSelectedImageUrl { get; set; } = "";
 
-    // Unsplash settings
-    public string UnsplashTopic { get; set; } = "nature";
-    public string UnsplashSearchQuery { get; set; } = "";
-    public string UnsplashSelectedImageId { get; set; } = "";
-    public string UnsplashSelectedImageUrl { get; set; } = "";
-    public string UnsplashPhotographerName { get; set; } = "";
-
     // Smithsonian settings
-    public string SmithsonianSearchQuery { get; set; } = "nature";
+    public string SmithsonianSearchQuery { get; set; } = "landscape painting";
     public string SmithsonianSelectedId { get; set; } = "";
     public string SmithsonianSelectedImageUrl { get; set; } = "";
 
@@ -148,7 +142,7 @@ public class DisplayConfig
 /// </summary>
 public class FavoriteImage
 {
-    public DisplayMode Source { get; set; }
+    public ImageSource Source { get; set; }
     public string ImageId { get; set; } = "";
     public string Title { get; set; } = "";
     public string ThumbnailUrl { get; set; } = "";
@@ -156,7 +150,8 @@ public class FavoriteImage
     public string LocalCachePath { get; set; } = "";
 }
 
-public enum DisplayMode { Spherical, FlatMap, Moon, NasaEpic, NasaApod, NationalParks, Unsplash, Smithsonian }
+public enum DisplayMode { Spherical, FlatMap, Moon, StillImage }
+public enum ImageSource { NasaEpic, NasaApod, NationalParks, Smithsonian }
 public enum ImageStyle { Topo, TopoBathy }
 public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
 public enum EpicImageType { Natural, Enhanced }

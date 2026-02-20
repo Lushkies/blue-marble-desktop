@@ -5,7 +5,7 @@ namespace DesktopEarth;
 /// </summary>
 public class ImageSourceInfo
 {
-    public DisplayMode Source { get; set; }
+    public ImageSource Source { get; set; }
     public string Id { get; set; } = "";
     public string Title { get; set; } = "";
     public string Description { get; set; } = "";
@@ -14,12 +14,12 @@ public class ImageSourceInfo
     public string FullImageUrl { get; set; } = "";
     public string HdImageUrl { get; set; } = "";
 
-    // Unsplash attribution (required by their API terms)
+    // Source attribution (photographer, credit)
     public string PhotographerName { get; set; } = "";
     public string PhotographerUrl { get; set; } = "";
     public string SourceAttribution { get; set; } = "";
 
-    // Unsplash download tracking URL
+    // Source-specific tracking URL
     public string DownloadLocationUrl { get; set; } = "";
 
     public bool IsFavorited { get; set; }

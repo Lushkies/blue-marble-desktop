@@ -116,7 +116,7 @@ public class SmithsonianApiClient
 
                     images.Add(new ImageSourceInfo
                     {
-                        Source = DisplayMode.Smithsonian,
+                        Source = ImageSource.Smithsonian,
                         Id = id,
                         Title = title,
                         ThumbnailUrl = thumbUrl,
