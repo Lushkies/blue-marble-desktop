@@ -416,14 +416,14 @@ public class SettingsForm : Form
 
         // Monitor selector (inside GroupBox, toggled by per-display radio)
         _monitorSelectLabel = MakeLabel("Configure:", 30, 84);
-        _monitorSelectLabel.Visible = false;
+        _monitorSelectLabel.Enabled = false;
 
         _monitorSelectCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Location = new Point(105, 81),
             Width = 370,
-            Visible = false
+            Enabled = false
         };
 
         var screens = MonitorManager.GetAllScreens();
@@ -1306,22 +1306,6 @@ public class SettingsForm : Form
         tab.Controls.Add(verifyButton);
         y += 40;
 
-        // OK button to apply and close focus
-        var okButton = new Button
-        {
-            Text = "OK",
-            Location = new Point(100, y),
-            Width = 80,
-            Height = 28
-        };
-        okButton.Click += (_, _) =>
-        {
-            SchedulePreview();
-            // Move focus away from the text box
-            okButton.Focus();
-        };
-        tab.Controls.Add(okButton);
-
         return tab;
     }
 
@@ -1333,6 +1317,7 @@ public class SettingsForm : Form
 
         _globeControlsPanel.Visible = mode <= 2;
         _stillImagePanel.Visible = mode == 3;
+        _resetButton.Visible = mode != 3;
 
         // Random rotation visible for still image mode (always visible, greyed out when not checked)
         _randomRotationCheck.Visible = mode == 3;
@@ -1349,6 +1334,11 @@ public class SettingsForm : Form
             _offsetXSlider.Enabled = !isFlatMap;
             _offsetYSlider.Enabled = !isFlatMap;
             _locationCombo.Enabled = !isFlatMap && !isMoon;
+
+            // Moon doesn't have city lights or Earth-style daytime lighting
+            _nightLightsCheck.Enabled = !isMoon;
+            _nightBrightnessSlider.Enabled = !isMoon && _nightLightsCheck.Checked;
+            _ambientSlider.Enabled = !isMoon;
         }
 
         // Auto-load content when switching to still image
@@ -1375,8 +1365,8 @@ public class SettingsForm : Form
     private void UpdatePerDisplayVisibility()
     {
         bool perDisplay = _perDisplayRadio.Checked;
-        _monitorSelectLabel.Visible = perDisplay;
-        _monitorSelectCombo.Visible = perDisplay;
+        _monitorSelectLabel.Enabled = perDisplay;
+        _monitorSelectCombo.Enabled = perDisplay;
     }
 
     // -- REFRESH METHODS --
@@ -1693,35 +1683,56 @@ public class SettingsForm : Form
 
     private void ResetToDefaults()
     {
+        int mode = _displayModeCombo.SelectedIndex;
         _isLoading = true;
 
-        _displayModeCombo.SelectedIndex = (int)DisplayMode.Spherical;
-        _stillImageSourceCombo.SelectedIndex = (int)ImageSource.NasaEpic;
-        _longitudeSlider.Value = 88;
-        _longitudeValue.Text = "88\u00b0";
-        _latitudeSlider.Value = 42;
-        _latitudeValue.Text = "42\u00b0";
-        _zoomSlider.Value = 25;
-        _zoomValue.Text = "25";
-        _offsetXSlider.Value = 0;
-        _offsetXValue.Text = "0";
-        _offsetYSlider.Value = 0;
-        _offsetYValue.Text = "0";
-        _nightLightsCheck.Checked = true;
-        _nightBrightnessSlider.Value = 17;
-        _nightBrightnessValue.Text = "1.7";
-        _nightBrightnessSlider.Enabled = true;
-        _ambientSlider.Value = 15;
-        _ambientValue.Text = "0.15";
-        _topoBathyRadio.Checked = true;
-        _locationCombo.SelectedIndex = 0;
+        switch (mode)
+        {
+            case 0: // Globe
+                _locationCombo.SelectedIndex = 0;
+                _longitudeSlider.Value = 88;
+                _longitudeValue.Text = "88\u00b0";
+                _latitudeSlider.Value = 42;
+                _latitudeValue.Text = "42\u00b0";
+                _zoomSlider.Value = 25;
+                _zoomValue.Text = "25";
+                _offsetXSlider.Value = 0;
+                _offsetXValue.Text = "0";
+                _offsetYSlider.Value = 0;
+                _offsetYValue.Text = "0";
+                _nightLightsCheck.Checked = true;
+                _nightBrightnessSlider.Value = 17;
+                _nightBrightnessValue.Text = "1.7";
+                _nightBrightnessSlider.Enabled = true;
+                _ambientSlider.Value = 15;
+                _ambientValue.Text = "0.15";
+                _topoBathyRadio.Checked = true;
+                break;
 
-        _epicTypeCombo.SelectedIndex = 0;
-        _epicLatestRadio.Checked = true;
-        _randomRotationCheck.Checked = false;
-        _randomFavoritesOnlyCheck.Checked = false;
+            case 1: // Flat Map
+                _nightLightsCheck.Checked = true;
+                _nightBrightnessSlider.Value = 17;
+                _nightBrightnessValue.Text = "1.7";
+                _nightBrightnessSlider.Enabled = true;
+                _ambientSlider.Value = 15;
+                _ambientValue.Text = "0.15";
+                _topoBathyRadio.Checked = true;
+                break;
 
-        UpdateModeVisibility();
+            case 2: // Moon
+                _longitudeSlider.Value = 88;
+                _longitudeValue.Text = "88\u00b0";
+                _latitudeSlider.Value = 42;
+                _latitudeValue.Text = "42\u00b0";
+                _zoomSlider.Value = 25;
+                _zoomValue.Text = "25";
+                _offsetXSlider.Value = 0;
+                _offsetXValue.Text = "0";
+                _offsetYSlider.Value = 0;
+                _offsetYValue.Text = "0";
+                break;
+        }
+
         _isLoading = false;
         SchedulePreview();
     }

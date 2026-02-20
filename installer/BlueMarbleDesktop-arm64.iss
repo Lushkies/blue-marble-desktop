@@ -2,7 +2,7 @@
 ; Produces a standard Windows installer for ARM64 (Windows on ARM) systems
 
 #define MyAppName "Blue Marble Desktop"
-#define MyAppVersion "4.1.0"
+#define MyAppVersion "4.1.1"
 #define MyAppPublisher "Blue Marble Desktop"
 #define MyAppURL "https://github.com/Lushkies/blue-marble-desktop"
 #define MyAppExeName "BlueMarbleDesktop.exe"
