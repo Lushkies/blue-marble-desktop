@@ -42,6 +42,19 @@ foreach (int sz in sizes)
     g.Clear(Color.Transparent);
     g.DrawImage(source, 0, 0, sz, sz);
 
+    // Add a white circular outline around the globe edge for tray visibility
+    float strokeWidth = sz switch
+    {
+        16 => 1.2f,
+        32 => 2.0f,
+        48 => 2.5f,
+        _ => 6.0f   // 256px
+    };
+    float inset = strokeWidth / 2f;
+    using var pen = new Pen(Color.White, strokeWidth);
+    pen.Alignment = PenAlignment.Inset;
+    g.DrawEllipse(pen, inset, inset, sz - strokeWidth, sz - strokeWidth);
+
     using var pngStream = new MemoryStream();
     resized.Save(pngStream, ImageFormat.Png);
     imageData.Add(pngStream.ToArray());
