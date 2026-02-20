@@ -141,6 +141,21 @@ public class SettingsForm : Form
     // Quality filter
     private ComboBox _qualityFilterCombo = null!;
 
+    // Presets controls
+    private ComboBox _presetCombo = null!;
+
+    // User images controls
+    private Panel _userImagesSubPanel = null!;
+    private ThumbnailGridPanel _userImagesGrid = null!;
+    private Label _userImagesStatusLabel = null!;
+    private readonly UserImageManager _userImageManager = new();
+
+    // My Collection tab controls
+    private ThumbnailGridPanel? _favoritesGrid;
+    private Label? _favoritesCountLabel;
+    private ThumbnailGridPanel? _userImagesCollectionGrid;
+    private Label? _userImagesCountLabel;
+
     public SettingsForm(SettingsManager settingsManager, RenderScheduler renderScheduler)
     {
         _settingsManager = settingsManager;
@@ -267,6 +282,14 @@ public class SettingsForm : Form
             s.SmithsonianSelectedImageUrl = _smithsonianGrid.SelectedImage.HdImageUrl;
         }
 
+        // User images
+        if (_userImagesGrid?.SelectedImage != null)
+        {
+            s.UserImageSelectedId = _userImagesGrid.SelectedImage.Id;
+            s.UserImageSelectedPath = _userImageManager.GetImagePath(
+                _userImagesGrid.SelectedImage.Id) ?? "";
+        }
+
         // Quality filter
         s.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
         {
@@ -332,6 +355,14 @@ public class SettingsForm : Form
             config.SmithsonianSelectedImageUrl = _smithsonianGrid.SelectedImage.HdImageUrl;
         }
 
+        // User images
+        if (_userImagesGrid?.SelectedImage != null)
+        {
+            config.UserImageSelectedId = _userImagesGrid.SelectedImage.Id;
+            config.UserImageSelectedPath = _userImageManager.GetImagePath(
+                _userImagesGrid.SelectedImage.Id) ?? "";
+        }
+
         // Quality filter
         config.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
         {
@@ -384,6 +415,13 @@ public class SettingsForm : Form
         tabControl.TabPages.Add(CreateAppearanceTab());
         tabControl.TabPages.Add(CreateSystemTab());
         tabControl.TabPages.Add(CreateApiKeysTab());
+        tabControl.TabPages.Add(CreateMyCollectionTab());
+
+        // Refresh My Collection tab when user switches to it
+        tabControl.SelectedIndexChanged += (_, _) =>
+        {
+            if (tabControl.SelectedIndex == 3) RefreshMyCollectionTab();
+        };
 
         Controls.Add(tabControl);
     }
@@ -545,6 +583,47 @@ public class SettingsForm : Form
         _resetButton.Click += (_, _) => ResetToDefaults();
         tab.Controls.Add(_resetButton);
 
+        // -- PRESETS (always visible, below reset button) --
+        var presetLabel = MakeLabel("Presets:", LeftMargin, panelY + 465);
+        tab.Controls.Add(presetLabel);
+
+        _presetCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(LeftMargin + 60, panelY + 462),
+            Width = 180
+        };
+        tab.Controls.Add(_presetCombo);
+
+        var presetSaveBtn = new Button
+        {
+            Text = "Save",
+            Location = new Point(LeftMargin + 250, panelY + 461),
+            Width = 60, Height = 26
+        };
+        presetSaveBtn.Click += (_, _) => SavePreset();
+        tab.Controls.Add(presetSaveBtn);
+
+        var presetLoadBtn = new Button
+        {
+            Text = "Load",
+            Location = new Point(LeftMargin + 315, panelY + 461),
+            Width = 60, Height = 26
+        };
+        presetLoadBtn.Click += (_, _) => LoadPreset();
+        tab.Controls.Add(presetLoadBtn);
+
+        var presetDeleteBtn = new Button
+        {
+            Text = "Delete",
+            Location = new Point(LeftMargin + 380, panelY + 461),
+            Width = 60, Height = 26
+        };
+        presetDeleteBtn.Click += (_, _) => DeletePreset();
+        tab.Controls.Add(presetDeleteBtn);
+
+        RefreshPresetCombo();
+
         return tab;
     }
 
@@ -692,7 +771,7 @@ public class SettingsForm : Form
             Location = new Point(85, py),
             Width = 180
         };
-        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian"]);
+        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images"]);
         _stillImageSourceCombo.SelectedIndex = 0;
         _stillImageSourceCombo.SelectedIndexChanged += (_, _) =>
         {
@@ -729,6 +808,9 @@ public class SettingsForm : Form
 
         _smithsonianSubPanel = CreateSmithsonianSubPanel(subPanelY);
         panel.Controls.Add(_smithsonianSubPanel);
+
+        _userImagesSubPanel = CreateUserImagesSubPanel(subPanelY);
+        panel.Controls.Add(_userImagesSubPanel);
 
         return panel;
     }
@@ -1402,10 +1484,12 @@ public class SettingsForm : Form
         _apodSubPanel.Visible = source == 1;
         _npsSubPanel.Visible = source == 2;
         _smithsonianSubPanel.Visible = source == 3;
+        _userImagesSubPanel.Visible = source == 4;
 
         // Auto-load on first view
         if (source == 0 && _epicGrid.SelectedImage == null) RefreshEpicImages();
         if (source == 1 && _apodGrid.SelectedImage == null) RefreshApodImages();
+        if (source == 4) RefreshUserImages(); // Always refresh (files may change externally)
     }
 
     private void UpdatePerDisplayVisibility()
@@ -1911,6 +1995,551 @@ public class SettingsForm : Form
         AutoSize = false,
         Height = 25
     };
+
+    // -- PRESET METHODS --
+
+    private void RefreshPresetCombo()
+    {
+        _presetCombo.Items.Clear();
+        if (_settings.Presets.Count == 0)
+        {
+            _presetCombo.Items.Add("(no presets saved)");
+            _presetCombo.SelectedIndex = 0;
+        }
+        else
+        {
+            foreach (var p in _settings.Presets)
+                _presetCombo.Items.Add(p.Name);
+            _presetCombo.SelectedIndex = 0;
+        }
+    }
+
+    private void SavePreset()
+    {
+        var name = PromptForName("Save Preset", "Enter a name for this preset:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        var preset = new SettingsPreset
+        {
+            Name = name.Trim(),
+            DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex,
+            StillImageSource = (ImageSource)_stillImageSourceCombo.SelectedIndex,
+            LongitudeOffset = _longitudeSlider.Value,
+            CameraTilt = _latitudeSlider.Value,
+            ImageOffsetX = _offsetXSlider.Value,
+            ImageOffsetY = _offsetYSlider.Value,
+            NightLightsEnabled = _nightLightsCheck.Checked,
+            NightLightsBrightness = _nightBrightnessSlider.Value / 10f,
+            AmbientLight = _ambientSlider.Value / 100f,
+            ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo,
+            EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex,
+            MinImageQuality = _qualityFilterCombo.SelectedIndex switch
+            {
+                1 => ImageQualityTier.SD,
+                2 => ImageQualityTier.HD,
+                3 => ImageQualityTier.UD,
+                _ => ImageQualityTier.Unknown
+            }
+        };
+
+        var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
+        preset.ZoomLevel = distance;
+        preset.FieldOfView = fov;
+
+        _settings.Presets.Add(preset);
+        _settingsManager.Save();
+        RefreshPresetCombo();
+        _presetCombo.SelectedIndex = _settings.Presets.Count - 1;
+    }
+
+    private void LoadPreset()
+    {
+        int idx = _presetCombo.SelectedIndex;
+        if (idx < 0 || idx >= _settings.Presets.Count) return;
+
+        var preset = _settings.Presets[idx];
+        _isLoading = true;
+
+        _displayModeCombo.SelectedIndex = Math.Min((int)preset.DisplayMode, _displayModeCombo.Items.Count - 1);
+        _stillImageSourceCombo.SelectedIndex = Math.Min((int)preset.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
+        _longitudeSlider.Value = Math.Clamp((int)preset.LongitudeOffset, -180, 180);
+        _longitudeValue.Text = preset.LongitudeOffset.ToString("F0") + "\u00b0";
+        _latitudeSlider.Value = Math.Clamp((int)preset.CameraTilt, -60, 60);
+        _latitudeValue.Text = preset.CameraTilt.ToString("F0") + "\u00b0";
+        _zoomSlider.Value = CameraToZoomSlider(preset.ZoomLevel);
+        _zoomValue.Text = _zoomSlider.Value.ToString();
+        _offsetXSlider.Value = Math.Clamp((int)preset.ImageOffsetX, -25, 25);
+        _offsetXValue.Text = preset.ImageOffsetX.ToString("F0");
+        _offsetYSlider.Value = Math.Clamp((int)preset.ImageOffsetY, -25, 25);
+        _offsetYValue.Text = preset.ImageOffsetY.ToString("F0");
+        _nightLightsCheck.Checked = preset.NightLightsEnabled;
+        _nightBrightnessSlider.Value = Math.Clamp((int)(preset.NightLightsBrightness * 10),
+            _nightBrightnessSlider.Minimum, _nightBrightnessSlider.Maximum);
+        _nightBrightnessValue.Text = preset.NightLightsBrightness.ToString("F1");
+        _ambientSlider.Value = Math.Clamp((int)(preset.AmbientLight * 100),
+            _ambientSlider.Minimum, _ambientSlider.Maximum);
+        _ambientValue.Text = preset.AmbientLight.ToString("F2");
+        if (preset.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
+        else _topoRadio.Checked = true;
+        _epicTypeCombo.SelectedIndex = (int)preset.EpicImageType;
+        _qualityFilterCombo.SelectedIndex = preset.MinImageQuality switch
+        {
+            ImageQualityTier.SD => 1,
+            ImageQualityTier.HD => 2,
+            ImageQualityTier.UD => 3,
+            _ => 0
+        };
+
+        _isLoading = false;
+        UpdateModeVisibility();
+        SchedulePreview();
+    }
+
+    private void DeletePreset()
+    {
+        int idx = _presetCombo.SelectedIndex;
+        if (idx < 0 || idx >= _settings.Presets.Count) return;
+
+        var name = _settings.Presets[idx].Name;
+        if (MessageBox.Show($"Delete preset \"{name}\"?", "Delete Preset",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+        _settings.Presets.RemoveAt(idx);
+        _settingsManager.Save();
+        RefreshPresetCombo();
+    }
+
+    private static string? PromptForName(string title, string prompt)
+    {
+        using var dialog = new Form
+        {
+            Text = title,
+            Width = 350,
+            Height = 150,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false,
+            MinimizeBox = false
+        };
+
+        var label = new Label { Text = prompt, Left = 15, Top = 15, AutoSize = true };
+        var textBox = new TextBox { Left = 15, Top = 40, Width = 300 };
+        var okButton = new Button
+        {
+            Text = "OK",
+            DialogResult = DialogResult.OK,
+            Left = 155, Top = 75, Width = 75
+        };
+        var cancelButton = new Button
+        {
+            Text = "Cancel",
+            DialogResult = DialogResult.Cancel,
+            Left = 240, Top = 75, Width = 75
+        };
+
+        dialog.Controls.AddRange([label, textBox, okButton, cancelButton]);
+        dialog.AcceptButton = okButton;
+        dialog.CancelButton = cancelButton;
+
+        return dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(textBox.Text)
+            ? textBox.Text.Trim() : null;
+    }
+
+    // -- USER IMAGES SUB-PANEL (5th source in Still Image dropdown) --
+
+    private Panel CreateUserImagesSubPanel(int y)
+    {
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
+        int uy = 0;
+
+        // Add images button
+        var addButton = new Button
+        {
+            Text = "Add Images...",
+            Location = new Point(LeftMargin, uy),
+            Width = 110,
+            Height = 28
+        };
+        addButton.Click += (_, _) =>
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Title = "Select Images",
+                Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files|*.*",
+                Multiselect = true
+            };
+            if (dialog.ShowDialog() != DialogResult.OK) return;
+
+            int count = _userImageManager.ImportImages(dialog.FileNames);
+            _userImagesStatusLabel.Text = $"Added {count} image{(count != 1 ? "s" : "")}";
+            RefreshUserImages();
+        };
+        panel.Controls.Add(addButton);
+
+        _userImagesStatusLabel = MakeLabel("", 140, uy + 5);
+        _userImagesStatusLabel.ForeColor = Color.Gray;
+        panel.Controls.Add(_userImagesStatusLabel);
+        uy += 35;
+
+        // Thumbnail grid
+        _userImagesGrid = new ThumbnailGridPanel(_imageCache)
+        {
+            Location = new Point(LeftMargin, uy),
+            Size = new Size(490, 340)
+        };
+        _userImagesGrid.ImageSelected += (_, img) =>
+        {
+            // Set this user image as the selected wallpaper
+            SchedulePreview();
+        };
+        _userImagesGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
+        panel.Controls.Add(_userImagesGrid);
+
+        return panel;
+    }
+
+    private void RefreshUserImages()
+    {
+        var images = _userImageManager.GetAllImages();
+        foreach (var img in images)
+            img.IsFavorited = _settings.Favorites.Any(f =>
+                f.Source == ImageSource.UserImages && f.ImageId == img.Id);
+        _userImagesGrid.SetImages(images);
+
+        int count = images.Count;
+        _userImagesStatusLabel.Text = $"{count} user image{(count != 1 ? "s" : "")}";
+    }
+
+    // -- MY COLLECTION TAB (4th tab) --
+
+    private TabPage CreateMyCollectionTab()
+    {
+        var tab = new TabPage("My Collection");
+        tab.AutoScroll = true;
+        int y = 10;
+
+        // === FAVORITES SECTION ===
+        _favoritesCountLabel = new Label
+        {
+            Text = "Favorites (0)",
+            Location = new Point(LeftMargin, y),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 10, FontStyle.Bold)
+        };
+        tab.Controls.Add(_favoritesCountLabel);
+        y += 28;
+
+        _favoritesGrid = new ThumbnailGridPanel(_imageCache)
+        {
+            Location = new Point(LeftMargin, y),
+            Size = new Size(490, 200),
+            ShowSourceBadge = true
+        };
+        _favoritesGrid.ImageSelected += (_, img) => SetFavoriteAsWallpaper(img);
+        _favoritesGrid.FavoriteToggled += (_, img) =>
+        {
+            ToggleFavoriteFromCollection(img);
+            RefreshMyCollectionTab();
+        };
+        tab.Controls.Add(_favoritesGrid);
+        y += 205;
+
+        // Export / Clear buttons
+        var exportFavButton = new Button
+        {
+            Text = "Export Favorites",
+            Location = new Point(LeftMargin, y),
+            Width = 130, Height = 28
+        };
+        exportFavButton.Click += (_, _) => ExportFavorites();
+        tab.Controls.Add(exportFavButton);
+
+        var clearFavButton = new Button
+        {
+            Text = "Clear All Favorites",
+            Location = new Point(LeftMargin + 140, y),
+            Width = 150, Height = 28
+        };
+        clearFavButton.Click += (_, _) => ClearAllFavorites();
+        tab.Controls.Add(clearFavButton);
+        y += 40;
+
+        // === USER IMAGES SECTION ===
+        _userImagesCountLabel = new Label
+        {
+            Text = "User Images (0)",
+            Location = new Point(LeftMargin, y),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 10, FontStyle.Bold)
+        };
+        tab.Controls.Add(_userImagesCountLabel);
+        y += 28;
+
+        _userImagesCollectionGrid = new ThumbnailGridPanel(_imageCache)
+        {
+            Location = new Point(LeftMargin, y),
+            Size = new Size(490, 200)
+        };
+        _userImagesCollectionGrid.ImageSelected += (_, img) => SetUserImageAsWallpaper(img);
+        _userImagesCollectionGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
+        tab.Controls.Add(_userImagesCollectionGrid);
+        y += 205;
+
+        // Add / Clear buttons for user images
+        var addImagesButton = new Button
+        {
+            Text = "Add Images...",
+            Location = new Point(LeftMargin, y),
+            Width = 110, Height = 28
+        };
+        addImagesButton.Click += (_, _) =>
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Title = "Select Images",
+                Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files|*.*",
+                Multiselect = true
+            };
+            if (dialog.ShowDialog() != DialogResult.OK) return;
+
+            _userImageManager.ImportImages(dialog.FileNames);
+            RefreshMyCollectionTab();
+        };
+        tab.Controls.Add(addImagesButton);
+
+        var clearUserButton = new Button
+        {
+            Text = "Clear All",
+            Location = new Point(LeftMargin + 120, y),
+            Width = 90, Height = 28
+        };
+        clearUserButton.Click += (_, _) => ClearAllUserImages();
+        tab.Controls.Add(clearUserButton);
+        y += 40;
+
+        // === STORAGE LOCATIONS SECTION ===
+        var appDataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BlueMarbleDesktop");
+
+        var cacheGroup = new GroupBox
+        {
+            Text = "Storage Locations",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(490, 105)
+        };
+
+        var cacheInfo = new Label
+        {
+            Text = $"Cached images:  {Path.Combine(appDataDir, "image_cache")}\n" +
+                   $"User images:    {Path.Combine(appDataDir, "user_images")}\n" +
+                   $"Settings:       {Path.Combine(appDataDir, "settings.json")}",
+            Location = new Point(10, 20),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.Gray
+        };
+        cacheGroup.Controls.Add(cacheInfo);
+
+        var openFolderButton = new Button
+        {
+            Text = "Open Folder",
+            Location = new Point(10, 73),
+            Width = 100, Height = 24
+        };
+        openFolderButton.Click += (_, _) =>
+        {
+            try { System.Diagnostics.Process.Start("explorer.exe", appDataDir); }
+            catch { }
+        };
+        cacheGroup.Controls.Add(openFolderButton);
+
+        var disclaimer = new Label
+        {
+            Text = "Files are stored locally. You can copy or back up\nimages from these folders at any time.",
+            Location = new Point(120, 73),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.Gray
+        };
+        cacheGroup.Controls.Add(disclaimer);
+
+        tab.Controls.Add(cacheGroup);
+
+        return tab;
+    }
+
+    private void RefreshMyCollectionTab()
+    {
+        if (_favoritesGrid == null || _userImagesCollectionGrid == null) return;
+
+        // Favorites section
+        var favImages = _settings.Favorites.Select(fav => new ImageSourceInfo
+        {
+            Source = fav.Source,
+            Id = fav.ImageId,
+            Title = !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId,
+            ThumbnailUrl = fav.ThumbnailUrl,
+            FullImageUrl = fav.FullImageUrl,
+            IsFavorited = true
+        }).ToList();
+
+        _favoritesGrid.SetImages(favImages);
+        _favoritesCountLabel!.Text = $"Favorites ({favImages.Count})";
+
+        // User images section
+        var userImages = _userImageManager.GetAllImages();
+        foreach (var img in userImages)
+            img.IsFavorited = _settings.Favorites.Any(f =>
+                f.Source == ImageSource.UserImages && f.ImageId == img.Id);
+
+        _userImagesCollectionGrid.SetImages(userImages);
+        _userImagesCountLabel!.Text = $"User Images ({userImages.Count})";
+    }
+
+    private void SetFavoriteAsWallpaper(ImageSourceInfo img)
+    {
+        _settingsManager.ApplyAndSave(s =>
+        {
+            s.DisplayMode = DisplayMode.StillImage;
+            s.StillImageSource = img.Source;
+            switch (img.Source)
+            {
+                case ImageSource.NasaApod:
+                    s.ApodSelectedImageId = img.Id;
+                    s.ApodSelectedImageUrl = img.FullImageUrl;
+                    break;
+                case ImageSource.NationalParks:
+                    s.NpsSelectedImageId = img.Id;
+                    s.NpsSelectedImageUrl = img.FullImageUrl;
+                    break;
+                case ImageSource.Smithsonian:
+                    s.SmithsonianSelectedId = img.Id;
+                    s.SmithsonianSelectedImageUrl = img.FullImageUrl;
+                    break;
+                case ImageSource.UserImages:
+                    s.UserImageSelectedId = img.Id;
+                    s.UserImageSelectedPath = _userImageManager.GetImagePath(img.Id) ?? "";
+                    break;
+            }
+        });
+        _renderScheduler.TriggerUpdate();
+    }
+
+    private void SetUserImageAsWallpaper(ImageSourceInfo img)
+    {
+        var path = _userImageManager.GetImagePath(img.Id);
+        if (path == null) return;
+
+        _settingsManager.ApplyAndSave(s =>
+        {
+            s.DisplayMode = DisplayMode.StillImage;
+            s.StillImageSource = ImageSource.UserImages;
+            s.UserImageSelectedId = img.Id;
+            s.UserImageSelectedPath = path;
+        });
+        _renderScheduler.TriggerUpdate();
+    }
+
+    private void ToggleFavoriteFromCollection(ImageSourceInfo img)
+    {
+        // In the favorites grid, clicking star always unfavorites
+        var existing = _settings.Favorites.Find(f =>
+            f.Source == img.Source && f.ImageId == img.Id);
+        if (existing != null)
+        {
+            _settings.Favorites.Remove(existing);
+            _settingsManager.Save();
+        }
+    }
+
+    private void ExportFavorites()
+    {
+        if (_settings.Favorites.Count == 0)
+        {
+            MessageBox.Show("No favorites to export.", "Export Favorites",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Choose a folder to export favorites to",
+            UseDescriptionForTitle = true
+        };
+        if (dialog.ShowDialog() != DialogResult.OK) return;
+
+        int exported = 0;
+        foreach (var fav in _settings.Favorites)
+        {
+            string? cachedPath = null;
+
+            // For user images, find in user_images directory
+            if (fav.Source == ImageSource.UserImages)
+            {
+                cachedPath = _userImageManager.GetImagePath(fav.ImageId);
+            }
+            else
+            {
+                cachedPath = _imageCache.GetCachedPathForFavorite(fav);
+            }
+
+            if (cachedPath != null && File.Exists(cachedPath))
+            {
+                var safeName = ImageCache.SanitizeFileName(
+                    !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId);
+                var destPath = Path.Combine(dialog.SelectedPath,
+                    safeName + Path.GetExtension(cachedPath));
+
+                // Avoid overwriting
+                int counter = 1;
+                while (File.Exists(destPath))
+                {
+                    destPath = Path.Combine(dialog.SelectedPath,
+                        $"{safeName}_{counter}{Path.GetExtension(cachedPath)}");
+                    counter++;
+                }
+
+                try { File.Copy(cachedPath, destPath); exported++; }
+                catch { }
+            }
+        }
+
+        MessageBox.Show($"Exported {exported} of {_settings.Favorites.Count} favorites.",
+            "Export Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void ClearAllFavorites()
+    {
+        if (_settings.Favorites.Count == 0) return;
+
+        if (MessageBox.Show(
+            $"Remove all {_settings.Favorites.Count} favorites?\n\nThis does not delete cached image files.",
+            "Clear Favorites", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+
+        _settings.Favorites.Clear();
+        _settingsManager.Save();
+        RefreshMyCollectionTab();
+    }
+
+    private void ClearAllUserImages()
+    {
+        var images = _userImageManager.GetAllImages();
+        if (images.Count == 0) return;
+
+        if (MessageBox.Show(
+            $"Delete all {images.Count} user images?\n\nThis permanently removes the files.",
+            "Clear User Images", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            return;
+
+        // Also remove any user image favorites
+        _settings.Favorites.RemoveAll(f => f.Source == ImageSource.UserImages);
+
+        _userImageManager.DeleteAllImages();
+        _settingsManager.Save();
+        RefreshMyCollectionTab();
+    }
 
     protected override void Dispose(bool disposing)
     {

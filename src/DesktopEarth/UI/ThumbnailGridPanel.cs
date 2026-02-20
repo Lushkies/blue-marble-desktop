@@ -36,6 +36,9 @@ public class ThumbnailGridPanel : Panel
     /// <summary>Fires when a user clicks the star icon on an image.</summary>
     public event EventHandler<ImageSourceInfo>? FavoriteToggled;
 
+    /// <summary>When true, show a source label badge on each thumbnail (e.g. "APOD", "NPS").</summary>
+    public bool ShowSourceBadge { get; set; } = false;
+
     public ImageSourceInfo? SelectedImage =>
         _selectedIndex >= 0 && _selectedIndex < _images.Count
             ? _images[_selectedIndex] : null;
@@ -155,7 +158,9 @@ public class ThumbnailGridPanel : Panel
                 g.FillRectangle(placeholderBrush, thumbRect);
 
                 // Queue thumbnail load if not already loading
-                if (!_loadingThumbs.Contains(img.Id) && !string.IsNullOrEmpty(img.ThumbnailUrl))
+                // Load if there's a URL to download, OR if the cache already has it (local images)
+                if (!_loadingThumbs.Contains(img.Id) &&
+                    (!string.IsNullOrEmpty(img.ThumbnailUrl) || _cache.IsThumbCached(img.Source, img.Id)))
                 {
                     _loadingThumbs.Add(img.Id);
                     _ = LoadThumbnailAsync(img, _loadCts.Token);
@@ -171,6 +176,10 @@ public class ThumbnailGridPanel : Panel
 
             // Quality badge (bottom-right of thumbnail)
             DrawQualityBadge(g, img.QualityTier, thumbRect, badgeFont);
+
+            // Source badge (bottom-left of thumbnail, only when ShowSourceBadge is enabled)
+            if (ShowSourceBadge)
+                DrawSourceBadge(g, img.Source, thumbRect, badgeFont);
 
             // Title text (truncated)
             var titleRect = new Rectangle(
@@ -235,6 +244,36 @@ public class ThumbnailGridPanel : Panel
         // Center text in badge
         var textSize = g.MeasureString(text, font);
         float tx = badgeRect.X + (badgeRect.Width - textSize.Width) / 2;
+        float ty = badgeRect.Y + (badgeRect.Height - textSize.Height) / 2;
+        g.DrawString(text, font, textBrush, tx, ty);
+    }
+
+    private static void DrawSourceBadge(Graphics g, ImageSource source,
+        Rectangle thumbRect, Font font)
+    {
+        string text = source switch
+        {
+            ImageSource.NasaEpic => "EPIC",
+            ImageSource.NasaApod => "APOD",
+            ImageSource.NationalParks => "NPS",
+            ImageSource.Smithsonian => "SI",
+            ImageSource.UserImages => "USER",
+            _ => ""
+        };
+        if (string.IsNullOrEmpty(text)) return;
+
+        var textSize = g.MeasureString(text, font);
+        int badgeW = (int)textSize.Width + 6;
+        var badgeRect = new Rectangle(
+            thumbRect.Left + 2,
+            thumbRect.Bottom - BadgeHeight - 2,
+            badgeW, BadgeHeight);
+
+        using var bgBrush = new SolidBrush(Color.FromArgb(180, 30, 30, 30));
+        using var textBrush = new SolidBrush(Color.White);
+
+        g.FillRectangle(bgBrush, badgeRect);
+        float tx = badgeRect.X + 3;
         float ty = badgeRect.Y + (badgeRect.Height - textSize.Height) / 2;
         g.DrawString(text, font, textBrush, tx, ty);
     }

@@ -223,6 +223,7 @@ public class RenderScheduler : IDisposable
             ImageSource.NasaApod => "NASA APOD",
             ImageSource.NationalParks => "National Parks",
             ImageSource.Smithsonian => "Smithsonian",
+            ImageSource.UserImages => "user image",
             _ => "still image"
         },
         _ => "earth"
@@ -297,6 +298,9 @@ public class RenderScheduler : IDisposable
                 RandomRotationEnabled = displayConfig?.RandomRotationEnabled ?? settings.RandomRotationEnabled,
                 RandomFromFavoritesOnly = displayConfig?.RandomFromFavoritesOnly ?? settings.RandomFromFavoritesOnly,
                 Favorites = settings.Favorites, // Favorites are always global
+                // User images per-display
+                UserImageSelectedId = displayConfig?.UserImageSelectedId ?? settings.UserImageSelectedId,
+                UserImageSelectedPath = displayConfig?.UserImageSelectedPath ?? settings.UserImageSelectedPath,
             };
 
             // Always create fresh renderers for each display
@@ -434,6 +438,29 @@ public class RenderScheduler : IDisposable
             }
         }
 
+        // User images are local files — no download needed
+        if (source == ImageSource.UserImages)
+        {
+            var path = settings.UserImageSelectedPath;
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                renderer.LoadImage(gl, path);
+                if (!renderer.IsBelowMinimumQuality)
+                    return renderer.Render(width, height);
+            }
+            // Fallback: try any user image
+            var userMgr = new UserImageManager();
+            var allPaths = userMgr.GetAllImagePaths();
+            if (allPaths.Count > 0)
+            {
+                renderer.LoadImage(gl, allPaths[0]);
+                if (!renderer.IsBelowMinimumQuality)
+                    return renderer.Render(width, height);
+            }
+            ReportStatus("User images: No images available");
+            return new byte[width * height * 4];
+        }
+
         // Resolve the selected image URL for this source
         string? imageUrl = GetSelectedImageUrl(settings, source);
         string? imageId = GetSelectedImageId(settings, source);
@@ -508,6 +535,7 @@ public class RenderScheduler : IDisposable
         ImageSource.NasaApod => settings.ApodSelectedImageUrl,
         ImageSource.NationalParks => settings.NpsSelectedImageUrl,
         ImageSource.Smithsonian => settings.SmithsonianSelectedImageUrl,
+        ImageSource.UserImages => settings.UserImageSelectedPath,
         _ => null
     };
 
@@ -519,6 +547,7 @@ public class RenderScheduler : IDisposable
         ImageSource.NasaApod => settings.ApodSelectedImageId,
         ImageSource.NationalParks => settings.NpsSelectedImageId,
         ImageSource.Smithsonian => settings.SmithsonianSelectedId,
+        ImageSource.UserImages => settings.UserImageSelectedId,
         _ => null
     };
 
@@ -529,6 +558,18 @@ public class RenderScheduler : IDisposable
     {
         try
         {
+            // User images: scan directory directly instead of using image cache
+            if (source == ImageSource.UserImages && !settings.RandomFromFavoritesOnly)
+            {
+                var userMgr = new UserImageManager();
+                var userPaths = userMgr.GetAllImagePaths();
+                if (userPaths.Count > 0)
+                {
+                    _randomImageOverride = userPaths[_random.Next(userPaths.Count)];
+                }
+                return;
+            }
+
             if (settings.RandomFromFavoritesOnly)
             {
                 var sourceFavs = settings.Favorites

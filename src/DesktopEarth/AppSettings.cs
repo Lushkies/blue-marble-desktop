@@ -85,6 +85,13 @@ public class AppSettings
     // Favorites
     public List<FavoriteImage> Favorites { get; set; } = new();
 
+    // Settings presets (appearance-only saved configurations)
+    public List<SettingsPreset> Presets { get; set; } = new();
+
+    // User images settings
+    public string UserImageSelectedId { get; set; } = "";
+    public string UserImageSelectedPath { get; set; } = "";
+
     // Window state (remembered across sessions)
     public int WindowWidth { get; set; } = 560;
     public int WindowHeight { get; set; } = 790;
@@ -145,6 +152,10 @@ public class DisplayConfig
     // Random rotation
     public bool RandomRotationEnabled { get; set; } = false;
     public bool RandomFromFavoritesOnly { get; set; } = false;
+
+    // User images per-display
+    public string UserImageSelectedId { get; set; } = "";
+    public string UserImageSelectedPath { get; set; } = "";
 }
 
 /// <summary>
@@ -160,8 +171,31 @@ public class FavoriteImage
     public string LocalCachePath { get; set; } = "";
 }
 
+/// <summary>
+/// A saved appearance configuration (preset).
+/// Contains all view settings but no system/API settings.
+/// </summary>
+public class SettingsPreset
+{
+    public string Name { get; set; } = "";
+    public DisplayMode DisplayMode { get; set; }
+    public ImageSource StillImageSource { get; set; }
+    public float ZoomLevel { get; set; } = 3.94f;
+    public float FieldOfView { get; set; } = 50.3f;
+    public float CameraTilt { get; set; } = 42.0f;
+    public float LongitudeOffset { get; set; } = 88.0f;
+    public float ImageOffsetX { get; set; } = 0f;
+    public float ImageOffsetY { get; set; } = 0f;
+    public bool NightLightsEnabled { get; set; } = true;
+    public float NightLightsBrightness { get; set; } = 1.7f;
+    public float AmbientLight { get; set; } = 0.15f;
+    public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
+    public EpicImageType EpicImageType { get; set; } = EpicImageType.Natural;
+    public ImageQualityTier MinImageQuality { get; set; } = ImageQualityTier.SD;
+}
+
 public enum DisplayMode { Spherical, FlatMap, Moon, StillImage }
-public enum ImageSource { NasaEpic, NasaApod, NationalParks, Smithsonian }
+public enum ImageSource { NasaEpic, NasaApod, NationalParks, Smithsonian, UserImages }
 public enum ImageStyle { Topo, TopoBathy }
 public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
 public enum EpicImageType { Natural, Enhanced }

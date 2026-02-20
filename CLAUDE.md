@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 4.2.0
+**Current version:** 4.3.0
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -46,7 +46,7 @@ Build installers with Inno Setup:
 
 ```
 DisplayMode:   Spherical | FlatMap | Moon | StillImage
-ImageSource:   NasaEpic | NasaApod | NationalParks | Smithsonian
+ImageSource:   NasaEpic | NasaApod | NationalParks | Smithsonian | UserImages
 ImageStyle:    Topo | TopoBathy
 MultiMonitorMode: SameForAll | SpanAcross | PerDisplay
 EpicImageType: Natural | Enhanced
@@ -58,7 +58,7 @@ When `DisplayMode == StillImage`, the `StillImageSource` property selects which 
 
 1. **SettingsForm** (UI) writes to `AppSettings` via `SettingsManager.ApplyAndSave()`
 2. **RenderScheduler** reads settings, routes to the correct renderer
-3. For still images: RenderScheduler checks `StillImageSource` to pick EPIC/APOD/NPS/Smithsonian
+3. For still images: RenderScheduler checks `StillImageSource` to pick EPIC/APOD/NPS/Smithsonian/UserImages
 4. Rendered output saved as BMP, then **WallpaperSetter** applies it via Windows API
 
 ### API Keys
@@ -77,6 +77,7 @@ The app auto-migrates old settings JSON:
 Two separate caches:
 - **EpicImageCache** (`%AppData%/BlueMarbleDesktop/epic_images/`): Organized by type/date, 14-day retention
 - **ImageCache** (`%AppData%/BlueMarbleDesktop/image_cache/`): For APOD/NPS/Smithsonian, 30-day retention, protects favorited images, always keeps at least 1 image per source for offline fallback
+- **User Images** (`%AppData%/BlueMarbleDesktop/user_images/`): User-imported images, thumbnails in `image_cache/thumbnails/userimages/`
 
 ---
 
@@ -99,6 +100,7 @@ src/DesktopEarth/
   HiResTextureManager.cs    # HD texture download manager
   ImageCache.cs             # Unified cache for APOD/NPS/Smithsonian
   ImageSourceInfo.cs        # Shared image metadata model
+  UserImageManager.cs       # User-imported image directory management
   NpsApiClient.cs           # National Park Service API
   SmithsonianApiClient.cs   # Smithsonian Open Access API
   Rendering/
@@ -114,7 +116,7 @@ src/DesktopEarth/
     GraphicsCapabilityDetector.cs  # ARM64/Mesa3D detection
   UI/
     TrayApplicationContext.cs  # System tray icon + context menu
-    SettingsForm.cs            # Tabbed settings dialog (3 tabs)
+    SettingsForm.cs            # Tabbed settings dialog (4 tabs)
     ThumbnailGridPanel.cs      # Reusable image grid with selection + favorites
     AboutForm.cs               # Version/credits dialog
   Resources/
@@ -186,6 +188,7 @@ lib/
 - **v4.0** - Multiple image sources (APOD, NPS, Smithsonian, Unsplash), thumbnail grids, favorites, random rotation
 - **v4.1** - Remove Unsplash, combine still images into unified view with sub-dropdown, consolidate API keys to single api.data.gov key, search suggestion chips, cache improvements (30-day retention, protected favorites, offline fallback), UI polish
 - **v4.2** - Resizable settings window, fix Smithsonian API (correct endpoint + Solr query syntax), fix NPS search (exact park codes for chips), image quality tiers (SD/HD/UD badges + filter), minimum 1080p enforcement, 28 curated national park chips
+- **v4.3** - My Collection tab (view/export/manage all favorites with source badges), user-imported custom images as wallpaper source, settings presets (save/load named appearance configurations), storage location disclaimer
 
 ---
 
@@ -195,13 +198,12 @@ lib/
 - NPS photos often include people (park rangers, visitors, buildings) rather than nature landscapes -- no API-level filter exists for this
 - Smithsonian search results depend on the art_design category -- some terms work better than others
 - EPIC images are sometimes delayed 24-48 hours from NASA
-- The SettingsForm is one large file (~1800 lines) -- could benefit from being split into partial classes or user controls if it grows further
+- The SettingsForm is one large file (~2400 lines) -- could benefit from being split into partial classes or user controls if it grows further
 
 ### Potential Future Features
 - Filter NPS results to exclude photos with people (would need image analysis or metadata heuristics)
 - Pexels or Pixabay as image sources (free APIs, less restrictive than Unsplash was)
 - Seasonal/holiday themes
-- User-uploaded custom images as wallpaper source
 - Wallpaper scheduling (different wallpapers at different times of day)
 - Cloud sync for favorites
 - Notification when new APOD is available

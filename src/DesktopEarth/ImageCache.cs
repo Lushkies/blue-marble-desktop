@@ -256,8 +256,34 @@ public class ImageCache
         ImageSource.NasaApod => "nasaapod",
         ImageSource.NationalParks => "nationalparks",
         ImageSource.Smithsonian => "smithsonian",
+        ImageSource.UserImages => "userimages",
         _ => "other"
     };
+
+    /// <summary>
+    /// Get cached full-image path for a favorite, if it exists locally.
+    /// Checks LocalCachePath first, then the standard cache directory.
+    /// </summary>
+    public string? GetCachedPathForFavorite(FavoriteImage fav)
+    {
+        // Check if LocalCachePath is set and exists
+        if (!string.IsNullOrEmpty(fav.LocalCachePath) && File.Exists(fav.LocalCachePath))
+            return fav.LocalCachePath;
+
+        // For user images, check user_images directory
+        if (fav.Source == ImageSource.UserImages)
+        {
+            var userMgr = new UserImageManager();
+            return userMgr.GetImagePath(fav.ImageId);
+        }
+
+        // Check standard image_cache
+        var path = GetCachePath(fav.Source, fav.ImageId);
+        if (File.Exists(path) && new FileInfo(path).Length > 50 * 1024)
+            return path;
+
+        return null;
+    }
 
     public static string SanitizeFileName(string name)
     {
