@@ -85,6 +85,8 @@ public class SettingsForm : Form
     private Button _epicRefreshButton = null!;
     private readonly EpicApiClient _epicApi = new();
     private DateTime _lastEpicRefresh = DateTime.MinValue;
+    private Label _epicLatestDateLabel = null!;
+    private DateTime? _epicLatestAvailableDate;
 
     // APOD controls
     private RadioButton _apodLatestRadio = null!;
@@ -389,22 +391,11 @@ public class SettingsForm : Form
     private void InitializeForm()
     {
         Text = "Blue Marble Desktop Settings";
-        FormBorderStyle = FormBorderStyle.Sizable;
-        MaximizeBox = true;
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+        MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(560, 790);
-        Size = new Size(_settings.WindowWidth, _settings.WindowHeight);
+        ClientSize = new Size(560, 790);
         ShowInTaskbar = true;
-
-        // Save window size on resize
-        Resize += (_, _) =>
-        {
-            if (WindowState == FormWindowState.Normal)
-            {
-                _settings.WindowWidth = Width;
-                _settings.WindowHeight = Height;
-            }
-        };
 
         var tabControl = new TabControl
         {
@@ -414,13 +405,13 @@ public class SettingsForm : Form
 
         tabControl.TabPages.Add(CreateAppearanceTab());
         tabControl.TabPages.Add(CreateSystemTab());
-        tabControl.TabPages.Add(CreateApiKeysTab());
         tabControl.TabPages.Add(CreateMyCollectionTab());
+        tabControl.TabPages.Add(CreateApiKeysTab());
 
         // Refresh My Collection tab when user switches to it
         tabControl.SelectedIndexChanged += (_, _) =>
         {
-            if (tabControl.SelectedIndex == 3) RefreshMyCollectionTab();
+            if (tabControl.SelectedIndex == 2) RefreshMyCollectionTab();
         };
 
         Controls.Add(tabControl);
@@ -776,7 +767,7 @@ public class SettingsForm : Form
         _stillImageSourceCombo.SelectedIndexChanged += (_, _) =>
         {
             UpdateStillImageSubPanel();
-            SchedulePreview();
+            // Don't trigger render — user must click an image to set wallpaper
         };
         panel.Controls.Add(_stillImageSourceCombo);
 
@@ -790,7 +781,21 @@ public class SettingsForm : Form
         };
         _qualityFilterCombo.Items.AddRange(["Any", "SD (1080p+)", "HD (2160p+)", "UD (4K+)"]);
         _qualityFilterCombo.SelectedIndex = 1; // Default: SD
-        _qualityFilterCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
+        _qualityFilterCombo.SelectedIndexChanged += (_, _) =>
+        {
+            // Save the quality filter setting without triggering a render.
+            // The filter only affects which thumbnails are visible in the grid.
+            if (!_isLoading) _settingsManager.ApplyAndSave(s =>
+            {
+                s.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
+                {
+                    1 => ImageQualityTier.SD,
+                    2 => ImageQualityTier.HD,
+                    3 => ImageQualityTier.UD,
+                    _ => ImageQualityTier.Unknown
+                };
+            });
+        };
         panel.Controls.Add(_qualityFilterCombo);
         py += 30;
 
@@ -879,7 +884,20 @@ public class SettingsForm : Form
             SchedulePreview();
         };
         panel.Controls.Add(_epicDatePicker);
+
+        _epicLatestDateLabel = new Label
+        {
+            Text = "Checking latest available date...",
+            Location = new Point(320, ey + 1),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8f),
+            ForeColor = Color.FromArgb(100, 100, 100)
+        };
+        panel.Controls.Add(_epicLatestDateLabel);
         ey += 30;
+
+        // Fetch the latest available EPIC date in the background
+        FetchEpicLatestDate();
 
         _epicGrid = new ThumbnailGridPanel(_imageCache)
         {
@@ -1220,26 +1238,37 @@ public class SettingsForm : Form
         // HD Textures section
         var hdGroup = new GroupBox
         {
-            Text = "HD Textures (NASA)",
+            Text = "HD Textures (Globe + Flat Map only)",
             Location = new Point(LeftMargin, y),
-            Size = new Size(490, 90)
+            Size = new Size(490, 105)
         };
 
         bool hdAvailable = HiResTextureManager.AreHiResTexturesAvailable();
+        var hdDescLabel = new Label
+        {
+            Text = "HD textures enhance Globe and Flat Map views with ultra-high resolution\n" +
+                   "(21600x10800). They do not affect Still Image, Moon, or EPIC views.",
+            Location = new Point(15, 20),
+            Size = new Size(460, 30),
+            Font = new Font("Segoe UI", 8f),
+            ForeColor = Color.FromArgb(80, 80, 80)
+        };
+        hdGroup.Controls.Add(hdDescLabel);
+
         var hdStatusLabel = new Label
         {
             Text = hdAvailable
-                ? "\u2713 HD textures installed (21600\u00d710800 day, Black Marble night)"
-                : $"Standard textures in use. Download ~{HiResTextureManager.GetEstimatedDownloadSizeMB()} MB for HD quality.",
+                ? "\u2713 HD textures installed \u2014 Globe and Flat Map using ultra-high resolution."
+                : $"Standard textures in use. Download ~{HiResTextureManager.GetEstimatedDownloadSizeMB()} MB for HD (may take 10\u201330 min).",
             AutoSize = true,
-            Location = new Point(15, 22),
+            Location = new Point(15, 52),
             Font = new Font("Segoe UI", 8.5f)
         };
         hdGroup.Controls.Add(hdStatusLabel);
 
         var hdProgressLabel = new Label
         {
-            Text = "", AutoSize = true, Location = new Point(15, 42),
+            Text = "", AutoSize = true, Location = new Point(15, 52),
             Font = new Font("Segoe UI", 8.5f), Visible = false
         };
         hdGroup.Controls.Add(hdProgressLabel);
@@ -1247,7 +1276,7 @@ public class SettingsForm : Form
         var hdButton = new Button
         {
             Text = hdAvailable ? "Re-download HD Textures" : "Download HD Textures",
-            Location = new Point(15, 58), Width = 200, Height = 26
+            Location = new Point(15, 72), Width = 200, Height = 26
         };
 
         var hdManager = new HiResTextureManager();
@@ -1266,7 +1295,7 @@ public class SettingsForm : Form
                 hdButton.Text = success ? "Re-download HD Textures" : "Retry Download";
                 if (success)
                 {
-                    hdStatusLabel.Text = "\u2713 HD textures installed! Restart app or change a setting to use them.";
+                    hdStatusLabel.Text = "\u2713 HD textures installed \u2014 Globe and Flat Map using ultra-high resolution.";
                     _renderScheduler.TriggerUpdate();
                 }
             }
@@ -1289,8 +1318,142 @@ public class SettingsForm : Form
         };
         hdGroup.Controls.Add(hdButton);
         tab.Controls.Add(hdGroup);
+        y += 115;
+
+        // Cache Settings section
+        var cacheGroup = new GroupBox
+        {
+            Text = "Cache Settings",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(490, 120)
+        };
+
+        var cacheDescLabel = new Label
+        {
+            Text = "Controls how long downloaded images are kept. Favorites are never deleted.",
+            Location = new Point(15, 20),
+            Size = new Size(460, 18),
+            Font = new Font("Segoe UI", 8f),
+            ForeColor = Color.FromArgb(80, 80, 80)
+        };
+        cacheGroup.Controls.Add(cacheDescLabel);
+
+        cacheGroup.Controls.Add(new Label
+        {
+            Text = "Keep images for:", AutoSize = true,
+            Location = new Point(15, 44),
+            Font = new Font("Segoe UI", 9f)
+        });
+
+        var cacheDurationCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(130, 41),
+            Width = 150
+        };
+        cacheDurationCombo.Items.AddRange(["7 days", "14 days", "30 days (default)", "90 days", "Keep forever"]);
+        cacheDurationCombo.SelectedIndex = _settings.CacheDurationDays switch
+        {
+            7 => 0, 14 => 1, 90 => 3, 0 => 4, _ => 2
+        };
+        cacheDurationCombo.SelectedIndexChanged += (_, _) =>
+        {
+            int days = cacheDurationCombo.SelectedIndex switch
+            {
+                0 => 7, 1 => 14, 3 => 90, 4 => 0, _ => 30
+            };
+            _settingsManager.ApplyAndSave(s =>
+            {
+                s.CacheDurationDays = days;
+                s.EpicCacheDurationDays = Math.Min(days == 0 ? 0 : days, days == 0 ? 0 : Math.Max(days, 14));
+            });
+        };
+        cacheGroup.Controls.Add(cacheDurationCombo);
+
+        // Show cache size
+        var cacheSizeLabel = new Label
+        {
+            Text = "Calculating cache size...",
+            Location = new Point(290, 44),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8f),
+            ForeColor = Color.Gray
+        };
+        cacheGroup.Controls.Add(cacheSizeLabel);
+        Task.Run(() =>
+        {
+            long totalBytes = GetDirectorySize(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "BlueMarbleDesktop"));
+            string sizeText = totalBytes switch
+            {
+                < 1024 * 1024 => $"{totalBytes / 1024} KB used",
+                < 1024L * 1024 * 1024 => $"{totalBytes / (1024 * 1024)} MB used",
+                _ => $"{totalBytes / (1024L * 1024 * 1024):F1} GB used"
+            };
+            try { Invoke(() => cacheSizeLabel.Text = sizeText); } catch { }
+        });
+
+        var clearCacheButton = new Button
+        {
+            Text = "Clear Cache Now",
+            Location = new Point(15, 70),
+            Width = 130, Height = 28
+        };
+        clearCacheButton.Click += (_, _) =>
+        {
+            var result = MessageBox.Show(
+                "This will delete all cached images (except favorites and user images).\n\n" +
+                "Images will be re-downloaded as needed. Continue?",
+                "Clear Cache", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (result != DialogResult.Yes) return;
+            try
+            {
+                var protectedIds = new HashSet<string>(
+                    _settings.Favorites.Select(f => ImageCache.SanitizeFileName(f.ImageId)));
+                // Use 1 day = effectively delete everything except today's files
+                _imageCache.CleanOldCache(protectedIds, maxDays: 1);
+
+                var epicDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "BlueMarbleDesktop", "epic_images");
+                if (Directory.Exists(epicDir))
+                    Directory.Delete(epicDir, true);
+
+                cacheSizeLabel.Text = "Cache cleared";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error clearing cache: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        };
+
+        var clearCacheNote = new Label
+        {
+            Text = "Favorites and user images are not affected.",
+            Location = new Point(155, 75),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8f),
+            ForeColor = Color.Gray
+        };
+        cacheGroup.Controls.Add(clearCacheNote);
+        cacheGroup.Controls.Add(clearCacheButton);
+        tab.Controls.Add(cacheGroup);
 
         return tab;
+    }
+
+    private static long GetDirectorySize(string path)
+    {
+        if (!Directory.Exists(path)) return 0;
+        try
+        {
+            return new DirectoryInfo(path)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Sum(f => f.Length);
+        }
+        catch { return 0; }
     }
 
     private TabPage CreateApiKeysTab()
@@ -1500,6 +1663,53 @@ public class SettingsForm : Form
     }
 
     // -- REFRESH METHODS --
+
+    private void FetchEpicLatestDate()
+    {
+        if (_epicLatestAvailableDate != null) return; // Already fetched this session
+
+        var imageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
+        Task.Run(async () =>
+        {
+            try
+            {
+                var dates = await _epicApi.GetAvailableDatesAsync(imageType);
+                if (dates == null || dates.Count == 0) return;
+
+                // Parse the most recent date (last in the list)
+                var lastDateStr = dates[^1].Date;
+                if (!DateTime.TryParse(lastDateStr, out var latestDate)) return;
+
+                _epicLatestAvailableDate = latestDate;
+
+                if (IsDisposed) return;
+                try
+                {
+                    Invoke(() =>
+                    {
+                        _epicLatestDateLabel.Text = $"Latest available: {latestDate:MMM d, yyyy}";
+                        _epicLatestDateLabel.ForeColor = Color.FromArgb(60, 120, 60);
+                        _epicDatePicker.MaxDate = latestDate;
+                    });
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to fetch EPIC latest date: {ex.Message}");
+                if (IsDisposed) return;
+                try
+                {
+                    Invoke(() =>
+                    {
+                        _epicLatestDateLabel.Text = "Could not check latest date";
+                        _epicLatestDateLabel.ForeColor = Color.Gray;
+                    });
+                }
+                catch { }
+            }
+        });
+    }
 
     private void RefreshEpicImages()
     {
@@ -2302,8 +2512,16 @@ public class SettingsForm : Form
             };
             if (dialog.ShowDialog() != DialogResult.OK) return;
 
-            _userImageManager.ImportImages(dialog.FileNames);
-            RefreshMyCollectionTab();
+            try
+            {
+                int count = _userImageManager.ImportImages(dialog.FileNames);
+                RefreshMyCollectionTab();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to import images: {ex.Message}",
+                    "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         };
         tab.Controls.Add(addImagesButton);
 

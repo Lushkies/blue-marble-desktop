@@ -77,7 +77,7 @@ public class ThumbnailGridPanel : Panel
         _loadCts = new CancellationTokenSource();
 
         _images = images ?? new List<ImageSourceInfo>();
-        _selectedIndex = _images.Count > 0 ? 0 : -1;
+        _selectedIndex = -1; // No pre-selection — user must click to select
 
         // Dispose old thumbnails
         foreach (var thumb in _loadedThumbs.Values)

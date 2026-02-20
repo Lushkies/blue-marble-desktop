@@ -28,8 +28,8 @@ public class RenderScheduler : IDisposable
     // New image sources cache
     private readonly ImageCache _imageCache = new();
 
-    // Random rotation
-    private readonly Random _random = new();
+    // Image rotation (sequential cycling instead of random)
+    private int _rotationIndex;
     private string? _randomImageOverride;
 
     public event Action<string>? StatusChanged;
@@ -102,9 +102,14 @@ public class RenderScheduler : IDisposable
             InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
             ReportStatus("Renderer initialized.");
             // Clean old caches on startup (protect favorited images)
-            _epicCache.CleanOldCache();
-            var protectedIds = GetProtectedImageIds(settings);
-            _imageCache.CleanOldCache(protectedIds);
+            int epicDays = settings.EpicCacheDurationDays;
+            int imageDays = settings.CacheDurationDays;
+            if (epicDays > 0) _epicCache.CleanOldCache(epicDays);
+            if (imageDays > 0)
+            {
+                var protectedIds = GetProtectedImageIds(settings);
+                _imageCache.CleanOldCache(protectedIds, imageDays);
+            }
         };
 
         window.Render += (_) =>
@@ -117,6 +122,16 @@ public class RenderScheduler : IDisposable
 
             var now = DateTime.UtcNow;
             bool signaled = _renderNowSignal.IsSet;
+
+            // On subsequent launches, skip the very first render to preserve existing wallpaper.
+            // The user's wallpaper stays as-is until the next manual or timed update.
+            if (firstRender && _settingsManager.SkipFirstRender)
+            {
+                firstRender = false;
+                lastUpdate = now;
+                ReportStatus("Preserving existing wallpaper (app restarted).");
+                return;
+            }
 
             if (!firstRender && !signaled &&
                 (now - lastUpdate).TotalSeconds < settings.UpdateIntervalSeconds)
@@ -153,10 +168,10 @@ public class RenderScheduler : IDisposable
                         InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
                     }
 
-                    // Handle random rotation for still image sources
+                    // Handle image rotation for still image sources
                     if (settings.DisplayMode == DisplayMode.StillImage && settings.RandomRotationEnabled)
                     {
-                        PickRandomImage(settings, settings.StillImageSource);
+                        PickNextImage(settings, settings.StillImageSource);
                     }
 
                     string modeName = GetModeName(settings);
@@ -309,10 +324,10 @@ public class RenderScheduler : IDisposable
             currentImageStyle = displaySettings.ImageStyle;
             InitializeRenderers(gl, displaySettings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
 
-            // Handle random rotation for this display
+            // Handle image rotation for this display
             if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled)
             {
-                PickRandomImage(displaySettings, displaySettings.StillImageSource);
+                PickNextImage(displaySettings, displaySettings.StillImageSource);
             }
 
             // Render this display
@@ -552,9 +567,10 @@ public class RenderScheduler : IDisposable
     };
 
     /// <summary>
-    /// Pick a random image for rotation. Sets _randomImageOverride to a local file path.
+    /// Pick the next image for sequential rotation. Sets _randomImageOverride to a local file path.
+    /// Cycles through images in order instead of picking randomly.
     /// </summary>
-    private void PickRandomImage(AppSettings settings, ImageSource source)
+    private void PickNextImage(AppSettings settings, ImageSource source)
     {
         try
         {
@@ -565,7 +581,8 @@ public class RenderScheduler : IDisposable
                 var userPaths = userMgr.GetAllImagePaths();
                 if (userPaths.Count > 0)
                 {
-                    _randomImageOverride = userPaths[_random.Next(userPaths.Count)];
+                    _randomImageOverride = userPaths[_rotationIndex % userPaths.Count];
+                    _rotationIndex++;
                 }
                 return;
             }
@@ -577,7 +594,8 @@ public class RenderScheduler : IDisposable
 
                 if (sourceFavs.Count > 0)
                 {
-                    var pick = sourceFavs[_random.Next(sourceFavs.Count)];
+                    var pick = sourceFavs[_rotationIndex % sourceFavs.Count];
+                    _rotationIndex++;
 
                     if (!string.IsNullOrEmpty(pick.LocalCachePath) && File.Exists(pick.LocalCachePath))
                     {
@@ -602,12 +620,13 @@ public class RenderScheduler : IDisposable
             var cached = _imageCache.GetAllCachedImagePaths(source);
             if (cached.Count > 0)
             {
-                _randomImageOverride = cached[_random.Next(cached.Count)];
+                _randomImageOverride = cached[_rotationIndex % cached.Count];
+                _rotationIndex++;
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Random rotation error ({source}): {ex.Message}");
+            Console.WriteLine($"Image rotation error ({source}): {ex.Message}");
         }
     }
 

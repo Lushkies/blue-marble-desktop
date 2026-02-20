@@ -182,16 +182,17 @@ public class ImageCache
     }
 
     /// <summary>
-    /// Delete cached files older than MaxCachedDays.
+    /// Delete cached files older than the specified number of days.
     /// Protects favorited images and always keeps the most recent image per source.
     /// </summary>
-    public void CleanOldCache(HashSet<string>? protectedIds = null)
+    public void CleanOldCache(HashSet<string>? protectedIds = null, int maxDays = 30)
     {
         try
         {
             if (!Directory.Exists(CacheDir)) return;
+            if (maxDays <= 0) return; // 0 = keep forever
 
-            var cutoff = DateTime.Now.AddDays(-MaxCachedDays);
+            var cutoff = DateTime.Now.AddDays(-maxDays);
 
             foreach (var dir in Directory.GetDirectories(CacheDir))
             {

@@ -46,17 +46,18 @@ public class EpicImageCache
     }
 
     /// <summary>
-    /// Delete cached images older than MaxCachedDays.
+    /// Delete cached images older than the specified number of days.
     /// Safe to call periodically — skips errors silently.
     /// </summary>
-    public void CleanOldCache()
+    public void CleanOldCache(int maxDays = 14)
     {
         try
         {
             if (!Directory.Exists(CacheDir))
                 return;
+            if (maxDays <= 0) return; // 0 = keep forever
 
-            var cutoff = DateTime.Now.AddDays(-MaxCachedDays);
+            var cutoff = DateTime.Now.AddDays(-maxDays);
 
             foreach (var collectionDir in Directory.GetDirectories(CacheDir))
             {

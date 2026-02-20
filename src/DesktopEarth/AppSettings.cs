@@ -92,6 +92,13 @@ public class AppSettings
     public string UserImageSelectedId { get; set; } = "";
     public string UserImageSelectedPath { get; set; } = "";
 
+    // First-run detection (used to skip wallpaper re-render on subsequent launches)
+    public bool HasLaunchedBefore { get; set; } = false;
+
+    // Cache duration in days (0 = keep forever)
+    public int CacheDurationDays { get; set; } = 30;
+    public int EpicCacheDurationDays { get; set; } = 14;
+
     // Window state (remembered across sessions)
     public int WindowWidth { get; set; } = 560;
     public int WindowHeight { get; set; } = 790;
