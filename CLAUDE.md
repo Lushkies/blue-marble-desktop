@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 4.3.1
+**Current version:** 4.3.2
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -116,7 +116,7 @@ src/DesktopEarth/
     GraphicsCapabilityDetector.cs  # ARM64/Mesa3D detection
   UI/
     TrayApplicationContext.cs  # System tray icon + context menu
-    SettingsForm.cs            # Tabbed settings dialog (4 tabs)
+    SettingsForm.cs            # Tabbed settings dialog (3 tabs)
     ThumbnailGridPanel.cs      # Reusable image grid with selection + favorites
     AboutForm.cs               # Version/credits dialog
   Resources/
@@ -190,6 +190,7 @@ lib/
 - **v4.2** - Resizable settings window, fix Smithsonian API (correct endpoint + Solr query syntax), fix NPS search (exact park codes for chips), image quality tiers (SD/HD/UD badges + filter), minimum 1080p enforcement, 28 curated national park chips
 - **v4.3** - My Collection tab (view/export/manage all favorites with source badges), user-imported custom images as wallpaper source, settings presets (save/load named appearance configurations), storage location disclaimer
 - **v4.3.1** - Bug fixes (crash-resistant settings, wallpaper persistence on restart, correct image selection for NPS/Smithsonian, no render on source/quality change), sequential favorites cycling, EPIC latest date indicator, configurable cache duration, improved HD texture description, fixed window size, tab reorder
+- **v4.3.2** - Critical fixes (wallpaper truly persists across restarts, API key saves immediately, Add Images crash fix, EPIC date shows correct latest), settings auto-open on launch, "Favorite Current Wallpaper" tray button, 3-tab layout (API Keys merged into System, Storage Locations moved to System)
 
 ---
 

@@ -404,14 +404,13 @@ public class SettingsForm : Form
         };
 
         tabControl.TabPages.Add(CreateAppearanceTab());
-        tabControl.TabPages.Add(CreateSystemTab());
         tabControl.TabPages.Add(CreateMyCollectionTab());
-        tabControl.TabPages.Add(CreateApiKeysTab());
+        tabControl.TabPages.Add(CreateSystemTab());
 
         // Refresh My Collection tab when user switches to it
         tabControl.SelectedIndexChanged += (_, _) =>
         {
-            if (tabControl.SelectedIndex == 2) RefreshMyCollectionTab();
+            if (tabControl.SelectedIndex == 1) RefreshMyCollectionTab();
         };
 
         Controls.Add(tabControl);
@@ -1440,6 +1439,206 @@ public class SettingsForm : Form
         cacheGroup.Controls.Add(clearCacheNote);
         cacheGroup.Controls.Add(clearCacheButton);
         tab.Controls.Add(cacheGroup);
+        y += 130;
+
+        // === STORAGE LOCATIONS SECTION ===
+        var appDataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BlueMarbleDesktop");
+
+        var storageGroup = new GroupBox
+        {
+            Text = "Storage Locations",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(490, 105)
+        };
+
+        var storageInfo = new Label
+        {
+            Text = $"Cached images:  {Path.Combine(appDataDir, "image_cache")}\n" +
+                   $"User images:    {Path.Combine(appDataDir, "user_images")}\n" +
+                   $"Settings:       {Path.Combine(appDataDir, "settings.json")}",
+            Location = new Point(10, 20),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.Gray
+        };
+        storageGroup.Controls.Add(storageInfo);
+
+        var openFolderButton = new Button
+        {
+            Text = "Open Folder",
+            Location = new Point(10, 73),
+            Width = 100, Height = 24
+        };
+        openFolderButton.Click += (_, _) =>
+        {
+            try { System.Diagnostics.Process.Start("explorer.exe", appDataDir); }
+            catch { }
+        };
+        storageGroup.Controls.Add(openFolderButton);
+
+        var storageDisclaimer = new Label
+        {
+            Text = "Files are stored locally. You can copy or back up\nimages from these folders at any time.",
+            Location = new Point(120, 73),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.Gray
+        };
+        storageGroup.Controls.Add(storageDisclaimer);
+        tab.Controls.Add(storageGroup);
+        y += 115;
+
+        // === API KEY SECTION ===
+        var apiKeyGroup = new GroupBox
+        {
+            Text = "API Key",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(490, 175)
+        };
+        int ay = 18;
+
+        var apiInfoLabel = new Label
+        {
+            Text = "All image sources (NASA APOD, National Parks, Smithsonian) use a single free\n" +
+                   "api.data.gov API key. The default DEMO_KEY has a 50 requests/day limit.",
+            Location = new Point(15, ay),
+            Size = new Size(460, 32),
+            Font = new Font("Segoe UI", 8f),
+            ForeColor = Color.FromArgb(80, 80, 80)
+        };
+        apiKeyGroup.Controls.Add(apiInfoLabel);
+        ay += 36;
+
+        apiKeyGroup.Controls.Add(new Label
+        {
+            Text = "API Key:", AutoSize = true,
+            Location = new Point(15, ay + 3),
+            Font = new Font("Segoe UI", 9f)
+        });
+        _apiKeyBox = new TextBox { Location = new Point(80, ay), Width = 390 };
+        _apiKeyBox.TextChanged += (_, _) =>
+        {
+            // Auto-trim trailing whitespace
+            var text = _apiKeyBox.Text;
+            if (text != text.TrimEnd())
+            {
+                var pos = _apiKeyBox.SelectionStart;
+                _apiKeyBox.Text = text.TrimEnd();
+                _apiKeyBox.SelectionStart = Math.Min(pos, _apiKeyBox.Text.Length);
+            }
+            // Save API key to disk after debounce (300ms)
+            SchedulePreview();
+        };
+        apiKeyGroup.Controls.Add(_apiKeyBox);
+        ay += 28;
+
+        var apiKeyNote = new Label
+        {
+            Text = "Used for NASA APOD, National Parks (NPS), and Smithsonian Open Access.",
+            Location = new Point(80, ay),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.Gray
+        };
+        apiKeyGroup.Controls.Add(apiKeyNote);
+        ay += 18;
+
+        var apiSignupLink = new LinkLabel
+        {
+            Text = "Get a free API key at: https://api.data.gov/signup/",
+            Location = new Point(80, ay),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8.5f)
+        };
+        apiSignupLink.LinkClicked += (_, _) =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    "https://api.data.gov/signup/") { UseShellExecute = true });
+            }
+            catch { }
+        };
+        apiKeyGroup.Controls.Add(apiSignupLink);
+        ay += 24;
+
+        var apiVerifyButton = new Button
+        {
+            Text = "Verify Key",
+            Location = new Point(80, ay),
+            Width = 100, Height = 26
+        };
+        var apiVerifyStatus = new Label
+        {
+            Text = "", Location = new Point(190, ay + 4),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8.5f)
+        };
+        apiKeyGroup.Controls.Add(apiVerifyStatus);
+        apiVerifyButton.Click += (_, _) =>
+        {
+            var key = _apiKeyBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                apiVerifyStatus.Text = "Please enter an API key first.";
+                apiVerifyStatus.ForeColor = Color.FromArgb(180, 80, 80);
+                return;
+            }
+
+            apiVerifyButton.Enabled = false;
+            apiVerifyStatus.Text = "Verifying...";
+            apiVerifyStatus.ForeColor = Color.Gray;
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var result = await _apodApi.GetByDateAsync(key, DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd"));
+                    if (IsDisposed) return;
+                    try
+                    {
+                        Invoke(() =>
+                        {
+                            apiVerifyButton.Enabled = true;
+                            if (result != null)
+                            {
+                                apiVerifyStatus.Text = "API key is valid!";
+                                apiVerifyStatus.ForeColor = Color.FromArgb(60, 130, 60);
+                            }
+                            else
+                            {
+                                apiVerifyStatus.Text = "Key may be invalid or rate-limited.";
+                                apiVerifyStatus.ForeColor = Color.FromArgb(180, 120, 0);
+                            }
+                        });
+                    }
+                    catch (ObjectDisposedException) { }
+                }
+                catch (Exception ex)
+                {
+                    if (IsDisposed) return;
+                    try
+                    {
+                        Invoke(() =>
+                        {
+                            apiVerifyButton.Enabled = true;
+                            apiVerifyStatus.Text = $"Error: {ex.Message}";
+                            apiVerifyStatus.ForeColor = Color.FromArgb(180, 80, 80);
+                        });
+                    }
+                    catch (ObjectDisposedException) { }
+                }
+            });
+        };
+        apiKeyGroup.Controls.Add(apiVerifyButton);
+        tab.Controls.Add(apiKeyGroup);
+        y += 185;
+
+        // Enable scrolling for the system tab
+        tab.AutoScroll = true;
+        tab.AutoScrollMinSize = new Size(510, y);
 
         return tab;
     }
@@ -1456,149 +1655,6 @@ public class SettingsForm : Form
         catch { return 0; }
     }
 
-    private TabPage CreateApiKeysTab()
-    {
-        var tab = new TabPage("API Keys");
-        int y = 15;
-
-        var infoLabel = new Label
-        {
-            Text = "All image sources (NASA APOD, National Parks, Smithsonian) use a single free\n" +
-                   "api.data.gov API key. The default DEMO_KEY has a 50 requests/day limit.",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 40),
-            Font = new Font("Segoe UI", 9f)
-        };
-        tab.Controls.Add(infoLabel);
-        y += 48;
-
-        // Unified API key
-        tab.Controls.Add(MakeLabel("API Key:", LeftMargin, y + 3));
-        _apiKeyBox = new TextBox { Location = new Point(100, y), Width = 380 };
-        _apiKeyBox.TextChanged += (_, _) =>
-        {
-            // Auto-trim trailing whitespace
-            var text = _apiKeyBox.Text;
-            if (text != text.TrimEnd())
-            {
-                var pos = _apiKeyBox.SelectionStart;
-                _apiKeyBox.Text = text.TrimEnd();
-                _apiKeyBox.SelectionStart = Math.Min(pos, _apiKeyBox.Text.Length);
-            }
-        };
-        tab.Controls.Add(_apiKeyBox);
-        y += 30;
-
-        var keyNote = new Label
-        {
-            Text = "Used for NASA APOD, National Parks (NPS), and Smithsonian Open Access.",
-            Location = new Point(100, y),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
-        };
-        tab.Controls.Add(keyNote);
-        y += 22;
-
-        // Signup link
-        var signupLink = new LinkLabel
-        {
-            Text = "Get a free API key at: https://api.data.gov/signup/",
-            Location = new Point(100, y),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8.5f)
-        };
-        signupLink.LinkClicked += (_, _) =>
-        {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                    "https://api.data.gov/signup/") { UseShellExecute = true });
-            }
-            catch { }
-        };
-        tab.Controls.Add(signupLink);
-        y += 28;
-
-        // Verify button
-        var verifyButton = new Button
-        {
-            Text = "Verify Key",
-            Location = new Point(100, y),
-            Width = 100,
-            Height = 28
-        };
-        var verifyStatus = new Label
-        {
-            Text = "",
-            Location = new Point(210, y + 4),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8.5f)
-        };
-        tab.Controls.Add(verifyStatus);
-
-        verifyButton.Click += (_, _) =>
-        {
-            var key = _apiKeyBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(key))
-            {
-                verifyStatus.Text = "Please enter an API key first.";
-                verifyStatus.ForeColor = Color.FromArgb(180, 80, 80);
-                return;
-            }
-
-            verifyButton.Enabled = false;
-            verifyStatus.Text = "Verifying...";
-            verifyStatus.ForeColor = Color.Gray;
-
-            Task.Run(async () =>
-            {
-                try
-                {
-                    // Quick test with APOD
-                    var result = await _apodApi.GetByDateAsync(key, DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd"));
-
-                    if (IsDisposed) return;
-                    try
-                    {
-                        Invoke(() =>
-                        {
-                            verifyButton.Enabled = true;
-                            if (result != null)
-                            {
-                                verifyStatus.Text = "API key is valid!";
-                                verifyStatus.ForeColor = Color.FromArgb(60, 130, 60);
-                            }
-                            else
-                            {
-                                verifyStatus.Text = "Key may be invalid or rate-limited.";
-                                verifyStatus.ForeColor = Color.FromArgb(180, 120, 0);
-                            }
-                        });
-                    }
-                    catch (ObjectDisposedException) { }
-                }
-                catch (Exception ex)
-                {
-                    if (IsDisposed) return;
-                    try
-                    {
-                        Invoke(() =>
-                        {
-                            verifyButton.Enabled = true;
-                            verifyStatus.Text = $"Error: {ex.Message}";
-                            verifyStatus.ForeColor = Color.FromArgb(180, 80, 80);
-                        });
-                    }
-                    catch (ObjectDisposedException) { }
-                }
-            });
-        };
-        tab.Controls.Add(verifyButton);
-        y += 40;
-
-        return tab;
-    }
 
     // -- MODE VISIBILITY --
 
@@ -1676,8 +1732,8 @@ public class SettingsForm : Form
                 var dates = await _epicApi.GetAvailableDatesAsync(imageType);
                 if (dates == null || dates.Count == 0) return;
 
-                // Parse the most recent date (last in the list)
-                var lastDateStr = dates[^1].Date;
+                // Parse the most recent date (first in the list — API returns newest first)
+                var lastDateStr = dates[0].Date;
                 if (!DateTime.TryParse(lastDateStr, out var latestDate)) return;
 
                 _epicLatestAvailableDate = latestDate;
@@ -2380,9 +2436,17 @@ public class SettingsForm : Form
             };
             if (dialog.ShowDialog() != DialogResult.OK) return;
 
-            int count = _userImageManager.ImportImages(dialog.FileNames);
-            _userImagesStatusLabel.Text = $"Added {count} image{(count != 1 ? "s" : "")}";
-            RefreshUserImages();
+            try
+            {
+                int count = _userImageManager.ImportImages(dialog.FileNames);
+                _userImagesStatusLabel.Text = $"Added {count} image{(count != 1 ? "s" : "")}";
+                RefreshUserImages();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to import images: {ex.Message}",
+                    "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         };
         panel.Controls.Add(addButton);
 
@@ -2534,55 +2598,6 @@ public class SettingsForm : Form
         clearUserButton.Click += (_, _) => ClearAllUserImages();
         tab.Controls.Add(clearUserButton);
         y += 40;
-
-        // === STORAGE LOCATIONS SECTION ===
-        var appDataDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BlueMarbleDesktop");
-
-        var cacheGroup = new GroupBox
-        {
-            Text = "Storage Locations",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 105)
-        };
-
-        var cacheInfo = new Label
-        {
-            Text = $"Cached images:  {Path.Combine(appDataDir, "image_cache")}\n" +
-                   $"User images:    {Path.Combine(appDataDir, "user_images")}\n" +
-                   $"Settings:       {Path.Combine(appDataDir, "settings.json")}",
-            Location = new Point(10, 20),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
-        };
-        cacheGroup.Controls.Add(cacheInfo);
-
-        var openFolderButton = new Button
-        {
-            Text = "Open Folder",
-            Location = new Point(10, 73),
-            Width = 100, Height = 24
-        };
-        openFolderButton.Click += (_, _) =>
-        {
-            try { System.Diagnostics.Process.Start("explorer.exe", appDataDir); }
-            catch { }
-        };
-        cacheGroup.Controls.Add(openFolderButton);
-
-        var disclaimer = new Label
-        {
-            Text = "Files are stored locally. You can copy or back up\nimages from these folders at any time.",
-            Location = new Point(120, 73),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
-        };
-        cacheGroup.Controls.Add(disclaimer);
-
-        tab.Controls.Add(cacheGroup);
 
         return tab;
     }

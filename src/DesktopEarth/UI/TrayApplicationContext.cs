@@ -26,6 +26,9 @@ public class TrayApplicationContext : ApplicationContext
 
         _renderScheduler.StatusChanged += OnStatusChanged;
         _renderScheduler.Start();
+
+        // Open settings window on launch
+        ShowSettings();
     }
 
     private ContextMenuStrip BuildContextMenu()
@@ -33,7 +36,10 @@ public class TrayApplicationContext : ApplicationContext
         var menu = new ContextMenuStrip();
 
         var updateNowItem = new ToolStripMenuItem("Update Wallpaper Now");
-        updateNowItem.Click += (_, _) => _renderScheduler.TriggerUpdate();
+        updateNowItem.Click += (_, _) => _renderScheduler.TriggerUserUpdate();
+
+        var favoriteItem = new ToolStripMenuItem("Favorite Current Wallpaper");
+        favoriteItem.Click += (_, _) => FavoriteCurrentWallpaper();
 
         var settingsItem = new ToolStripMenuItem("Settings...");
         settingsItem.Click += (_, _) => ShowSettings();
@@ -45,6 +51,7 @@ public class TrayApplicationContext : ApplicationContext
         exitItem.Click += (_, _) => ExitApplication();
 
         menu.Items.Add(updateNowItem);
+        menu.Items.Add(favoriteItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(settingsItem);
         menu.Items.Add(aboutItem);
@@ -65,6 +72,36 @@ public class TrayApplicationContext : ApplicationContext
 
         _settingsForm = new SettingsForm(_settingsManager, _renderScheduler);
         _settingsForm.Show();
+    }
+
+    private void FavoriteCurrentWallpaper()
+    {
+        var fav = _renderScheduler.GetCurrentAsFavorite();
+        if (fav == null)
+        {
+            _trayIcon.BalloonTipTitle = "Blue Marble Desktop";
+            _trayIcon.BalloonTipText = "No still image is currently displayed to favorite.";
+            _trayIcon.ShowBalloonTip(3000);
+            return;
+        }
+
+        var settings = _settingsManager.Settings;
+
+        // Check if already favorited
+        if (settings.Favorites.Any(f => f.Source == fav.Source && f.ImageId == fav.ImageId))
+        {
+            _trayIcon.BalloonTipTitle = "Blue Marble Desktop";
+            _trayIcon.BalloonTipText = "This image is already in your favorites.";
+            _trayIcon.ShowBalloonTip(3000);
+            return;
+        }
+
+        settings.Favorites.Add(fav);
+        _settingsManager.Save();
+
+        _trayIcon.BalloonTipTitle = "Blue Marble Desktop";
+        _trayIcon.BalloonTipText = "Added to favorites! View in My Collection tab.";
+        _trayIcon.ShowBalloonTip(3000);
     }
 
     private void ShowAbout()

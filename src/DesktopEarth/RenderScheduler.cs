@@ -32,6 +32,18 @@ public class RenderScheduler : IDisposable
     private int _rotationIndex;
     private string? _randomImageOverride;
 
+    // Gate: prevents all rendering until user explicitly triggers an update.
+    // Defaults to true (first-ever run renders immediately).
+    // Set to false on subsequent launches so the existing wallpaper is preserved.
+    private volatile bool _userHasTriggered = true;
+
+    // Track currently displayed image for "Favorite Current Wallpaper" feature
+    public ImageSource? CurrentImageSource { get; private set; }
+    public string? CurrentImageId { get; private set; }
+    public string? CurrentImageUrl { get; private set; }
+    public string? CurrentImagePath { get; private set; }
+    public string? CurrentImageTitle { get; private set; }
+
     public event Action<string>? StatusChanged;
 
     public RenderScheduler(SettingsManager settingsManager, AssetLocator assets)
@@ -40,8 +52,12 @@ public class RenderScheduler : IDisposable
         _assets = assets;
         _wallpaperPath = Path.Combine(Path.GetTempPath(), "BlueMarbleDesktop_wallpaper.bmp");
 
-        // Re-render whenever settings change (belt-and-suspenders with SettingsForm.TriggerUpdate)
-        _settingsManager.SettingsChanged += TriggerUpdate;
+        // On subsequent launches, don't render until user explicitly changes something
+        if (_settingsManager.SkipFirstRender)
+            _userHasTriggered = false;
+
+        // Re-render whenever settings change
+        _settingsManager.SettingsChanged += TriggerUserUpdate;
     }
 
     public void Start()
@@ -68,6 +84,52 @@ public class RenderScheduler : IDisposable
     public void TriggerUpdate()
     {
         _renderNowSignal.Set();
+    }
+
+    /// <summary>
+    /// Trigger a render update from an explicit user action (settings change, tray button, etc.).
+    /// Also enables rendering if it was disabled for wallpaper preservation on restart.
+    /// </summary>
+    public void TriggerUserUpdate()
+    {
+        _userHasTriggered = true;
+        _renderNowSignal.Set();
+    }
+
+    /// <summary>
+    /// Build a FavoriteImage from the currently displayed wallpaper, or null if not a still image.
+    /// </summary>
+    public FavoriteImage? GetCurrentAsFavorite()
+    {
+        if (CurrentImageSource == null || string.IsNullOrEmpty(CurrentImageId))
+            return null;
+
+        return new FavoriteImage
+        {
+            Source = CurrentImageSource.Value,
+            ImageId = CurrentImageId,
+            Title = CurrentImageTitle ?? CurrentImageId,
+            FullImageUrl = CurrentImageUrl ?? "",
+            LocalCachePath = CurrentImagePath ?? ""
+        };
+    }
+
+    private void SetCurrentImage(ImageSource source, string? id, string? url, string? path, string? title = null)
+    {
+        CurrentImageSource = source;
+        CurrentImageId = id;
+        CurrentImageUrl = url;
+        CurrentImagePath = path;
+        CurrentImageTitle = title;
+    }
+
+    private void ClearCurrentImage()
+    {
+        CurrentImageSource = null;
+        CurrentImageId = null;
+        CurrentImageUrl = null;
+        CurrentImagePath = null;
+        CurrentImageTitle = null;
     }
 
     private void RenderLoop()
@@ -120,18 +182,18 @@ public class RenderScheduler : IDisposable
                 return;
             }
 
-            var now = DateTime.UtcNow;
-            bool signaled = _renderNowSignal.IsSet;
-
-            // On subsequent launches, skip the very first render to preserve existing wallpaper.
-            // The user's wallpaper stays as-is until the next manual or timed update.
-            if (firstRender && _settingsManager.SkipFirstRender)
+            // On subsequent launches, don't render until user explicitly triggers an update.
+            // This preserves the existing wallpaper indefinitely until the user changes settings
+            // or clicks "Update Wallpaper Now" in the tray menu.
+            if (!_userHasTriggered)
             {
-                firstRender = false;
-                lastUpdate = now;
-                ReportStatus("Preserving existing wallpaper (app restarted).");
+                _renderNowSignal.Reset(); // Drain any stale signals
+                Thread.Sleep(200);
                 return;
             }
+
+            var now = DateTime.UtcNow;
+            bool signaled = _renderNowSignal.IsSet;
 
             if (!firstRender && !signaled &&
                 (now - lastUpdate).TotalSeconds < settings.UpdateIntervalSeconds)
@@ -198,6 +260,7 @@ public class RenderScheduler : IDisposable
                             DisplayMode.Moon => moonRenderer!.Render(renderWidth, renderHeight),
                             _ => earthRenderer!.Render(renderWidth, renderHeight),
                         };
+                        ClearCurrentImage(); // Globe/Flat Map/Moon are not favoritable
                     }
 
                     SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
@@ -447,7 +510,10 @@ public class RenderScheduler : IDisposable
             {
                 renderer.LoadImage(gl, overridePath);
                 if (!renderer.IsBelowMinimumQuality)
+                {
+                    SetCurrentImage(source, Path.GetFileNameWithoutExtension(overridePath), null, overridePath);
                     return renderer.Render(width, height);
+                }
 
                 Console.WriteLine($"RenderScheduler: Random image below 1080p minimum, skipping");
             }
@@ -461,7 +527,11 @@ public class RenderScheduler : IDisposable
             {
                 renderer.LoadImage(gl, path);
                 if (!renderer.IsBelowMinimumQuality)
+                {
+                    SetCurrentImage(source, settings.UserImageSelectedId, null, path,
+                        Path.GetFileNameWithoutExtension(path));
                     return renderer.Render(width, height);
+                }
             }
             // Fallback: try any user image
             var userMgr = new UserImageManager();
@@ -470,7 +540,10 @@ public class RenderScheduler : IDisposable
             {
                 renderer.LoadImage(gl, allPaths[0]);
                 if (!renderer.IsBelowMinimumQuality)
+                {
+                    SetCurrentImage(source, Path.GetFileNameWithoutExtension(allPaths[0]), null, allPaths[0]);
                     return renderer.Render(width, height);
+                }
             }
             ReportStatus("User images: No images available");
             return new byte[width * height * 4];
@@ -488,6 +561,7 @@ public class RenderScheduler : IDisposable
             {
                 ReportStatus($"{source}: Using cached image (no selection)");
                 renderer.LoadImage(gl, cached);
+                SetCurrentImage(source, Path.GetFileNameWithoutExtension(cached), null, cached);
                 return renderer.Render(width, height);
             }
             ReportStatus($"{source}: No image selected");
@@ -525,6 +599,7 @@ public class RenderScheduler : IDisposable
             }
             else
             {
+                SetCurrentImage(source, imageId, imageUrl, imagePath);
                 return renderer.Render(width, height);
             }
         }
@@ -535,6 +610,7 @@ public class RenderScheduler : IDisposable
         {
             ReportStatus($"{source}: Using cached image (offline)");
             renderer.LoadImage(gl, fallback);
+            SetCurrentImage(source, Path.GetFileNameWithoutExtension(fallback), null, fallback);
             return renderer.Render(width, height);
         }
 
@@ -656,6 +732,8 @@ public class RenderScheduler : IDisposable
         if (imagePath != null)
         {
             renderer.LoadImage(gl, imagePath);
+            SetCurrentImage(ImageSource.NasaEpic,
+                Path.GetFileNameWithoutExtension(imagePath), null, imagePath, "NASA EPIC");
             return renderer.Render(width, height);
         }
 
@@ -767,7 +845,7 @@ public class RenderScheduler : IDisposable
 
     public void Dispose()
     {
-        _settingsManager.SettingsChanged -= TriggerUpdate;
+        _settingsManager.SettingsChanged -= TriggerUserUpdate;
         Stop();
         _renderNowSignal.Dispose();
     }
