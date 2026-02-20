@@ -31,6 +31,13 @@ public class StillImageRenderer : IDisposable
     /// <summary>True if an image has been loaded and is ready to render.</summary>
     public bool HasImage => _currentImagePath != null && _textures != null;
 
+    /// <summary>
+    /// True if the loaded image is below the minimum 1080p threshold.
+    /// Callers should skip rendering and try a different image when this is true.
+    /// </summary>
+    public bool IsBelowMinimumQuality => _imageWidth > 0 && _imageHeight > 0 &&
+        Math.Max(_imageWidth, _imageHeight) < 1080;
+
     public void Initialize(GL gl)
     {
         _gl = gl;
@@ -103,6 +110,14 @@ public class StillImageRenderer : IDisposable
         {
             _imageWidth = 1024;
             _imageHeight = 1024;
+        }
+
+        // Enforce minimum 1080p quality -- warn but still load (caller decides whether to skip)
+        int maxDim = Math.Max(_imageWidth, _imageHeight);
+        if (maxDim > 0 && maxDim < 1080)
+        {
+            Console.WriteLine($"StillImageRenderer: WARNING - {Path.GetFileName(imagePath)} " +
+                $"is below minimum quality ({_imageWidth}x{_imageHeight}, max dimension {maxDim}px < 1080px)");
         }
 
         _textures.LoadTexture(imagePath, "image");

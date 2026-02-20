@@ -23,10 +23,46 @@ public class NpsApiClient
     };
 
     /// <summary>
+    /// Maps display names (used in suggestion chips) to NPS park codes.
+    /// Using park codes gives exact park results instead of fuzzy text search.
+    /// </summary>
+    public static readonly Dictionary<string, string> ParkCodes = new()
+    {
+        ["Acadia"] = "acad",
+        ["Arches"] = "arch",
+        ["Badlands"] = "badl",
+        ["Big Bend"] = "bibe",
+        ["Bryce Canyon"] = "brca",
+        ["Canyonlands"] = "cany",
+        ["Capitol Reef"] = "care",
+        ["Crater Lake"] = "crla",
+        ["Death Valley"] = "deva",
+        ["Denali"] = "dena",
+        ["Everglades"] = "ever",
+        ["Glacier"] = "glac",
+        ["Grand Canyon"] = "grca",
+        ["Grand Teton"] = "grte",
+        ["Great Smoky Mtns"] = "grsm",
+        ["Hawaii Volcanoes"] = "havo",
+        ["Joshua Tree"] = "jotr",
+        ["Mount Rainier"] = "mora",
+        ["Olympic"] = "olym",
+        ["Redwood"] = "redw",
+        ["Rocky Mountain"] = "romo",
+        ["Saguaro"] = "sagu",
+        ["Sequoia"] = "sequ",
+        ["Shenandoah"] = "shen",
+        ["Theodore Roosevelt"] = "thro",
+        ["Yellowstone"] = "yell",
+        ["Yosemite"] = "yose",
+        ["Zion"] = "zion"
+    };
+
+    /// <summary>
     /// Search parks by keyword and return their images.
     /// Returns null on error.
     /// </summary>
-    public async Task<List<ImageSourceInfo>?> SearchParksAsync(string apiKey, string query, int limit = 10)
+    public async Task<List<ImageSourceInfo>?> SearchParksAsync(string apiKey, string query, int limit = 20)
     {
         try
         {

@@ -22,7 +22,24 @@ public class ImageSourceInfo
     // Source-specific tracking URL
     public string DownloadLocationUrl { get; set; } = "";
 
+    // Image dimensions (0 = unknown)
+    public int ImageWidth { get; set; }
+    public int ImageHeight { get; set; }
+    public ImageQualityTier QualityTier { get; set; } = ImageQualityTier.Unknown;
+
     public bool IsFavorited { get; set; }
 
     public override string ToString() => !string.IsNullOrEmpty(Title) ? Title : Id;
+
+    /// <summary>
+    /// Calculate quality tier from image dimensions.
+    /// </summary>
+    public static ImageQualityTier GetQualityTier(int width, int height)
+    {
+        int maxDim = Math.Max(width, height);
+        if (maxDim >= 3840) return ImageQualityTier.UD;
+        if (maxDim >= 2160) return ImageQualityTier.HD;
+        if (maxDim >= 1080) return ImageQualityTier.SD;
+        return ImageQualityTier.Unknown; // Below minimum
+    }
 }

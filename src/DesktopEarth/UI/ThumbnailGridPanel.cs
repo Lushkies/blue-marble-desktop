@@ -4,19 +4,22 @@ using System.Drawing.Drawing2D;
 namespace DesktopEarth.UI;
 
 /// <summary>
-/// A scrollable grid of image thumbnails with lazy loading and favorites support.
-/// 3 columns, each cell shows a thumbnail + title below it.
+/// A scrollable grid of image thumbnails with lazy loading, favorites, and quality badges.
+/// Dynamic column count based on panel width (minimum 3 columns).
 /// </summary>
 public class ThumbnailGridPanel : Panel
 {
-    private const int Columns = 3;
+    private const int MinColumns = 3;
     private const int ThumbSize = 130;
     private const int CellPadding = 6;
     private const int TitleHeight = 20;
     private const int CellWidth = ThumbSize + CellPadding * 2;
     private const int CellHeight = ThumbSize + TitleHeight + CellPadding * 2;
     private const int StarSize = 20;
+    private const int BadgeWidth = 24;
+    private const int BadgeHeight = 14;
 
+    private int _columns = MinColumns;
     private List<ImageSourceInfo> _images = new();
     private int _selectedIndex = -1;
     private readonly ImageCache _cache;
@@ -79,10 +82,7 @@ public class ThumbnailGridPanel : Panel
         _loadedThumbs.Clear();
         _loadingThumbs.Clear();
 
-        // Resize inner panel to fit all rows
-        int rows = (_images.Count + Columns - 1) / Columns;
-        _innerPanel.Size = new Size(Columns * CellWidth + 2, Math.Max(rows * CellHeight, 10));
-        _innerPanel.Invalidate();
+        RecalculateLayout();
     }
 
     /// <summary>
@@ -98,6 +98,23 @@ public class ThumbnailGridPanel : Panel
         }
     }
 
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        RecalculateLayout();
+    }
+
+    private void RecalculateLayout()
+    {
+        // Calculate columns based on available width (account for scrollbar)
+        int availableWidth = ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 2;
+        _columns = Math.Max(MinColumns, availableWidth / CellWidth);
+
+        int rows = (_images.Count + _columns - 1) / Math.Max(_columns, 1);
+        _innerPanel.Size = new Size(_columns * CellWidth + 2, Math.Max(rows * CellHeight, 10));
+        _innerPanel.Invalidate();
+    }
+
     private void InnerPanel_Paint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -110,6 +127,7 @@ public class ThumbnailGridPanel : Panel
         using var selectedPen = new Pen(Color.FromArgb(0, 120, 215), 2);
         using var starBrush = new SolidBrush(Color.FromArgb(255, 200, 50));
         using var starOutlinePen = new Pen(Color.FromArgb(180, 180, 180), 1);
+        using var badgeFont = new Font("Segoe UI", 7f, FontStyle.Bold);
 
         for (int i = 0; i < _images.Count; i++)
         {
@@ -151,6 +169,9 @@ public class ThumbnailGridPanel : Panel
                     thumbRect.Width + 2, thumbRect.Height + 2);
             }
 
+            // Quality badge (bottom-right of thumbnail)
+            DrawQualityBadge(g, img.QualityTier, thumbRect, badgeFont);
+
             // Title text (truncated)
             var titleRect = new Rectangle(
                 cellRect.X + CellPadding,
@@ -172,6 +193,50 @@ public class ThumbnailGridPanel : Panel
                 DrawStar(g, starRect, faintBrush, starOutlinePen);
             }
         }
+    }
+
+    private static void DrawQualityBadge(Graphics g, ImageQualityTier tier,
+        Rectangle thumbRect, Font font)
+    {
+        string text;
+        Color bgColor;
+
+        switch (tier)
+        {
+            case ImageQualityTier.UD:
+                text = "UD";
+                bgColor = Color.FromArgb(200, 180, 140, 20); // Gold
+                break;
+            case ImageQualityTier.HD:
+                text = "HD";
+                bgColor = Color.FromArgb(200, 0, 100, 200); // Blue
+                break;
+            case ImageQualityTier.SD:
+                text = "SD";
+                bgColor = Color.FromArgb(200, 120, 120, 120); // Gray
+                break;
+            default:
+                text = "?";
+                bgColor = Color.FromArgb(160, 60, 60, 60); // Dark gray
+                break;
+        }
+
+        var badgeRect = new Rectangle(
+            thumbRect.Right - BadgeWidth - 2,
+            thumbRect.Bottom - BadgeHeight - 2,
+            BadgeWidth, BadgeHeight);
+
+        using var bgBrush = new SolidBrush(bgColor);
+        using var textBrush = new SolidBrush(Color.White);
+
+        // Rounded rectangle badge
+        g.FillRectangle(bgBrush, badgeRect);
+
+        // Center text in badge
+        var textSize = g.MeasureString(text, font);
+        float tx = badgeRect.X + (badgeRect.Width - textSize.Width) / 2;
+        float ty = badgeRect.Y + (badgeRect.Height - textSize.Height) / 2;
+        g.DrawString(text, font, textBrush, tx, ty);
     }
 
     private static void DrawThumbnailFit(Graphics g, System.Drawing.Image thumb, Rectangle destRect)
@@ -316,15 +381,15 @@ public class ThumbnailGridPanel : Panel
     {
         int col = p.X / CellWidth;
         int row = p.Y / CellHeight;
-        if (col < 0 || col >= Columns) return -1;
-        int index = row * Columns + col;
+        if (col < 0 || col >= _columns) return -1;
+        int index = row * _columns + col;
         return index >= 0 && index < _images.Count ? index : -1;
     }
 
     private Rectangle GetCellBounds(int index)
     {
-        int col = index % Columns;
-        int row = index / Columns;
+        int col = index % _columns;
+        int row = index / _columns;
         return new Rectangle(col * CellWidth, row * CellHeight, CellWidth, CellHeight);
     }
 

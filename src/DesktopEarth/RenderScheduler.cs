@@ -427,7 +427,10 @@ public class RenderScheduler : IDisposable
             if (File.Exists(overridePath))
             {
                 renderer.LoadImage(gl, overridePath);
-                return renderer.Render(width, height);
+                if (!renderer.IsBelowMinimumQuality)
+                    return renderer.Render(width, height);
+
+                Console.WriteLine($"RenderScheduler: Random image below 1080p minimum, skipping");
             }
         }
 
@@ -471,10 +474,20 @@ public class RenderScheduler : IDisposable
         if (imagePath != null && File.Exists(imagePath))
         {
             renderer.LoadImage(gl, imagePath);
-            return renderer.Render(width, height);
+
+            // Enforce minimum 1080p quality -- skip sub-1080p images
+            if (renderer.IsBelowMinimumQuality)
+            {
+                ReportStatus($"{source}: Image below minimum 1080p quality, trying fallback");
+                Console.WriteLine($"RenderScheduler: Skipping {imageId} -- below 1080p minimum");
+            }
+            else
+            {
+                return renderer.Render(width, height);
+            }
         }
 
-        // Download failed — try any cached image for this source
+        // Download failed or below quality — try any cached image for this source
         var fallback = _imageCache.GetLatestCachedImagePath(source);
         if (fallback != null)
         {

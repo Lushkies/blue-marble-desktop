@@ -138,6 +138,9 @@ public class SettingsForm : Form
     // Shared Reset button
     private Button _resetButton = null!;
 
+    // Quality filter
+    private ComboBox _qualityFilterCombo = null!;
+
     public SettingsForm(SettingsManager settingsManager, RenderScheduler renderScheduler)
     {
         _settingsManager = settingsManager;
@@ -264,6 +267,15 @@ public class SettingsForm : Form
             s.SmithsonianSelectedImageUrl = _smithsonianGrid.SelectedImage.HdImageUrl;
         }
 
+        // Quality filter
+        s.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
+        {
+            1 => ImageQualityTier.SD,
+            2 => ImageQualityTier.HD,
+            3 => ImageQualityTier.UD,
+            _ => ImageQualityTier.Unknown // "Any"
+        };
+
         // Rotation
         s.RandomRotationEnabled = _randomRotationCheck.Checked;
         s.RandomFromFavoritesOnly = _randomFavoritesOnlyCheck.Checked;
@@ -320,6 +332,15 @@ public class SettingsForm : Form
             config.SmithsonianSelectedImageUrl = _smithsonianGrid.SelectedImage.HdImageUrl;
         }
 
+        // Quality filter
+        config.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
+        {
+            1 => ImageQualityTier.SD,
+            2 => ImageQualityTier.HD,
+            3 => ImageQualityTier.UD,
+            _ => ImageQualityTier.Unknown
+        };
+
         // Rotation
         config.RandomRotationEnabled = _randomRotationCheck.Checked;
         config.RandomFromFavoritesOnly = _randomFavoritesOnlyCheck.Checked;
@@ -337,11 +358,22 @@ public class SettingsForm : Form
     private void InitializeForm()
     {
         Text = "Blue Marble Desktop Settings";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
         StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(560, 790);
+        MinimumSize = new Size(560, 790);
+        Size = new Size(_settings.WindowWidth, _settings.WindowHeight);
         ShowInTaskbar = true;
+
+        // Save window size on resize
+        Resize += (_, _) =>
+        {
+            if (WindowState == FormWindowState.Normal)
+            {
+                _settings.WindowWidth = Width;
+                _settings.WindowHeight = Height;
+            }
+        };
 
         var tabControl = new TabControl
         {
@@ -668,6 +700,19 @@ public class SettingsForm : Form
             SchedulePreview();
         };
         panel.Controls.Add(_stillImageSourceCombo);
+
+        // Min quality filter
+        panel.Controls.Add(MakeLabel("Min quality:", 290, py + 3));
+        _qualityFilterCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(380, py),
+            Width = 90
+        };
+        _qualityFilterCombo.Items.AddRange(["Any", "SD (1080p+)", "HD (2160p+)", "UD (4K+)"]);
+        _qualityFilterCombo.SelectedIndex = 1; // Default: SD
+        _qualityFilterCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
+        panel.Controls.Add(_qualityFilterCombo);
         py += 30;
 
         // Sub-panels (all start at same Y inside the still image panel)
@@ -903,25 +948,24 @@ public class SettingsForm : Form
         panel.Controls.Add(_npsSearchButton);
         py += 28;
 
-        // Suggestion chips
+        // Suggestion chips (wrapping, scrollable, uses exact park codes)
         _npsChipsPanel = new FlowLayoutPanel
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 28),
-            WrapContents = false,
-            AutoScroll = false
+            Size = new Size(490, 56),
+            WrapContents = true,
+            AutoScroll = true
         };
-        string[] npsChips = ["Yosemite", "Grand Canyon", "Yellowstone", "Glacier", "Zion",
-            "Rocky Mountain", "Acadia", "Olympic", "Grand Teton", "Denali"];
-        foreach (var chip in npsChips)
+        foreach (var parkName in NpsApiClient.ParkCodes.Keys.OrderBy(k => k))
         {
+            var chipName = parkName; // capture for closure
             var btn = new Button
             {
-                Text = chip,
+                Text = chipName,
                 AutoSize = true,
                 Height = 24,
                 Padding = new Padding(2, 0, 2, 0),
-                Margin = new Padding(0, 0, 4, 0),
+                Margin = new Padding(0, 0, 4, 2),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 7.5f),
                 BackColor = Color.FromArgb(235, 240, 250),
@@ -932,13 +976,13 @@ public class SettingsForm : Form
             btn.FlatAppearance.BorderSize = 1;
             btn.Click += (_, _) =>
             {
-                _npsSearchBox.Text = chip;
+                _npsSearchBox.Text = chipName;
                 RefreshNpsImages();
             };
             _npsChipsPanel.Controls.Add(btn);
         }
         panel.Controls.Add(_npsChipsPanel);
-        py += 32;
+        py += 60;
 
         _npsGrid = new ThumbnailGridPanel(_imageCache)
         {
@@ -985,25 +1029,27 @@ public class SettingsForm : Form
         panel.Controls.Add(_smithsonianSearchButton);
         py += 28;
 
-        // Suggestion chips
+        // Suggestion chips (curated for art_design category)
         _smithsonianChipsPanel = new FlowLayoutPanel
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 28),
-            WrapContents = false,
-            AutoScroll = false
+            Size = new Size(490, 56),
+            WrapContents = true,
+            AutoScroll = true
         };
-        string[] smithChips = ["Landscape Painting", "Butterfly", "Mineral", "Fossil",
-            "Ocean", "Galaxy", "Moon", "Mars", "Volcano", "Parthenon", "Sunset"];
+        string[] smithChips = ["Landscape Painting", "Sunset", "Mountain", "Ocean", "Forest",
+            "Butterfly", "Architecture", "Waterfall", "Desert", "Volcano",
+            "Coral Reef", "Glacier", "Photography", "Parthenon", "Night Sky"];
         foreach (var chip in smithChips)
         {
+            var chipText = chip; // capture for closure
             var btn = new Button
             {
-                Text = chip,
+                Text = chipText,
                 AutoSize = true,
                 Height = 24,
                 Padding = new Padding(2, 0, 2, 0),
-                Margin = new Padding(0, 0, 4, 0),
+                Margin = new Padding(0, 0, 4, 2),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 7.5f),
                 BackColor = Color.FromArgb(240, 235, 225),
@@ -1014,13 +1060,13 @@ public class SettingsForm : Form
             btn.FlatAppearance.BorderSize = 1;
             btn.Click += (_, _) =>
             {
-                _smithsonianSearchBox.Text = chip;
+                _smithsonianSearchBox.Text = chipText;
                 RefreshSmithsonianImages();
             };
             _smithsonianChipsPanel.Controls.Add(btn);
         }
         panel.Controls.Add(_smithsonianChipsPanel);
-        py += 32;
+        py += 60;
 
         _smithsonianGrid = new ThumbnailGridPanel(_imageCache)
         {
@@ -1426,6 +1472,9 @@ public class SettingsForm : Form
                             ThumbnailUrl = $"https://epic.gsfc.nasa.gov/archive/{collection}/{yyyy}/{mm}/{dd}/thumbs/{img.Image}.jpg",
                             FullImageUrl = $"https://epic.gsfc.nasa.gov/archive/{collection}/{yyyy}/{mm}/{dd}/jpg/{img.Image}.jpg",
                             HdImageUrl = $"https://epic.gsfc.nasa.gov/archive/{collection}/{yyyy}/{mm}/{dd}/png/{img.Image}.png",
+                            ImageWidth = 2048,
+                            ImageHeight = 2048,
+                            QualityTier = ImageQualityTier.HD,
                             SourceAttribution = "NASA EPIC / DSCOVR",
                             IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NasaEpic && f.ImageId == img.Image)
                         };
@@ -1519,7 +1568,12 @@ public class SettingsForm : Form
 
         Task.Run(async () =>
         {
-            var images = await _npsApi.SearchParksAsync(apiKey, query);
+            // Use park code for exact match if query matches a known park name
+            List<ImageSourceInfo>? images;
+            if (NpsApiClient.ParkCodes.TryGetValue(query, out var parkCode))
+                images = await _npsApi.GetParkImagesAsync(apiKey, parkCode);
+            else
+                images = await _npsApi.SearchParksAsync(apiKey, query);
 
             if (IsDisposed) return;
             try
@@ -1672,6 +1726,15 @@ public class SettingsForm : Form
         if (!string.IsNullOrEmpty(config.EpicSelectedDate) && DateTime.TryParse(config.EpicSelectedDate, out var epicDate))
             _epicDatePicker.Value = epicDate;
 
+        // Quality filter
+        _qualityFilterCombo.SelectedIndex = config.MinImageQuality switch
+        {
+            ImageQualityTier.SD => 1,
+            ImageQualityTier.HD => 2,
+            ImageQualityTier.UD => 3,
+            _ => 0
+        };
+
         // Rotation
         _randomRotationCheck.Checked = config.RandomRotationEnabled;
         _randomFavoritesOnlyCheck.Checked = config.RandomFromFavoritesOnly;
@@ -1771,6 +1834,15 @@ public class SettingsForm : Form
 
         // API key
         _apiKeyBox.Text = _settings.ApiDataGovKey;
+
+        // Quality filter
+        _qualityFilterCombo.SelectedIndex = _settings.MinImageQuality switch
+        {
+            ImageQualityTier.SD => 1,
+            ImageQualityTier.HD => 2,
+            ImageQualityTier.UD => 3,
+            _ => 0 // Any
+        };
 
         // Rotation
         _randomRotationCheck.Checked = _settings.RandomRotationEnabled;

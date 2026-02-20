@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 4.1.0
+**Current version:** 4.2.0
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -185,6 +185,7 @@ lib/
 - **v3.2** - HD texture download (21600x10800), zoom slider
 - **v4.0** - Multiple image sources (APOD, NPS, Smithsonian, Unsplash), thumbnail grids, favorites, random rotation
 - **v4.1** - Remove Unsplash, combine still images into unified view with sub-dropdown, consolidate API keys to single api.data.gov key, search suggestion chips, cache improvements (30-day retention, protected favorites, offline fallback), UI polish
+- **v4.2** - Resizable settings window, fix Smithsonian API (correct endpoint + Solr query syntax), fix NPS search (exact park codes for chips), image quality tiers (SD/HD/UD badges + filter), minimum 1080p enforcement, 28 curated national park chips
 
 ---
 
@@ -192,7 +193,7 @@ lib/
 
 ### Known Issues
 - NPS photos often include people (park rangers, visitors, buildings) rather than nature landscapes -- no API-level filter exists for this
-- Smithsonian search results can be unpredictable -- some obvious terms ("nature", "space", "earth") return nothing while others ("landscape painting", "butterfly", "Parthenon") work well
+- Smithsonian search results depend on the art_design category -- some terms work better than others
 - EPIC images are sometimes delayed 24-48 hours from NASA
 - The SettingsForm is one large file (~1800 lines) -- could benefit from being split into partial classes or user controls if it grows further
 

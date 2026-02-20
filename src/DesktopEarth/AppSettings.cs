@@ -75,12 +75,19 @@ public class AppSettings
     // Unified api.data.gov API key (works for NASA APOD, NPS, and Smithsonian)
     public string ApiDataGovKey { get; set; } = "DEMO_KEY";
 
+    // Image quality filter (minimum quality for still images)
+    public ImageQualityTier MinImageQuality { get; set; } = ImageQualityTier.SD;
+
     // Random rotation
     public bool RandomRotationEnabled { get; set; } = false;
     public bool RandomFromFavoritesOnly { get; set; } = false;
 
     // Favorites
     public List<FavoriteImage> Favorites { get; set; } = new();
+
+    // Window state (remembered across sessions)
+    public int WindowWidth { get; set; } = 560;
+    public int WindowHeight { get; set; } = 790;
 
     // Per-display configurations (used when MultiMonitorMode == PerDisplay)
     public List<DisplayConfig> DisplayConfigs { get; set; } = new();
@@ -132,6 +139,9 @@ public class DisplayConfig
     public string SmithsonianSelectedId { get; set; } = "";
     public string SmithsonianSelectedImageUrl { get; set; } = "";
 
+    // Image quality filter
+    public ImageQualityTier MinImageQuality { get; set; } = ImageQualityTier.SD;
+
     // Random rotation
     public bool RandomRotationEnabled { get; set; } = false;
     public bool RandomFromFavoritesOnly { get; set; } = false;
@@ -155,3 +165,4 @@ public enum ImageSource { NasaEpic, NasaApod, NationalParks, Smithsonian }
 public enum ImageStyle { Topo, TopoBathy }
 public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
 public enum EpicImageType { Natural, Enhanced }
+public enum ImageQualityTier { Unknown, SD, HD, UD }
