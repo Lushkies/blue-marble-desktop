@@ -64,6 +64,21 @@ public class SettingsForm : Form
     private RadioButton _topoRadio = null!;
     private RadioButton _topoBathyRadio = null!;
 
+    // Globe/map controls panel (hidden when EPIC view is selected)
+    private Panel _globeControlsPanel = null!;
+
+    // EPIC controls panel (shown only when NASA EPIC view is selected)
+    private Panel _epicPanel = null!;
+    private ComboBox _epicTypeCombo = null!;
+    private RadioButton _epicLatestRadio = null!;
+    private RadioButton _epicDateRadio = null!;
+    private DateTimePicker _epicDatePicker = null!;
+    private ListBox _epicImageList = null!;
+    private Label _epicStatusLabel = null!;
+    private Button _epicRefreshButton = null!;
+    private readonly EpicApiClient _epicApi = new();
+    private DateTime _lastEpicRefresh = DateTime.MinValue;
+
     // System tab controls
     private ComboBox _updateIntervalCombo = null!;
     private CheckBox _runOnStartupCheck = null!;
@@ -179,6 +194,12 @@ public class SettingsForm : Form
         s.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
         s.AmbientLight = _ambientSlider.Value / 100f;
         s.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
+
+        // EPIC settings
+        s.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
+        s.EpicUseLatest = _epicLatestRadio.Checked;
+        s.EpicSelectedDate = _epicDatePicker.Value.ToString("yyyy-MM-dd");
+        s.EpicSelectedImage = _epicImageList.SelectedItem is EpicImageInfo sel ? sel.Image : "";
     }
 
     private void SaveAppearanceToDisplayConfig(DisplayConfig config)
@@ -198,6 +219,12 @@ public class SettingsForm : Form
         config.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
         config.AmbientLight = _ambientSlider.Value / 100f;
         config.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
+
+        // EPIC settings
+        config.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
+        config.EpicUseLatest = _epicLatestRadio.Checked;
+        config.EpicSelectedDate = _epicDatePicker.Value.ToString("yyyy-MM-dd");
+        config.EpicSelectedImage = _epicImageList.SelectedItem is EpicImageInfo sel ? sel.Image : "";
     }
 
     private DisplayConfig GetOrCreateDisplayConfig(string deviceName)
@@ -258,205 +285,13 @@ public class SettingsForm : Form
     private TabPage CreateAppearanceTab()
     {
         var tab = new TabPage("Appearance");
-        tab.AutoScroll = false;
+        tab.AutoScroll = true; // Scrollbar for longer content
         int y = 10;
 
-        // ── Display mode ──
-        tab.Controls.Add(MakeLabel("View:", LeftMargin, y + 3));
-        _displayModeCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(100, y),
-            Width = 150
-        };
-        _displayModeCombo.Items.AddRange(["Globe", "Flat Map", "Moon"]);
-        _displayModeCombo.SelectedIndexChanged += (_, _) =>
-        {
-            UpdateModeVisibility();
-            SchedulePreview();
-        };
-        tab.Controls.Add(_displayModeCombo);
+        // ══════════════════════════════════════════════════════════
+        //  MULTI-DISPLAY MODE (moved from System tab)
+        // ══════════════════════════════════════════════════════════
 
-        // ── Location preset ──
-        tab.Controls.Add(MakeLabel("Location:", 270, y + 3));
-        _locationCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(340, y),
-            Width = 120
-        };
-        foreach (var preset in LocationPresets)
-            _locationCombo.Items.Add(preset.Name);
-        _locationCombo.SelectedIndex = 0;
-        _locationCombo.SelectedIndexChanged += (_, _) =>
-        {
-            if (_isLoading || _locationCombo.SelectedIndex <= 0) return;
-            var preset = LocationPresets[_locationCombo.SelectedIndex];
-            _isLoading = true;
-            _longitudeSlider.Value = Math.Clamp((int)preset.Lon, -180, 180);
-            _longitudeValue.Text = preset.Lon.ToString("F0") + "\u00b0";
-            _latitudeSlider.Value = Math.Clamp((int)preset.Lat, -60, 60);
-            _latitudeValue.Text = preset.Lat.ToString("F0") + "\u00b0";
-            _isLoading = false;
-            SchedulePreview();
-        };
-        tab.Controls.Add(_locationCombo);
-        y += 30;
-
-        // ── Spherical panel (longitude + latitude — disabled in flat map mode) ──
-        _sphericalPanel = new Panel
-        {
-            Location = new Point(0, y),
-            Size = new Size(480, (LabelHeight + SliderRowHeight + RowGap) * 2),
-        };
-        int sy = 0;
-
-        // Longitude
-        _sphericalPanel.Controls.Add(MakeLabel("Longitude:", LeftMargin, sy));
-        _longitudeValue = MakeLabel("-100\u00b0", RightValueX, sy);
-        _sphericalPanel.Controls.Add(_longitudeValue);
-        sy += LabelHeight;
-        _longitudeSlider = MakeSlider(LeftMargin, sy, -180, 180, -100);
-        _longitudeSlider.Scroll += (_, _) =>
-        {
-            _longitudeValue.Text = _longitudeSlider.Value + "\u00b0";
-            _locationCombo.SelectedIndex = 0; // Switch to "Custom"
-            SchedulePreview();
-        };
-        _sphericalPanel.Controls.Add(_longitudeSlider);
-        sy += SliderRowHeight + RowGap;
-
-        // Latitude
-        _sphericalPanel.Controls.Add(MakeLabel("Latitude:", LeftMargin, sy));
-        _latitudeValue = MakeLabel("42\u00b0", RightValueX, sy);
-        _sphericalPanel.Controls.Add(_latitudeValue);
-        sy += LabelHeight;
-        _latitudeSlider = MakeSlider(LeftMargin, sy, -60, 60, 42);
-        _latitudeSlider.Scroll += (_, _) =>
-        {
-            _latitudeValue.Text = _latitudeSlider.Value + "\u00b0";
-            _locationCombo.SelectedIndex = 0; // Switch to "Custom"
-            SchedulePreview();
-        };
-        _sphericalPanel.Controls.Add(_latitudeSlider);
-
-        tab.Controls.Add(_sphericalPanel);
-        y += _sphericalPanel.Height;
-
-        // ── Zoom (combined distance + FoV) ──
-        // Slider 1..100, default 100 (extreme close-up). Higher = more zoomed in.
-        y = AddSliderRow(tab, "Zoom:", "100", LeftMargin, y, 1, 100, 100, SliderWidth,
-            out _zoomSlider, out _zoomValue,
-            (s, v) => v.Text = s.Value.ToString());
-
-        // ── Image offset X/Y (Globe + Moon only) ──
-        y = AddSliderRow(tab, "Horizontal offset:", "0", LeftMargin, y, -25, 25, 0, SliderWidth,
-            out _offsetXSlider, out _offsetXValue,
-            (s, v) => v.Text = s.Value.ToString());
-
-        y = AddSliderRow(tab, "Vertical offset:", "-15", LeftMargin, y, -25, 25, -15, SliderWidth,
-            out _offsetYSlider, out _offsetYValue,
-            (s, v) => v.Text = s.Value.ToString());
-
-        // ── Night lights ──
-        _nightLightsCheck = new CheckBox
-        {
-            Text = "City lights at night",
-            AutoSize = true,
-            Location = new Point(LeftMargin, y)
-        };
-        _nightLightsCheck.CheckedChanged += (_, _) =>
-        {
-            _nightBrightnessSlider.Enabled = _nightLightsCheck.Checked;
-            SchedulePreview();
-        };
-        tab.Controls.Add(_nightLightsCheck);
-        y += 24;
-
-        y = AddSliderRow(tab, "Brightness:", "1.7", IndentMargin, y, 1, 30, 17, IndentSliderWidth,
-            out _nightBrightnessSlider, out _nightBrightnessValue,
-            (s, v) => v.Text = (s.Value / 10f).ToString("F1"));
-
-        // ── Daytime light ──
-        y = AddSliderRow(tab, "Daytime light:", "0.15", LeftMargin, y, 0, 50, 15, SliderWidth,
-            out _ambientSlider, out _ambientValue,
-            (s, v) => v.Text = (s.Value / 100f).ToString("F2"));
-
-        // ── Earth image style ──
-        var styleGroup = new GroupBox
-        {
-            Text = "Earth image style",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(440, 65)
-        };
-
-        _topoRadio = new RadioButton
-        {
-            Text = "Topographic (land only)",
-            AutoSize = true,
-            Location = new Point(15, 20)
-        };
-        _topoRadio.CheckedChanged += (_, _) => SchedulePreview();
-
-        _topoBathyRadio = new RadioButton
-        {
-            Text = "Topographic + Bathymetry (land + ocean floor)",
-            AutoSize = true,
-            Location = new Point(15, 42)
-        };
-        _topoBathyRadio.CheckedChanged += (_, _) => SchedulePreview();
-
-        styleGroup.Controls.AddRange([_topoRadio, _topoBathyRadio]);
-        tab.Controls.Add(styleGroup);
-        y += 75;
-
-        // ── Reset to defaults ──
-        var resetButton = new Button
-        {
-            Text = "Reset to Defaults",
-            Location = new Point(LeftMargin, y),
-            Width = 140,
-            Height = 30
-        };
-        resetButton.Click += (_, _) => ResetToDefaults();
-        tab.Controls.Add(resetButton);
-
-        return tab;
-    }
-
-    private TabPage CreateSystemTab()
-    {
-        var tab = new TabPage("System");
-        int y = 15;
-
-        // Update interval
-        tab.Controls.Add(MakeLabel("Update every:", LeftMargin, y + 3));
-        _updateIntervalCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(180, y),
-            Width = 270
-        };
-        _updateIntervalCombo.Items.AddRange([
-            "1 minute", "2 minutes", "5 minutes", "10 minutes",
-            "15 minutes", "30 minutes", "1 hour"
-        ]);
-        _updateIntervalCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
-        tab.Controls.Add(_updateIntervalCombo);
-        y += 35;
-
-        // Run on startup
-        _runOnStartupCheck = new CheckBox
-        {
-            Text = "Run Blue Marble Desktop when Windows starts",
-            AutoSize = true,
-            Location = new Point(LeftMargin, y)
-        };
-        _runOnStartupCheck.CheckedChanged += (_, _) => SchedulePreview();
-        tab.Controls.Add(_runOnStartupCheck);
-        y += 35;
-
-        // Multi-monitor
         var monitorGroup = new GroupBox
         {
             Text = "Multi-Display Mode",
@@ -554,6 +389,361 @@ public class SettingsForm : Form
         tab.Controls.Add(_perDisplayPanel);
         y += 50;
 
+        // ══════════════════════════════════════════════════════════
+        //  VIEW MODE
+        // ══════════════════════════════════════════════════════════
+
+        tab.Controls.Add(MakeLabel("View:", LeftMargin, y + 3));
+        _displayModeCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(100, y),
+            Width = 150
+        };
+        _displayModeCombo.Items.AddRange(["Globe", "Flat Map", "Moon", "NASA EPIC"]);
+        _displayModeCombo.SelectedIndexChanged += (_, _) =>
+        {
+            UpdateModeVisibility();
+            SchedulePreview();
+        };
+        tab.Controls.Add(_displayModeCombo);
+        y += 35;
+
+        // ══════════════════════════════════════════════════════════
+        //  GLOBE/MAP CONTROLS PANEL (hidden when EPIC is selected)
+        // ══════════════════════════════════════════════════════════
+
+        _globeControlsPanel = new Panel
+        {
+            Location = new Point(0, y),
+            Size = new Size(480, 520), // Will be auto-sized below
+        };
+        int gy = 0; // local Y within the globe controls panel
+
+        // ── Location preset ──
+        _globeControlsPanel.Controls.Add(MakeLabel("Location:", LeftMargin, gy + 3));
+        _locationCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(100, gy),
+            Width = 150
+        };
+        foreach (var preset in LocationPresets)
+            _locationCombo.Items.Add(preset.Name);
+        _locationCombo.SelectedIndex = 0;
+        _locationCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (_isLoading || _locationCombo.SelectedIndex <= 0) return;
+            var preset = LocationPresets[_locationCombo.SelectedIndex];
+            _isLoading = true;
+            _longitudeSlider.Value = Math.Clamp((int)preset.Lon, -180, 180);
+            _longitudeValue.Text = preset.Lon.ToString("F0") + "\u00b0";
+            _latitudeSlider.Value = Math.Clamp((int)preset.Lat, -60, 60);
+            _latitudeValue.Text = preset.Lat.ToString("F0") + "\u00b0";
+            _isLoading = false;
+            SchedulePreview();
+        };
+        _globeControlsPanel.Controls.Add(_locationCombo);
+        gy += 30;
+
+        // ── Spherical panel (longitude + latitude — disabled in flat map mode) ──
+        _sphericalPanel = new Panel
+        {
+            Location = new Point(0, gy),
+            Size = new Size(480, (LabelHeight + SliderRowHeight + RowGap) * 2),
+        };
+        int sy = 0;
+
+        // Longitude
+        _sphericalPanel.Controls.Add(MakeLabel("Longitude:", LeftMargin, sy));
+        _longitudeValue = MakeLabel("-100\u00b0", RightValueX, sy);
+        _sphericalPanel.Controls.Add(_longitudeValue);
+        sy += LabelHeight;
+        _longitudeSlider = MakeSlider(LeftMargin, sy, -180, 180, -100);
+        _longitudeSlider.Scroll += (_, _) =>
+        {
+            _longitudeValue.Text = _longitudeSlider.Value + "\u00b0";
+            _locationCombo.SelectedIndex = 0; // Switch to "Custom"
+            SchedulePreview();
+        };
+        _sphericalPanel.Controls.Add(_longitudeSlider);
+        sy += SliderRowHeight + RowGap;
+
+        // Latitude
+        _sphericalPanel.Controls.Add(MakeLabel("Latitude:", LeftMargin, sy));
+        _latitudeValue = MakeLabel("42\u00b0", RightValueX, sy);
+        _sphericalPanel.Controls.Add(_latitudeValue);
+        sy += LabelHeight;
+        _latitudeSlider = MakeSlider(LeftMargin, sy, -60, 60, 42);
+        _latitudeSlider.Scroll += (_, _) =>
+        {
+            _latitudeValue.Text = _latitudeSlider.Value + "\u00b0";
+            _locationCombo.SelectedIndex = 0; // Switch to "Custom"
+            SchedulePreview();
+        };
+        _sphericalPanel.Controls.Add(_latitudeSlider);
+
+        _globeControlsPanel.Controls.Add(_sphericalPanel);
+        gy += _sphericalPanel.Height;
+
+        // ── Zoom (combined distance + FoV) ──
+        gy = AddSliderRow(_globeControlsPanel, "Zoom:", "100", LeftMargin, gy, 1, 100, 100, SliderWidth,
+            out _zoomSlider, out _zoomValue,
+            (s, v) => v.Text = s.Value.ToString());
+
+        // ── Image offset X/Y ──
+        gy = AddSliderRow(_globeControlsPanel, "Horizontal offset:", "0", LeftMargin, gy, -25, 25, 0, SliderWidth,
+            out _offsetXSlider, out _offsetXValue,
+            (s, v) => v.Text = s.Value.ToString());
+
+        gy = AddSliderRow(_globeControlsPanel, "Vertical offset:", "-15", LeftMargin, gy, -25, 25, -15, SliderWidth,
+            out _offsetYSlider, out _offsetYValue,
+            (s, v) => v.Text = s.Value.ToString());
+
+        // ── Night lights ──
+        _nightLightsCheck = new CheckBox
+        {
+            Text = "City lights at night",
+            AutoSize = true,
+            Location = new Point(LeftMargin, gy)
+        };
+        _nightLightsCheck.CheckedChanged += (_, _) =>
+        {
+            _nightBrightnessSlider.Enabled = _nightLightsCheck.Checked;
+            SchedulePreview();
+        };
+        _globeControlsPanel.Controls.Add(_nightLightsCheck);
+        gy += 24;
+
+        gy = AddSliderRow(_globeControlsPanel, "Brightness:", "1.7", IndentMargin, gy, 1, 30, 17, IndentSliderWidth,
+            out _nightBrightnessSlider, out _nightBrightnessValue,
+            (s, v) => v.Text = (s.Value / 10f).ToString("F1"));
+
+        // ── Daytime light ──
+        gy = AddSliderRow(_globeControlsPanel, "Daytime light:", "0.15", LeftMargin, gy, 0, 50, 15, SliderWidth,
+            out _ambientSlider, out _ambientValue,
+            (s, v) => v.Text = (s.Value / 100f).ToString("F2"));
+
+        // ── Earth image style ──
+        var styleGroup = new GroupBox
+        {
+            Text = "Earth image style",
+            Location = new Point(LeftMargin, gy),
+            Size = new Size(440, 65)
+        };
+
+        _topoRadio = new RadioButton
+        {
+            Text = "Topographic (land only)",
+            AutoSize = true,
+            Location = new Point(15, 20)
+        };
+        _topoRadio.CheckedChanged += (_, _) => SchedulePreview();
+
+        _topoBathyRadio = new RadioButton
+        {
+            Text = "Topographic + Bathymetry (land + ocean floor)",
+            AutoSize = true,
+            Location = new Point(15, 42)
+        };
+        _topoBathyRadio.CheckedChanged += (_, _) => SchedulePreview();
+
+        styleGroup.Controls.AddRange([_topoRadio, _topoBathyRadio]);
+        _globeControlsPanel.Controls.Add(styleGroup);
+        gy += 75;
+
+        // ── Reset to defaults ──
+        var resetButton = new Button
+        {
+            Text = "Reset to Defaults",
+            Location = new Point(LeftMargin, gy),
+            Width = 140,
+            Height = 30
+        };
+        resetButton.Click += (_, _) => ResetToDefaults();
+        _globeControlsPanel.Controls.Add(resetButton);
+        gy += 40;
+
+        // Size the globe controls panel to fit its content
+        _globeControlsPanel.Size = new Size(480, gy);
+        tab.Controls.Add(_globeControlsPanel);
+
+        // ══════════════════════════════════════════════════════════
+        //  NASA EPIC CONTROLS PANEL (shown only when EPIC is selected)
+        // ══════════════════════════════════════════════════════════
+
+        _epicPanel = new Panel
+        {
+            Location = new Point(0, y), // Same Y position as globe controls
+            Size = new Size(480, 380),
+            Visible = false
+        };
+        int ey = 0; // local Y within the EPIC panel
+
+        // Image type
+        _epicPanel.Controls.Add(MakeLabel("Image type:", LeftMargin, ey + 3));
+        _epicTypeCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(120, ey),
+            Width = 150
+        };
+        _epicTypeCombo.Items.AddRange(["Natural Color", "Enhanced Color"]);
+        _epicTypeCombo.SelectedIndex = 0;
+        _epicTypeCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_isLoading) RefreshEpicImages();
+            SchedulePreview();
+        };
+        _epicPanel.Controls.Add(_epicTypeCombo);
+        ey += 35;
+
+        // Latest vs specific date
+        _epicLatestRadio = new RadioButton
+        {
+            Text = "Show latest image",
+            AutoSize = true,
+            Location = new Point(LeftMargin, ey),
+            Checked = true
+        };
+        _epicLatestRadio.CheckedChanged += (_, _) =>
+        {
+            _epicDatePicker.Enabled = !_epicLatestRadio.Checked;
+            if (!_isLoading && _epicLatestRadio.Checked) RefreshEpicImages();
+            SchedulePreview();
+        };
+        _epicPanel.Controls.Add(_epicLatestRadio);
+        ey += 25;
+
+        _epicDateRadio = new RadioButton
+        {
+            Text = "Choose date:",
+            AutoSize = true,
+            Location = new Point(LeftMargin, ey)
+        };
+        _epicDateRadio.CheckedChanged += (_, _) =>
+        {
+            _epicDatePicker.Enabled = _epicDateRadio.Checked;
+            if (!_isLoading && _epicDateRadio.Checked) RefreshEpicImages();
+            SchedulePreview();
+        };
+        _epicPanel.Controls.Add(_epicDateRadio);
+
+        _epicDatePicker = new DateTimePicker
+        {
+            Location = new Point(140, ey - 2),
+            Width = 170,
+            Format = DateTimePickerFormat.Short,
+            Value = DateTime.Now.AddDays(-1), // EPIC has ~1-day lag
+            MaxDate = DateTime.Now,
+            MinDate = new DateTime(2015, 6, 13), // EPIC mission start
+            Enabled = false
+        };
+        _epicDatePicker.ValueChanged += (_, _) =>
+        {
+            if (!_isLoading && _epicDateRadio.Checked) RefreshEpicImages();
+            SchedulePreview();
+        };
+        _epicPanel.Controls.Add(_epicDatePicker);
+        ey += 35;
+
+        // Available images list
+        _epicPanel.Controls.Add(MakeLabel("Available images:", LeftMargin, ey));
+        ey += 20;
+
+        _epicImageList = new ListBox
+        {
+            Location = new Point(LeftMargin, ey),
+            Size = new Size(440, 140),
+            Font = new Font("Segoe UI", 9)
+        };
+        _epicImageList.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_isLoading) SchedulePreview();
+        };
+        _epicPanel.Controls.Add(_epicImageList);
+        ey += 150;
+
+        // Status label
+        _epicStatusLabel = new Label
+        {
+            Text = "Select NASA EPIC view to load satellite images.",
+            Location = new Point(LeftMargin, ey),
+            Size = new Size(440, 40),
+            Font = new Font("Segoe UI", 8.5f),
+            ForeColor = Color.Gray
+        };
+        _epicPanel.Controls.Add(_epicStatusLabel);
+        ey += 45;
+
+        // Refresh button + Reset button
+        _epicRefreshButton = new Button
+        {
+            Text = "Refresh",
+            Location = new Point(LeftMargin, ey),
+            Width = 100,
+            Height = 30
+        };
+        _epicRefreshButton.Click += (_, _) =>
+        {
+            // 5-second cooldown
+            if ((DateTime.Now - _lastEpicRefresh).TotalSeconds < 5)
+            {
+                _epicStatusLabel.Text = "Please wait a few seconds before refreshing.";
+                _epicStatusLabel.ForeColor = Color.Gray;
+                return;
+            }
+            RefreshEpicImages();
+        };
+        _epicPanel.Controls.Add(_epicRefreshButton);
+
+        var epicResetButton = new Button
+        {
+            Text = "Reset to Defaults",
+            Location = new Point(130, ey),
+            Width = 140,
+            Height = 30
+        };
+        epicResetButton.Click += (_, _) => ResetToDefaults();
+        _epicPanel.Controls.Add(epicResetButton);
+
+        tab.Controls.Add(_epicPanel);
+
+        return tab;
+    }
+
+    private TabPage CreateSystemTab()
+    {
+        var tab = new TabPage("System");
+        int y = 15;
+
+        // Update interval
+        tab.Controls.Add(MakeLabel("Update every:", LeftMargin, y + 3));
+        _updateIntervalCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(180, y),
+            Width = 270
+        };
+        _updateIntervalCombo.Items.AddRange([
+            "1 minute", "2 minutes", "5 minutes", "10 minutes",
+            "15 minutes", "30 minutes", "1 hour"
+        ]);
+        _updateIntervalCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
+        tab.Controls.Add(_updateIntervalCombo);
+        y += 35;
+
+        // Run on startup
+        _runOnStartupCheck = new CheckBox
+        {
+            Text = "Run Blue Marble Desktop when Windows starts",
+            AutoSize = true,
+            Location = new Point(LeftMargin, y)
+        };
+        _runOnStartupCheck.CheckedChanged += (_, _) => SchedulePreview();
+        tab.Controls.Add(_runOnStartupCheck);
+        y += 35;
+
         // Render resolution
         tab.Controls.Add(MakeLabel("Render resolution:", LeftMargin, y + 3));
         _renderResCombo = new ComboBox
@@ -585,7 +775,7 @@ public class SettingsForm : Form
         var hdStatusLabel = new Label
         {
             Text = hdAvailable
-                ? "✓ HD textures installed (21600×10800 day, Black Marble night)"
+                ? "\u2713 HD textures installed (21600\u00d710800 day, Black Marble night)"
                 : $"Standard textures in use. Download ~{HiResTextureManager.GetEstimatedDownloadSizeMB()} MB for HD quality.",
             AutoSize = true,
             Location = new Point(15, 22),
@@ -633,7 +823,7 @@ public class SettingsForm : Form
                 hdButton.Text = success ? "Re-download HD Textures" : "Retry Download";
                 if (success)
                 {
-                    hdStatusLabel.Text = "✓ HD textures installed! Restart app or change a setting to use them.";
+                    hdStatusLabel.Text = "\u2713 HD textures installed! Restart app or change a setting to use them.";
                     _renderScheduler.TriggerUpdate();
                 }
             }
@@ -670,20 +860,92 @@ public class SettingsForm : Form
     {
         bool isFlatMap = _displayModeCombo.SelectedIndex == 1;
         bool isMoon = _displayModeCombo.SelectedIndex == 2;
+        bool isEpic = _displayModeCombo.SelectedIndex == 3;
 
-        // In flat map mode: disable controls that don't apply
-        _sphericalPanel.Enabled = !isFlatMap;
-        _zoomSlider.Enabled = !isFlatMap;
-        _offsetXSlider.Enabled = !isFlatMap;
-        _offsetYSlider.Enabled = !isFlatMap;
+        // Toggle between globe/map controls and EPIC controls
+        _globeControlsPanel.Visible = !isEpic;
+        _epicPanel.Visible = isEpic;
 
-        // Location presets only apply to Globe view (lon/lat sliders still work for Moon)
-        _locationCombo.Enabled = !isFlatMap && !isMoon;
+        // Globe/map-specific enable/disable
+        if (!isEpic)
+        {
+            _sphericalPanel.Enabled = !isFlatMap;
+            _zoomSlider.Enabled = !isFlatMap;
+            _offsetXSlider.Enabled = !isFlatMap;
+            _offsetYSlider.Enabled = !isFlatMap;
+            _locationCombo.Enabled = !isFlatMap && !isMoon;
+        }
+
+        // When switching to EPIC, load the image list
+        if (isEpic && _epicImageList.Items.Count == 0)
+        {
+            RefreshEpicImages();
+        }
     }
 
     private void UpdatePerDisplayVisibility()
     {
         _perDisplayPanel.Visible = _perDisplayRadio.Checked;
+    }
+
+    /// <summary>
+    /// Fetch EPIC images from the API and populate the image list.
+    /// Runs async to avoid blocking the UI thread.
+    /// </summary>
+    private void RefreshEpicImages()
+    {
+        _lastEpicRefresh = DateTime.Now;
+        _epicStatusLabel.Text = "Loading images from NASA EPIC...";
+        _epicStatusLabel.ForeColor = Color.Gray;
+        _epicRefreshButton.Enabled = false;
+        _epicImageList.Items.Clear();
+
+        var imageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
+        bool useLatest = _epicLatestRadio.Checked;
+        string date = _epicDatePicker.Value.ToString("yyyy-MM-dd");
+
+        Task.Run(async () =>
+        {
+            List<EpicImageInfo>? images;
+
+            if (useLatest)
+                images = await _epicApi.GetLatestImagesAsync(imageType);
+            else
+                images = await _epicApi.GetImagesByDateAsync(imageType, date);
+
+            // Update UI on the UI thread
+            if (IsDisposed) return;
+
+            try
+            {
+                Invoke(() =>
+                {
+                    _epicRefreshButton.Enabled = true;
+
+                    if (images == null || images.Count == 0)
+                    {
+                        _epicStatusLabel.Text = images == null
+                            ? "Could not connect to NASA EPIC. Check your internet connection."
+                            : $"No images available for {(useLatest ? "the latest date" : date)}. Try another date.";
+                        _epicStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                        return;
+                    }
+
+                    foreach (var img in images)
+                        _epicImageList.Items.Add(img);
+
+                    if (_epicImageList.Items.Count > 0)
+                        _epicImageList.SelectedIndex = 0;
+
+                    _epicStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} available. Select one to set as wallpaper.";
+                    _epicStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
+                });
+            }
+            catch (ObjectDisposedException)
+            {
+                // Form was closed during async operation
+            }
+        });
     }
 
     private static int CameraToZoomSlider(float distance)
@@ -706,7 +968,7 @@ public class SettingsForm : Form
 
         _isLoading = true;
 
-        _displayModeCombo.SelectedIndex = (int)config.DisplayMode;
+        _displayModeCombo.SelectedIndex = Math.Min((int)config.DisplayMode, _displayModeCombo.Items.Count - 1);
         _longitudeSlider.Value = Math.Clamp((int)config.LongitudeOffset, -180, 180);
         _longitudeValue.Text = config.LongitudeOffset.ToString("F0") + "\u00b0";
         _latitudeSlider.Value = Math.Clamp((int)config.CameraTilt, -60, 60);
@@ -727,6 +989,14 @@ public class SettingsForm : Form
             _topoBathyRadio.Checked = true;
         else
             _topoRadio.Checked = true;
+
+        // EPIC settings
+        _epicTypeCombo.SelectedIndex = (int)config.EpicImageType;
+        _epicLatestRadio.Checked = config.EpicUseLatest;
+        _epicDateRadio.Checked = !config.EpicUseLatest;
+        if (!string.IsNullOrEmpty(config.EpicSelectedDate) &&
+            DateTime.TryParse(config.EpicSelectedDate, out var epicDate))
+            _epicDatePicker.Value = epicDate;
 
         _locationCombo.SelectedIndex = 0; // Custom
         UpdateModeVisibility();
@@ -758,6 +1028,10 @@ public class SettingsForm : Form
         _topoBathyRadio.Checked = true;
         _locationCombo.SelectedIndex = 0; // Custom
 
+        // EPIC defaults
+        _epicTypeCombo.SelectedIndex = 0; // Natural
+        _epicLatestRadio.Checked = true;
+
         UpdateModeVisibility();
         _isLoading = false;
         SchedulePreview();
@@ -767,7 +1041,7 @@ public class SettingsForm : Form
     {
         _isLoading = true;
 
-        _displayModeCombo.SelectedIndex = (int)_settings.DisplayMode;
+        _displayModeCombo.SelectedIndex = Math.Min((int)_settings.DisplayMode, _displayModeCombo.Items.Count - 1);
         _longitudeSlider.Value = Math.Clamp((int)_settings.LongitudeOffset, -180, 180);
         _longitudeValue.Text = _settings.LongitudeOffset.ToString("F0") + "\u00b0";
         _latitudeSlider.Value = Math.Clamp((int)_settings.CameraTilt, -60, 60);
@@ -788,6 +1062,14 @@ public class SettingsForm : Form
             _topoBathyRadio.Checked = true;
         else
             _topoRadio.Checked = true;
+
+        // EPIC settings
+        _epicTypeCombo.SelectedIndex = (int)_settings.EpicImageType;
+        _epicLatestRadio.Checked = _settings.EpicUseLatest;
+        _epicDateRadio.Checked = !_settings.EpicUseLatest;
+        if (!string.IsNullOrEmpty(_settings.EpicSelectedDate) &&
+            DateTime.TryParse(_settings.EpicSelectedDate, out var epicDate))
+            _epicDatePicker.Value = epicDate;
 
         _locationCombo.SelectedIndex = 0; // Custom
         UpdateModeVisibility();

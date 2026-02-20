@@ -43,6 +43,12 @@ public class AppSettings
     // Ambient light level
     public float AmbientLight { get; set; } = 0.15f;
 
+    // NASA EPIC settings
+    public EpicImageType EpicImageType { get; set; } = EpicImageType.Natural;
+    public bool EpicUseLatest { get; set; } = true;
+    public string EpicSelectedDate { get; set; } = "";
+    public string EpicSelectedImage { get; set; } = "";
+
     // Per-display configurations (used when MultiMonitorMode == PerDisplay)
     public List<DisplayConfig> DisplayConfigs { get; set; } = new();
 }
@@ -64,8 +70,15 @@ public class DisplayConfig
     public float ImageOffsetX { get; set; } = 0.0f;
     public float ImageOffsetY { get; set; } = 0.0f;
     public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
+
+    // NASA EPIC settings
+    public EpicImageType EpicImageType { get; set; } = EpicImageType.Natural;
+    public bool EpicUseLatest { get; set; } = true;
+    public string EpicSelectedDate { get; set; } = "";
+    public string EpicSelectedImage { get; set; } = "";
 }
 
-public enum DisplayMode { Spherical, FlatMap, Moon }
+public enum DisplayMode { Spherical, FlatMap, Moon, NasaEpic }
 public enum ImageStyle { Topo, TopoBathy }
 public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
+public enum EpicImageType { Natural, Enhanced }

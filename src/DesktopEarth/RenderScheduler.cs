@@ -20,6 +20,11 @@ public class RenderScheduler : IDisposable
     private readonly ManualResetEventSlim _renderNowSignal = new(false);
     private readonly string _wallpaperPath;
 
+    // EPIC support
+    private readonly EpicApiClient _epicApi = new();
+    private readonly EpicImageCache _epicCache = new();
+    private string? _lastEpicImagePath; // Track last rendered EPIC image to avoid re-downloads
+
     public event Action<string>? StatusChanged;
 
     public RenderScheduler(SettingsManager settingsManager, AssetLocator assets)
@@ -74,6 +79,7 @@ public class RenderScheduler : IDisposable
         EarthRenderer? earthRenderer = null;
         FlatMapRenderer? flatMapRenderer = null;
         MoonRenderer? moonRenderer = null;
+        StillImageRenderer? stillImageRenderer = null;
         DisplayMode currentMode = settings.DisplayMode;
         ImageStyle currentImageStyle = settings.ImageStyle;
 
@@ -86,8 +92,10 @@ public class RenderScheduler : IDisposable
         window.Load += () =>
         {
             gl = GL.GetApi(window);
-            InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+            InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
             ReportStatus("Renderer initialized.");
+            // Clean old EPIC cache on startup
+            _epicCache.CleanOldCache();
         };
 
         window.Render += (_) =>
@@ -120,7 +128,7 @@ public class RenderScheduler : IDisposable
                 {
                     // Per-display rendering: render each monitor independently
                     RenderPerDisplay(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer,
-                        ref currentMode, ref currentImageStyle);
+                        ref stillImageRenderer, ref currentMode, ref currentImageStyle);
                 }
                 else
                 {
@@ -132,24 +140,33 @@ public class RenderScheduler : IDisposable
                     {
                         currentMode = settings.DisplayMode;
                         currentImageStyle = settings.ImageStyle;
-                        DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
-                        InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+                        DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
+                        InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
                     }
 
                     string modeName = settings.DisplayMode switch
                     {
                         DisplayMode.FlatMap => "flat map",
                         DisplayMode.Moon => "moon",
+                        DisplayMode.NasaEpic => "NASA EPIC",
                         _ => "earth"
                     };
                     ReportStatus($"Rendering {modeName}...");
 
-                    byte[] pixels = settings.DisplayMode switch
+                    byte[] pixels;
+                    if (settings.DisplayMode == DisplayMode.NasaEpic)
                     {
-                        DisplayMode.FlatMap => flatMapRenderer!.Render(renderWidth, renderHeight),
-                        DisplayMode.Moon => moonRenderer!.Render(renderWidth, renderHeight),
-                        _ => earthRenderer!.Render(renderWidth, renderHeight),
-                    };
+                        pixels = RenderEpicImage(gl, settings, ref stillImageRenderer, renderWidth, renderHeight);
+                    }
+                    else
+                    {
+                        pixels = settings.DisplayMode switch
+                        {
+                            DisplayMode.FlatMap => flatMapRenderer!.Render(renderWidth, renderHeight),
+                            DisplayMode.Moon => moonRenderer!.Render(renderWidth, renderHeight),
+                            _ => earthRenderer!.Render(renderWidth, renderHeight),
+                        };
+                    }
 
                     SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
                     WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
@@ -166,7 +183,7 @@ public class RenderScheduler : IDisposable
 
         window.Closing += () =>
         {
-            DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+            DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
         };
 
         try
@@ -181,6 +198,7 @@ public class RenderScheduler : IDisposable
 
     private void RenderPerDisplay(GL gl, AppSettings settings,
         ref EarthRenderer? earthRenderer, ref FlatMapRenderer? flatMapRenderer, ref MoonRenderer? moonRenderer,
+        ref StillImageRenderer? stillImageRenderer,
         ref DisplayMode currentMode, ref ImageStyle currentImageStyle)
     {
         var screens = MonitorManager.GetAllScreens();
@@ -222,23 +240,35 @@ public class RenderScheduler : IDisposable
                 NightLightsBrightness = displayConfig?.NightLightsBrightness ?? settings.NightLightsBrightness,
                 AmbientLight = displayConfig?.AmbientLight ?? settings.AmbientLight,
                 ImageStyle = displayConfig?.ImageStyle ?? settings.ImageStyle,
+                EpicImageType = displayConfig?.EpicImageType ?? settings.EpicImageType,
+                EpicUseLatest = displayConfig?.EpicUseLatest ?? settings.EpicUseLatest,
+                EpicSelectedDate = displayConfig?.EpicSelectedDate ?? settings.EpicSelectedDate,
+                EpicSelectedImage = displayConfig?.EpicSelectedImage ?? settings.EpicSelectedImage,
             };
 
             // Always create fresh renderers for each display so each gets
             // its own settings (zoom, longitude, etc.). Renderers store a
             // reference to settings at construction time.
-            DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+            DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
             currentMode = displaySettings.DisplayMode;
             currentImageStyle = displaySettings.ImageStyle;
-            InitializeRenderers(gl, displaySettings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer);
+            InitializeRenderers(gl, displaySettings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
 
             // Render this display
-            byte[] pixels = displaySettings.DisplayMode switch
+            byte[] pixels;
+            if (displaySettings.DisplayMode == DisplayMode.NasaEpic)
             {
-                DisplayMode.FlatMap => flatMapRenderer!.Render(sw, sh),
-                DisplayMode.Moon => moonRenderer!.Render(sw, sh),
-                _ => earthRenderer!.Render(sw, sh),
-            };
+                pixels = RenderEpicImage(gl, displaySettings, ref stillImageRenderer, sw, sh);
+            }
+            else
+            {
+                pixels = displaySettings.DisplayMode switch
+                {
+                    DisplayMode.FlatMap => flatMapRenderer!.Render(sw, sh),
+                    DisplayMode.Moon => moonRenderer!.Render(sw, sh),
+                    _ => earthRenderer!.Render(sw, sh),
+                };
+            }
 
             // Place rendered pixels into composite at the correct position (row-span copy)
             int offsetX = screen.Bounds.Left - vdLeft;
@@ -272,7 +302,8 @@ public class RenderScheduler : IDisposable
     }
 
     private void InitializeRenderers(GL gl, AppSettings settings,
-        ref EarthRenderer? earthRenderer, ref FlatMapRenderer? flatMapRenderer, ref MoonRenderer? moonRenderer)
+        ref EarthRenderer? earthRenderer, ref FlatMapRenderer? flatMapRenderer,
+        ref MoonRenderer? moonRenderer, ref StillImageRenderer? stillImageRenderer)
     {
         string dayTexPath = _assets.GetDayTexturePath(settings.ImageStyle);
         string nightTexPath = _assets.GetNightTexturePath();
@@ -297,6 +328,11 @@ public class RenderScheduler : IDisposable
                     earthRenderer.Initialize(gl, dayTexPath, nightTexPath);
                 }
                 break;
+            case DisplayMode.NasaEpic:
+                stillImageRenderer = new StillImageRenderer(settings);
+                stillImageRenderer.Initialize(gl);
+                // Image will be loaded later in RenderEpicImage()
+                break;
             default:
                 earthRenderer = new EarthRenderer(settings);
                 earthRenderer.Initialize(gl, dayTexPath, nightTexPath);
@@ -304,11 +340,117 @@ public class RenderScheduler : IDisposable
         }
     }
 
-    private static void DisposeRenderers(ref EarthRenderer? earth, ref FlatMapRenderer? flatMap, ref MoonRenderer? moon)
+    /// <summary>
+    /// Fetch (or use cached) EPIC image and render it via the StillImageRenderer.
+    /// Returns pixel data for the wallpaper. Falls back to cached images on network errors.
+    /// </summary>
+    private byte[] RenderEpicImage(GL gl, AppSettings settings, ref StillImageRenderer? renderer,
+        int width, int height)
+    {
+        // Ensure renderer exists
+        if (renderer == null)
+        {
+            renderer = new StillImageRenderer(settings);
+            renderer.Initialize(gl);
+        }
+
+        // Try to get an image to display
+        string? imagePath = ResolveEpicImage(settings);
+
+        if (imagePath != null)
+        {
+            renderer.LoadImage(gl, imagePath);
+            return renderer.Render(width, height);
+        }
+
+        // No image available — return black screen
+        return new byte[width * height * 4];
+    }
+
+    /// <summary>
+    /// Resolve which EPIC image file to use: download latest, use specific date, or fall back to cache.
+    /// Returns local file path or null if nothing available.
+    /// </summary>
+    private string? ResolveEpicImage(AppSettings settings)
+    {
+        try
+        {
+            List<EpicImageInfo>? images = null;
+
+            if (settings.EpicUseLatest)
+            {
+                // Get the latest images from the API
+                images = _epicApi.GetLatestImagesAsync(settings.EpicImageType)
+                    .GetAwaiter().GetResult();
+            }
+            else if (!string.IsNullOrEmpty(settings.EpicSelectedDate))
+            {
+                // Get images for the selected date
+                images = _epicApi.GetImagesByDateAsync(settings.EpicImageType, settings.EpicSelectedDate)
+                    .GetAwaiter().GetResult();
+            }
+
+            if (images != null && images.Count > 0)
+            {
+                // If a specific image is selected, find it; otherwise use the first one
+                EpicImageInfo selectedImage;
+                if (!string.IsNullOrEmpty(settings.EpicSelectedImage))
+                {
+                    selectedImage = images.Find(i => i.Image == settings.EpicSelectedImage) ?? images[0];
+                }
+                else
+                {
+                    selectedImage = images[0];
+                }
+
+                // Download (or use cache)
+                var path = _epicApi.DownloadImageAsync(selectedImage, settings.EpicImageType, _epicCache)
+                    .GetAwaiter().GetResult();
+
+                if (path != null)
+                {
+                    _lastEpicImagePath = path;
+                    return path;
+                }
+            }
+
+            // API failed or no images — try cached fallback
+            if (_lastEpicImagePath != null && File.Exists(_lastEpicImagePath))
+            {
+                ReportStatus("EPIC: Using previously loaded image (offline)");
+                return _lastEpicImagePath;
+            }
+
+            var cachedPath = _epicCache.GetLatestCachedImagePath(settings.EpicImageType);
+            if (cachedPath != null)
+            {
+                ReportStatus("EPIC: Using cached image (offline)");
+                _lastEpicImagePath = cachedPath;
+                return cachedPath;
+            }
+
+            ReportStatus("EPIC: No images available");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"EPIC resolve error: {ex.Message}");
+
+            // Fall back to any cached image
+            if (_lastEpicImagePath != null && File.Exists(_lastEpicImagePath))
+                return _lastEpicImagePath;
+
+            return _epicCache.GetLatestCachedImagePath(settings.EpicImageType);
+        }
+    }
+
+    private static void DisposeRenderers(ref EarthRenderer? earth, ref FlatMapRenderer? flatMap,
+        ref MoonRenderer? moon, ref StillImageRenderer? stillImage)
     {
         earth?.Dispose(); earth = null;
         flatMap?.Dispose(); flatMap = null;
         moon?.Dispose(); moon = null;
+        stillImage?.Dispose(); stillImage = null;
     }
 
     private void ReportStatus(string message)

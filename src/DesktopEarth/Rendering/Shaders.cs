@@ -238,6 +238,57 @@ void main()
 }
 ";
 
+    // ─── Still Image shaders (for EPIC satellite photos) ───
+
+    public const string StillImageVertex = @"
+#version 330 core
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aTexCoord;
+
+out vec2 vTexCoord;
+
+void main()
+{
+    vTexCoord = aTexCoord;
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+";
+
+    public const string StillImageFragment = @"
+#version 330 core
+
+in vec2 vTexCoord;
+
+uniform sampler2D uImage;
+uniform float uImageAspect;   // image width / height
+uniform float uScreenAspect;  // screen width / height
+
+out vec4 FragColor;
+
+void main()
+{
+    vec2 uv = vTexCoord;
+
+    if (uImageAspect > uScreenAspect) {
+        // Image is wider than screen: fit width, black bars top/bottom
+        float scale = uScreenAspect / uImageAspect;
+        uv.y = (uv.y - 0.5) / scale + 0.5;
+    } else {
+        // Image is taller than screen: fit height, black bars left/right
+        float scale = uImageAspect / uScreenAspect;
+        uv.x = (uv.x - 0.5) / scale + 0.5;
+    }
+
+    // Black bars for out-of-bounds UVs
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    } else {
+        FragColor = vec4(texture(uImage, uv).rgb, 1.0);
+    }
+}
+";
+
     // ─── Star background shaders ───
 
     public const string StarsVertex = @"
