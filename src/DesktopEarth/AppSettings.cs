@@ -57,6 +57,7 @@ public class AppSettings
 
     // NASA APOD settings
     public bool ApodUseLatest { get; set; } = true;
+    public int ApodRecentDays { get; set; } = 14;
     public string ApodSelectedDate { get; set; } = "";
     public string ApodSelectedImageId { get; set; } = "";
     public string ApodSelectedImageUrl { get; set; } = "";
@@ -75,9 +76,9 @@ public class AppSettings
     // Unified api.data.gov API key (works for NASA APOD, NPS, and Smithsonian)
     public string ApiDataGovKey { get; set; } = "DEMO_KEY";
 
-    // Random rotation
+    // Auto-rotation
     public bool RandomRotationEnabled { get; set; } = false;
-    public bool RandomFromFavoritesOnly { get; set; } = false;
+    public RotationSource RandomRotationSource { get; set; } = RotationSource.Favorites;
 
     // Favorites
     public List<FavoriteImage> Favorites { get; set; } = new();
@@ -139,6 +140,7 @@ public class DisplayConfig
 
     // NASA APOD settings
     public bool ApodUseLatest { get; set; } = true;
+    public int ApodRecentDays { get; set; } = 14;
     public string ApodSelectedDate { get; set; } = "";
     public string ApodSelectedImageId { get; set; } = "";
     public string ApodSelectedImageUrl { get; set; } = "";
@@ -154,9 +156,9 @@ public class DisplayConfig
     public string SmithsonianSelectedId { get; set; } = "";
     public string SmithsonianSelectedImageUrl { get; set; } = "";
 
-    // Random rotation
+    // Auto-rotation
     public bool RandomRotationEnabled { get; set; } = false;
-    public bool RandomFromFavoritesOnly { get; set; } = false;
+    public RotationSource RandomRotationSource { get; set; } = RotationSource.Favorites;
 
     // User images per-display
     public string UserImageSelectedId { get; set; } = "";
@@ -204,3 +206,4 @@ public enum ImageStyle { Topo, TopoBathy }
 public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
 public enum EpicImageType { Natural, Enhanced }
 public enum ImageQualityTier { Unknown, SD, HD, UD }
+public enum RotationSource { NasaEpic, NasaApod, NationalParks, Smithsonian, UserImages, Favorites, All }

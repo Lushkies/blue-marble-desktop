@@ -10,9 +10,9 @@
     <AssemblyName>BlueMarbleDesktop</AssemblyName>
     <RootNamespace>DesktopEarth</RootNamespace>
     <ApplicationIcon>Resources\bluemarbledesktop.ico</ApplicationIcon>
-    <Version>4.3.6</Version>
-    <FileVersion>4.3.6.0</FileVersion>
-    <AssemblyVersion>4.3.6.0</AssemblyVersion>
+    <Version>4.3.7</Version>
+    <FileVersion>4.3.7.0</FileVersion>
+    <AssemblyVersion>4.3.7.0</AssemblyVersion>
     <Product>Blue Marble Desktop</Product>
     <Company>Blue Marble Desktop</Company>
     <Authors>Alex and Claude (Anthropic)</Authors>

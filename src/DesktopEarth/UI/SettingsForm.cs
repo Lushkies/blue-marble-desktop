@@ -94,6 +94,7 @@ public class SettingsForm : Form
 
     // APOD controls
     private RadioButton _apodLatestRadio = null!;
+    private ComboBox _apodRecentDaysCombo = null!;
     private RadioButton _apodDateRadio = null!;
     private DateTimePicker _apodDatePicker = null!;
     private ThumbnailGridPanel _apodGrid = null!;
@@ -121,9 +122,9 @@ public class SettingsForm : Form
     // Unified image cache for new sources
     private readonly ImageCache _imageCache = new();
 
-    // Random rotation controls
+    // Auto-rotation controls
     private CheckBox _randomRotationCheck = null!;
-    private CheckBox _randomFavoritesOnlyCheck = null!;
+    private ComboBox _rotationSourceCombo = null!;
 
     // System tab controls
     private ComboBox _updateIntervalCombo = null!;
@@ -293,9 +294,25 @@ public class SettingsForm : Form
                 _userImagesGrid.SelectedImage.Id) ?? "";
         }
 
-        // Rotation
+        // Auto-rotation
         s.RandomRotationEnabled = _randomRotationCheck.Checked;
-        s.RandomFromFavoritesOnly = _randomFavoritesOnlyCheck.Checked;
+        s.RandomRotationSource = (RotationSource)_rotationSourceCombo.SelectedIndex;
+
+        // APOD recent days
+        s.ApodRecentDays = GetApodRecentDays();
+    }
+
+    private static readonly int[] ApodDaysValues = [7, 14, 30, 60, 90];
+
+    private int GetApodRecentDays()
+    {
+        int idx = _apodRecentDaysCombo.SelectedIndex;
+        return idx >= 0 && idx < ApodDaysValues.Length ? ApodDaysValues[idx] : 14;
+    }
+
+    private static int ApodDaysToIndex(int days)
+    {
+        return Array.IndexOf(ApodDaysValues, days) is int i and >= 0 ? i : 1; // default to 14 days
     }
 
     private void SaveAppearanceToDisplayConfig(DisplayConfig config)
@@ -357,9 +374,12 @@ public class SettingsForm : Form
                 _userImagesGrid.SelectedImage.Id) ?? "";
         }
 
-        // Rotation
+        // Auto-rotation
         config.RandomRotationEnabled = _randomRotationCheck.Checked;
-        config.RandomFromFavoritesOnly = _randomFavoritesOnlyCheck.Checked;
+        config.RandomRotationSource = (RotationSource)_rotationSourceCombo.SelectedIndex;
+
+        // APOD recent days
+        config.ApodRecentDays = GetApodRecentDays();
     }
 
     private DisplayConfig GetOrCreateDisplayConfig(string deviceName)
@@ -565,31 +585,33 @@ public class SettingsForm : Form
         tab.Controls.Add(_viewAccentPanel);
         y += 45; // accent panel (40) + gap (5)
 
-        // -- RANDOM ROTATION (visible for still image mode only) --
+        // -- AUTO-ROTATION (visible for still image mode only) --
         _randomRotationCheck = new CheckBox
         {
-            Text = "Rotate randomly each update",
+            Text = "Auto-rotate wallpaper",
             AutoSize = true,
             Location = new Point(LeftMargin, y),
             Visible = false
         };
         _randomRotationCheck.CheckedChanged += (_, _) =>
         {
-            _randomFavoritesOnlyCheck.Enabled = _randomRotationCheck.Checked;
+            _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
             SchedulePreview();
         };
         tab.Controls.Add(_randomRotationCheck);
 
-        _randomFavoritesOnlyCheck = new CheckBox
+        _rotationSourceCombo = new ComboBox
         {
-            Text = "Favorites only",
-            AutoSize = true,
-            Location = new Point(250, y),
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(250, y - 2),
+            Width = 160,
             Visible = false,
             Enabled = false
         };
-        _randomFavoritesOnlyCheck.CheckedChanged += (_, _) => SchedulePreview();
-        tab.Controls.Add(_randomFavoritesOnlyCheck);
+        _rotationSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images", "Favorites", "All Sources"]);
+        _rotationSourceCombo.SelectedIndex = 5; // Favorites default
+        _rotationSourceCombo.SelectedIndexChanged += (_, _) => { if (!_isLoading) SchedulePreview(); };
+        tab.Controls.Add(_rotationSourceCombo);
         y += 25;
 
         // -- MODE PANELS (all start at same Y, only one visible at a time) --
@@ -942,16 +964,32 @@ public class SettingsForm : Form
 
         _apodLatestRadio = new RadioButton
         {
-            Text = "Show latest 14 days", AutoSize = true,
+            Text = "Show recent:", AutoSize = true,
             Location = new Point(LeftMargin, py), Checked = true
         };
         _apodLatestRadio.CheckedChanged += (_, _) =>
         {
             _apodDatePicker.Enabled = !_apodLatestRadio.Checked;
+            _apodRecentDaysCombo.Enabled = _apodLatestRadio.Checked;
             if (!_isLoading && _apodLatestRadio.Checked) RefreshApodImages();
             SchedulePreview();
         };
         panel.Controls.Add(_apodLatestRadio);
+
+        _apodRecentDaysCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(140, py - 2),
+            Width = 90
+        };
+        _apodRecentDaysCombo.Items.AddRange(["7 days", "14 days", "30 days", "60 days", "90 days"]);
+        _apodRecentDaysCombo.SelectedIndex = 1; // 14 days default
+        _apodRecentDaysCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_isLoading && _apodLatestRadio.Checked) RefreshApodImages();
+            SchedulePreview();
+        };
+        panel.Controls.Add(_apodRecentDaysCombo);
         py += 22;
 
         _apodDateRadio = new RadioButton
@@ -1663,10 +1701,10 @@ public class SettingsForm : Form
         _stillImagePanel.Visible = isStillImage;
         _resetButton.Visible = !isStillImage;
 
-        // Random rotation visible for still image mode
+        // Auto-rotation visible for still image mode
         _randomRotationCheck.Visible = isStillImage;
-        _randomFavoritesOnlyCheck.Visible = isStillImage;
-        _randomFavoritesOnlyCheck.Enabled = _randomRotationCheck.Checked;
+        _rotationSourceCombo.Visible = isStillImage;
+        _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
 
         // Source row in accent panel — visible only for Still Image
         _sourceLabel.Visible = isStillImage;
@@ -1682,7 +1720,7 @@ public class SettingsForm : Form
             // Reposition controls below the accent panel
             int belowAccent = _viewAccentPanel.Bottom + 5;
             _randomRotationCheck.Top = belowAccent;
-            _randomFavoritesOnlyCheck.Top = belowAccent;
+            _rotationSourceCombo.Top = belowAccent - 2;
 
             int panelTop = belowAccent + (isStillImage ? 25 : 0);
             _globeControlsPanel.Top = panelTop;
@@ -1880,12 +1918,13 @@ public class SettingsForm : Form
         var apiKey = _settings.ApiDataGovKey;
         bool useLatest = _apodLatestRadio.Checked;
         string date = _apodDatePicker.Value.ToString("yyyy-MM-dd");
+        int recentDays = GetApodRecentDays();
 
         Task.Run(async () =>
         {
             List<ImageSourceInfo>? images;
             if (useLatest)
-                images = await _apodApi.GetRecentAsync(apiKey, 14);
+                images = await _apodApi.GetRecentAsync(apiKey, recentDays);
             else
             {
                 var single = await _apodApi.GetByDateAsync(apiKey, date);
@@ -2131,9 +2170,12 @@ public class SettingsForm : Form
         if (!string.IsNullOrEmpty(config.SmithsonianSearchQuery))
             _smithsonianSearchBox.Text = config.SmithsonianSearchQuery;
 
-        // Rotation
+        // Auto-rotation
         _randomRotationCheck.Checked = config.RandomRotationEnabled;
-        _randomFavoritesOnlyCheck.Checked = config.RandomFromFavoritesOnly;
+        _rotationSourceCombo.SelectedIndex = Math.Clamp((int)config.RandomRotationSource, 0, _rotationSourceCombo.Items.Count - 1);
+
+        // APOD recent days
+        _apodRecentDaysCombo.SelectedIndex = ApodDaysToIndex(config.ApodRecentDays);
 
         _locationCombo.SelectedIndex = 0;
         UpdateModeVisibility();
@@ -2233,9 +2275,12 @@ public class SettingsForm : Form
         // API key
         _apiKeyBox.Text = _settings.ApiDataGovKey;
 
-        // Rotation
+        // Auto-rotation
         _randomRotationCheck.Checked = _settings.RandomRotationEnabled;
-        _randomFavoritesOnlyCheck.Checked = _settings.RandomFromFavoritesOnly;
+        _rotationSourceCombo.SelectedIndex = Math.Clamp((int)_settings.RandomRotationSource, 0, _rotationSourceCombo.Items.Count - 1);
+
+        // APOD recent days
+        _apodRecentDaysCombo.SelectedIndex = ApodDaysToIndex(_settings.ApodRecentDays);
 
         // NPS search query
         if (!string.IsNullOrEmpty(_settings.NpsSearchQuery))

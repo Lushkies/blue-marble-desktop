@@ -88,6 +88,32 @@ public class EpicImageCache
     }
 
     /// <summary>
+    /// Get all cached image paths for a given EPIC image type.
+    /// Used by the rotation system to build a pool of available images.
+    /// </summary>
+    public List<string> GetAllCachedImagePaths(EpicImageType type)
+    {
+        try
+        {
+            var collection = type == EpicImageType.Enhanced ? "enhanced" : "natural";
+            var collectionDir = Path.Combine(CacheDir, collection);
+
+            if (!Directory.Exists(collectionDir))
+                return new List<string>();
+
+            return Directory.GetDirectories(collectionDir)
+                .SelectMany(dateDir => Directory.GetFiles(dateDir, "*.jpg"))
+                .Where(f => new FileInfo(f).Length > 100 * 1024)
+                .OrderByDescending(f => File.GetLastWriteTime(f))
+                .ToList();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
+    /// <summary>
     /// Find the most recent cached image for offline fallback.
     /// Returns the file path or null if no cached images exist.
     /// </summary>

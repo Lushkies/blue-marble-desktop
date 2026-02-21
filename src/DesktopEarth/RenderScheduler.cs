@@ -28,9 +28,11 @@ public class RenderScheduler : IDisposable
     // New image sources cache
     private readonly ImageCache _imageCache = new();
 
-    // Image rotation (sequential cycling instead of random)
+    // Image rotation (sequential cycling through source pools)
     private int _rotationIndex;
     private string? _randomImageOverride;
+    private ImageSource? _randomImageSource;
+    private int _poolBuildCycleCount;
 
     // Gate: prevents all rendering until user explicitly triggers an update.
     // Defaults to true (first-ever run renders immediately).
@@ -247,7 +249,8 @@ public class RenderScheduler : IDisposable
                     // Handle image rotation for still image sources
                     if (settings.DisplayMode == DisplayMode.StillImage && settings.RandomRotationEnabled)
                     {
-                        PickNextImage(settings, settings.StillImageSource);
+                        PickNextImage(settings, settings.RandomRotationSource);
+                        MaybeProactiveFetch(settings);
                     }
 
                     string modeName = GetModeName(settings);
@@ -372,6 +375,7 @@ public class RenderScheduler : IDisposable
                 EpicSelectedDate = displayConfig?.EpicSelectedDate ?? settings.EpicSelectedDate,
                 EpicSelectedImage = displayConfig?.EpicSelectedImage ?? settings.EpicSelectedImage,
                 // NASA APOD per-display
+                ApodRecentDays = displayConfig?.ApodRecentDays ?? settings.ApodRecentDays,
                 ApodUseLatest = displayConfig?.ApodUseLatest ?? settings.ApodUseLatest,
                 ApodSelectedDate = displayConfig?.ApodSelectedDate ?? settings.ApodSelectedDate,
                 ApodSelectedImageId = displayConfig?.ApodSelectedImageId ?? settings.ApodSelectedImageId,
@@ -387,9 +391,9 @@ public class RenderScheduler : IDisposable
                 SmithsonianSelectedImageUrl = displayConfig?.SmithsonianSelectedImageUrl ?? settings.SmithsonianSelectedImageUrl,
                 // API key (always from global settings)
                 ApiDataGovKey = settings.ApiDataGovKey,
-                // Random rotation per-display
+                // Auto-rotation per-display
                 RandomRotationEnabled = displayConfig?.RandomRotationEnabled ?? settings.RandomRotationEnabled,
-                RandomFromFavoritesOnly = displayConfig?.RandomFromFavoritesOnly ?? settings.RandomFromFavoritesOnly,
+                RandomRotationSource = displayConfig?.RandomRotationSource ?? settings.RandomRotationSource,
                 Favorites = settings.Favorites, // Favorites are always global
                 // User images per-display
                 UserImageSelectedId = displayConfig?.UserImageSelectedId ?? settings.UserImageSelectedId,
@@ -405,7 +409,8 @@ public class RenderScheduler : IDisposable
             // Handle image rotation for this display
             if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled)
             {
-                PickNextImage(displaySettings, displaySettings.StillImageSource);
+                PickNextImage(displaySettings, displaySettings.RandomRotationSource);
+                MaybeProactiveFetch(displaySettings);
             }
 
             // Render this display
@@ -516,18 +521,20 @@ public class RenderScheduler : IDisposable
             renderer.Initialize(gl);
         }
 
-        // If random rotation picked an image, use it
+        // If random rotation picked an image, use it (may be from a different source in "All" mode)
         if (_randomImageOverride != null)
         {
             var overridePath = _randomImageOverride;
             _randomImageOverride = null;
+            var effectiveSource = _randomImageSource ?? source;
+            _randomImageSource = null;
 
             if (File.Exists(overridePath))
             {
                 renderer.LoadImage(gl, overridePath);
                 if (!renderer.IsBelowMinimumQuality)
                 {
-                    SetCurrentImage(source, Path.GetFileNameWithoutExtension(overridePath), null, overridePath);
+                    SetCurrentImage(effectiveSource, Path.GetFileNameWithoutExtension(overridePath), null, overridePath);
                     return renderer.Render(width, height);
                 }
 
@@ -660,70 +667,241 @@ public class RenderScheduler : IDisposable
 
     /// <summary>
     /// Pick the next image for sequential rotation. Sets _randomImageOverride to a local file path.
-    /// Cycles through images in order instead of picking randomly.
+    /// Cycles through images in order from the selected rotation source pool.
     /// </summary>
-    private void PickNextImage(AppSettings settings, ImageSource source)
+    private void PickNextImage(AppSettings settings, RotationSource rotationSource)
     {
         try
         {
-            // User images: scan directory directly instead of using image cache
-            if (source == ImageSource.UserImages && !settings.RandomFromFavoritesOnly)
+            var pool = BuildRotationPool(settings, rotationSource);
+            if (pool.Count > 0)
             {
-                var userMgr = new UserImageManager();
-                var userPaths = userMgr.GetAllImagePaths();
-                if (userPaths.Count > 0)
-                {
-                    _randomImageOverride = userPaths[_rotationIndex % userPaths.Count];
-                    _rotationIndex++;
-                }
-                return;
-            }
-
-            if (settings.RandomFromFavoritesOnly)
-            {
-                // Snapshot favorites under lock (UI thread may modify the list concurrently)
-                List<FavoriteImage> sourceFavs;
-                lock (settings.FavoritesLock)
-                {
-                    sourceFavs = settings.Favorites
-                        .Where(f => f.Source == source).ToList();
-                }
-
-                if (sourceFavs.Count > 0)
-                {
-                    var pick = sourceFavs[_rotationIndex % sourceFavs.Count];
-                    _rotationIndex++;
-
-                    if (!string.IsNullOrEmpty(pick.LocalCachePath) && File.Exists(pick.LocalCachePath))
-                    {
-                        _randomImageOverride = pick.LocalCachePath;
-                        return;
-                    }
-
-                    if (!string.IsNullOrEmpty(pick.FullImageUrl))
-                    {
-                        var path = _imageCache.DownloadToCache(source, pick.ImageId, pick.FullImageUrl)
-                            .GetAwaiter().GetResult();
-                        if (path != null)
-                        {
-                            _randomImageOverride = path;
-                            return;
-                        }
-                    }
-                }
-            }
-
-            // Fall back to all cached images for this source
-            var cached = _imageCache.GetAllCachedImagePaths(source);
-            if (cached.Count > 0)
-            {
-                _randomImageOverride = cached[_rotationIndex % cached.Count];
+                var picked = pool[_rotationIndex % pool.Count];
+                _randomImageOverride = picked;
+                _randomImageSource = DetectSourceFromPath(picked);
                 _rotationIndex++;
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Image rotation error ({source}): {ex.Message}");
+            Console.WriteLine($"Image rotation error ({rotationSource}): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Build a list of local file paths that form the rotation pool for a given source.
+    /// </summary>
+    private List<string> BuildRotationPool(AppSettings settings, RotationSource source)
+    {
+        return source switch
+        {
+            RotationSource.NasaEpic => _epicCache.GetAllCachedImagePaths(settings.EpicImageType),
+            RotationSource.NasaApod => _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod),
+            RotationSource.NationalParks => _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks),
+            RotationSource.Smithsonian => _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian),
+            RotationSource.UserImages => new UserImageManager().GetAllImagePaths(),
+            RotationSource.Favorites => GetFavoriteImagePaths(settings),
+            RotationSource.All => BuildWeightedAllPool(settings),
+            _ => new List<string>()
+        };
+    }
+
+    /// <summary>
+    /// Get cached file paths for all favorites (thread-safe).
+    /// </summary>
+    private List<string> GetFavoriteImagePaths(AppSettings settings)
+    {
+        List<FavoriteImage> favs;
+        lock (settings.FavoritesLock)
+        {
+            favs = settings.Favorites.ToList();
+        }
+
+        var paths = new List<string>();
+        foreach (var fav in favs)
+        {
+            var path = _imageCache.GetCachedPathForFavorite(fav);
+            if (path != null && File.Exists(path))
+                paths.Add(path);
+        }
+        return paths;
+    }
+
+    /// <summary>
+    /// Build a weighted rotation pool from all sources.
+    /// Weights: EPIC 3x, APOD 3x, NPS 3x, Smithsonian 1x, User 2x.
+    /// Shuffled deterministically so sequential cycling produces mixed order.
+    /// </summary>
+    private List<string> BuildWeightedAllPool(AppSettings settings)
+    {
+        var pool = new List<string>();
+        AddWeighted(pool, _epicCache.GetAllCachedImagePaths(settings.EpicImageType), 3);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod), 3);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks), 3);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian), 1);
+        AddWeighted(pool, new UserImageManager().GetAllImagePaths(), 2);
+
+        // Add favorites that aren't already in the pool (e.g., from sources without local cache)
+        foreach (var path in GetFavoriteImagePaths(settings))
+        {
+            if (!pool.Contains(path))
+                pool.Add(path);
+        }
+
+        // Deterministic shuffle so cycling through with _rotationIndex gives mixed order
+        var rng = new Random(42);
+        for (int i = pool.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (pool[i], pool[j]) = (pool[j], pool[i]);
+        }
+
+        return pool;
+    }
+
+    private static void AddWeighted(List<string> pool, List<string> source, int weight)
+    {
+        for (int w = 0; w < weight; w++)
+            pool.AddRange(source);
+    }
+
+    /// <summary>
+    /// Detect which ImageSource a file path belongs to based on its directory.
+    /// </summary>
+    private static ImageSource? DetectSourceFromPath(string path)
+    {
+        if (path.Contains("epic_images")) return ImageSource.NasaEpic;
+        if (path.Contains("nasaapod")) return ImageSource.NasaApod;
+        if (path.Contains("nationalparks")) return ImageSource.NationalParks;
+        if (path.Contains("smithsonian")) return ImageSource.Smithsonian;
+        if (path.Contains("user_images")) return ImageSource.UserImages;
+        return null;
+    }
+
+    /// <summary>
+    /// Proactively fetch new images to build the rotation pool over time.
+    /// Aggressive at first (every cycle while pool &lt; 20), then tapers to every 5th cycle.
+    /// </summary>
+    private void MaybeProactiveFetch(AppSettings settings)
+    {
+        _poolBuildCycleCount++;
+
+        var source = settings.RandomRotationSource;
+        // No proactive fetching for user-managed pools
+        if (source == RotationSource.Favorites || source == RotationSource.UserImages)
+            return;
+
+        int currentPoolSize = BuildRotationPool(settings, source).Count;
+
+        // Determine fetch frequency based on pool size and API key
+        bool isDemoKey = settings.ApiDataGovKey == "DEMO_KEY";
+        bool shouldFetch;
+        if (isDemoKey)
+            shouldFetch = (_poolBuildCycleCount % 5) == 0; // Conservative for DEMO_KEY
+        else if (currentPoolSize < 20)
+            shouldFetch = true; // Aggressive when pool is small
+        else
+            shouldFetch = (_poolBuildCycleCount % 5) == 0; // Maintenance
+
+        if (!shouldFetch) return;
+
+        // Fire-and-forget background fetch (doesn't block render)
+        var apiKey = settings.ApiDataGovKey;
+        var epicType = settings.EpicImageType;
+        Task.Run(async () =>
+        {
+            try
+            {
+                await FetchNewImageForPool(source, apiKey, epicType);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Pool build fetch error: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Download new images from a source to grow the rotation pool.
+    /// </summary>
+    private async Task FetchNewImageForPool(RotationSource source, string apiKey, EpicImageType epicType)
+    {
+        switch (source)
+        {
+            case RotationSource.NasaApod:
+            {
+                // Fetch a random APOD from the last 2 years
+                var randomDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(1, 730));
+                var apodImage = await new ApodApiClient().GetByDateAsync(apiKey, randomDate.ToString("yyyy-MM-dd"));
+                if (apodImage != null)
+                {
+                    var url = ApodApiClient.GetBestUrl(apodImage);
+                    await _imageCache.DownloadToCache(ImageSource.NasaApod, apodImage.Id, url);
+                    Console.WriteLine($"Pool build: Fetched APOD {apodImage.Id}");
+                }
+                break;
+            }
+            case RotationSource.NationalParks:
+            {
+                // Fetch images from a random curated park
+                var parkCodes = NpsApiClient.ParkCodes.Values.ToList();
+                var randomPark = parkCodes[Random.Shared.Next(parkCodes.Count)];
+                var images = await new NpsApiClient().GetParkImagesAsync(apiKey, randomPark);
+                if (images != null)
+                {
+                    foreach (var img in images.Take(3))
+                    {
+                        var url = !string.IsNullOrEmpty(img.HdImageUrl) ? img.HdImageUrl : img.FullImageUrl;
+                        if (!string.IsNullOrEmpty(url))
+                            await _imageCache.DownloadToCache(ImageSource.NationalParks, img.Id, url);
+                    }
+                    Console.WriteLine($"Pool build: Fetched NPS {randomPark} ({images.Count} images)");
+                }
+                break;
+            }
+            case RotationSource.Smithsonian:
+            {
+                // Smithsonian uses sort=random, so each call returns different results
+                var images = await new SmithsonianApiClient().SearchImagesAsync(apiKey, "landscape painting", 0, 5);
+                if (images != null)
+                {
+                    foreach (var img in images.Take(3))
+                    {
+                        var url = !string.IsNullOrEmpty(img.HdImageUrl) ? img.HdImageUrl : img.FullImageUrl;
+                        if (!string.IsNullOrEmpty(url))
+                            await _imageCache.DownloadToCache(ImageSource.Smithsonian, img.Id, url);
+                    }
+                    Console.WriteLine($"Pool build: Fetched {images.Count} Smithsonian images");
+                }
+                break;
+            }
+            case RotationSource.NasaEpic:
+            {
+                // Fetch latest EPIC images
+                var epicImages = await _epicApi.GetLatestImagesAsync(epicType);
+                if (epicImages != null)
+                {
+                    foreach (var img in epicImages.Take(3))
+                    {
+                        if (!_epicCache.IsCached(img, epicType))
+                            await _epicApi.DownloadImageAsync(img, epicType, _epicCache);
+                    }
+                    Console.WriteLine($"Pool build: Fetched {Math.Min(3, epicImages.Count)} EPIC images");
+                }
+                break;
+            }
+            case RotationSource.All:
+            {
+                // Pick a random source (weighted toward nature/space)
+                var sources = new[] {
+                    RotationSource.NasaApod, RotationSource.NasaApod,
+                    RotationSource.NationalParks, RotationSource.NationalParks,
+                    RotationSource.NasaEpic,
+                    RotationSource.Smithsonian
+                };
+                await FetchNewImageForPool(sources[Random.Shared.Next(sources.Length)], apiKey, epicType);
+                break;
+            }
         }
     }
 
@@ -746,6 +924,28 @@ public class RenderScheduler : IDisposable
         {
             renderer = new StillImageRenderer(settings);
             renderer.Initialize(gl);
+        }
+
+        // If random rotation picked an image, use it (may be from any source in "All" mode)
+        if (_randomImageOverride != null)
+        {
+            var overridePath = _randomImageOverride;
+            _randomImageOverride = null;
+
+            if (File.Exists(overridePath))
+            {
+                renderer.LoadImage(gl, overridePath);
+                if (!renderer.IsBelowMinimumQuality)
+                {
+                    SetCurrentImage(_randomImageSource ?? ImageSource.NasaEpic,
+                        Path.GetFileNameWithoutExtension(overridePath), null, overridePath);
+                    _randomImageSource = null;
+                    return renderer.Render(width, height);
+                }
+
+                Console.WriteLine($"RenderScheduler: Random image below 1080p minimum, skipping");
+            }
+            _randomImageSource = null;
         }
 
         string? imagePath = ResolveEpicImage(settings);

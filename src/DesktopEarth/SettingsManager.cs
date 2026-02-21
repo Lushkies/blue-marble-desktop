@@ -138,6 +138,9 @@ public class SettingsManager
             // Migrate old separate API keys to unified ApiDataGovKey
             MigrateApiKeys();
 
+            // Migrate old RandomFromFavoritesOnly to new RotationSource
+            MigrateRotationSettings();
+
             // Clear extension data so old properties don't get re-serialized
             Settings.ExtensionData = null;
             return true;
@@ -171,6 +174,36 @@ public class SettingsManager
                     Save(); // Persist migrated key
                     return;
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Migrate old RandomFromFavoritesOnly boolean to new RotationSource enum.
+    /// Old property ends up in ExtensionData since it's no longer on AppSettings.
+    /// </summary>
+    private void MigrateRotationSettings()
+    {
+        if (Settings.ExtensionData == null) return;
+
+        if (Settings.ExtensionData.TryGetValue("RandomFromFavoritesOnly", out var favOnlyEl))
+        {
+            if (favOnlyEl.ValueKind == System.Text.Json.JsonValueKind.True)
+            {
+                Settings.RandomRotationSource = RotationSource.Favorites;
+            }
+            else if (favOnlyEl.ValueKind == System.Text.Json.JsonValueKind.False && Settings.RandomRotationEnabled)
+            {
+                // Old "rotate but not favorites only" = rotate current source
+                Settings.RandomRotationSource = Settings.StillImageSource switch
+                {
+                    ImageSource.NasaEpic => RotationSource.NasaEpic,
+                    ImageSource.NasaApod => RotationSource.NasaApod,
+                    ImageSource.NationalParks => RotationSource.NationalParks,
+                    ImageSource.Smithsonian => RotationSource.Smithsonian,
+                    ImageSource.UserImages => RotationSource.UserImages,
+                    _ => RotationSource.Favorites
+                };
             }
         }
     }
