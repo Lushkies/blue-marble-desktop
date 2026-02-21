@@ -84,23 +84,48 @@ public class SettingsManager
             string json = File.ReadAllText(path);
 
             // Migrate old v4.0.0 DisplayMode enum values to the new combined StillImage mode.
+            // Old format had DisplayMode = NasaEpic/NasaApod/NationalParks/Smithsonian/Unsplash.
+            // New format uses DisplayMode = StillImage with a separate StillImageSource property.
+            //
+            // IMPORTANT: Only replace DisplayMode values, NOT ImageSource values!
+            // A global string replace would corrupt Favorites[].Source, StillImageSource, etc.
             ImageSource? migratedSource = null;
 
-            if (json.Contains("\"NasaEpic\"") && !json.Contains("\"StillImage\""))
-                migratedSource = ImageSource.NasaEpic;
-            else if (json.Contains("\"NasaApod\"") && !json.Contains("\"StillImage\""))
-                migratedSource = ImageSource.NasaApod;
-            else if (json.Contains("\"NationalParks\"") && !json.Contains("\"StillImage\""))
-                migratedSource = ImageSource.NationalParks;
-            else if (json.Contains("\"Smithsonian\"") && !json.Contains("\"StillImage\""))
-                migratedSource = ImageSource.Smithsonian;
-
-            // Replace removed/renamed enum values so JsonStringEnumConverter doesn't throw
-            json = json.Replace("\"Unsplash\"", "\"Spherical\"");
-            json = json.Replace("\"NasaEpic\"", "\"StillImage\"");
-            json = json.Replace("\"NasaApod\"", "\"StillImage\"");
-            json = json.Replace("\"NationalParks\"", "\"StillImage\"");
-            json = json.Replace("\"Smithsonian\"", "\"StillImage\"");
+            // Detect old format: DisplayMode has an image source name instead of StillImage
+            var displayModeMatch = System.Text.RegularExpressions.Regex.Match(
+                json, @"""DisplayMode""\s*:\s*""(\w+)""");
+            if (displayModeMatch.Success)
+            {
+                var oldMode = displayModeMatch.Groups[1].Value;
+                switch (oldMode)
+                {
+                    case "NasaEpic":
+                        migratedSource = ImageSource.NasaEpic;
+                        json = json.Replace(displayModeMatch.Value,
+                            "\"DisplayMode\": \"StillImage\"");
+                        break;
+                    case "NasaApod":
+                        migratedSource = ImageSource.NasaApod;
+                        json = json.Replace(displayModeMatch.Value,
+                            "\"DisplayMode\": \"StillImage\"");
+                        break;
+                    case "NationalParks":
+                        migratedSource = ImageSource.NationalParks;
+                        json = json.Replace(displayModeMatch.Value,
+                            "\"DisplayMode\": \"StillImage\"");
+                        break;
+                    case "Smithsonian":
+                        migratedSource = ImageSource.Smithsonian;
+                        json = json.Replace(displayModeMatch.Value,
+                            "\"DisplayMode\": \"StillImage\"");
+                        break;
+                    case "Unsplash":
+                        // Unsplash was removed — fall back to Spherical (globe)
+                        json = json.Replace(displayModeMatch.Value,
+                            "\"DisplayMode\": \"Spherical\"");
+                        break;
+                }
+            }
 
             Settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
 

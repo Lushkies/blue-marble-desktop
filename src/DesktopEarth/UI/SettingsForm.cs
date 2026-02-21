@@ -1831,6 +1831,8 @@ public class SettingsForm : Form
                     }).ToList();
 
                     _epicGrid.SetImages(sourceInfos);
+                    // Restore previously saved selection
+                    _epicGrid.SelectById(_settings.EpicSelectedImage);
                     _epicStatusLabel.Text = $"{sourceInfos.Count} image{(sourceInfos.Count != 1 ? "s" : "")} available.";
                     _epicStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
                 });
@@ -1884,6 +1886,8 @@ public class SettingsForm : Form
                         img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NasaApod && f.ImageId == img.Id);
 
                     _apodGrid.SetImages(images);
+                    // Restore previously saved selection
+                    _apodGrid.SelectById(_settings.ApodSelectedImageId);
                     _apodStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} loaded.";
                     _apodStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
                 });
@@ -1945,6 +1949,8 @@ public class SettingsForm : Form
                         img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NationalParks && f.ImageId == img.Id);
 
                     _npsGrid.SetImages(images);
+                    // Restore previously saved selection
+                    _npsGrid.SelectById(_settings.NpsSelectedImageId);
                     _npsStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
                     _npsStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
                 });
@@ -1994,6 +2000,8 @@ public class SettingsForm : Form
                         img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.Smithsonian && f.ImageId == img.Id);
 
                     _smithsonianGrid.SetImages(images);
+                    // Restore previously saved selection
+                    _smithsonianGrid.SelectById(_settings.SmithsonianSelectedId);
                     _smithsonianStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
                     _smithsonianStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
                 });
@@ -2518,6 +2526,9 @@ public class SettingsForm : Form
             img.IsFavorited = _settings.Favorites.Any(f =>
                 f.Source == ImageSource.UserImages && f.ImageId == img.Id);
         _userImagesGrid.SetImages(images);
+
+        // Restore previously saved selection
+        _userImagesGrid.SelectById(_settings.UserImageSelectedId);
 
         int count = images.Count;
         _userImagesStatusLabel.Text = $"{count} user image{(count != 1 ? "s" : "")}";
