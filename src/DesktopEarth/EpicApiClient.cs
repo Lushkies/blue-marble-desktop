@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -99,7 +99,7 @@ public class EpicApiClient
         var collection = type == EpicImageType.Enhanced ? "enhanced" : "natural";
 
         // Parse the date from the image's Date field (format: "2026-02-18 00:13:03")
-        if (!DateTime.TryParse(image.Date, out var dt))
+        if (!DateTime.TryParse(image.Date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
             return "";
 
         var year = dt.Year.ToString("D4");
@@ -117,6 +117,7 @@ public class EpicApiClient
         EpicImageInfo image, EpicImageType type, EpicImageCache cache,
         CancellationToken ct = default)
     {
+        string? tempPath = null;
         try
         {
             // Check if already cached
@@ -130,7 +131,7 @@ public class EpicApiClient
                 return null;
 
             Console.WriteLine($"EPIC: Downloading {image.Image}...");
-            var response = await Http.GetAsync(url, ct);
+            using var response = await Http.GetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             // Ensure directory exists
@@ -138,7 +139,7 @@ public class EpicApiClient
             Directory.CreateDirectory(dir);
 
             // Write to temp file first, then move (atomic)
-            var tempPath = cachePath + ".tmp";
+            tempPath = cachePath + ".tmp";
             await using (var fileStream = File.Create(tempPath))
             {
                 await response.Content.CopyToAsync(fileStream, ct);
@@ -151,6 +152,7 @@ public class EpicApiClient
         catch (Exception ex)
         {
             Console.WriteLine($"EPIC download error: {ex.Message}");
+            try { if (tempPath != null) File.Delete(tempPath); } catch { }
             return null;
         }
     }
@@ -181,7 +183,7 @@ public class EpicImageInfo
     /// </summary>
     public override string ToString()
     {
-        if (DateTime.TryParse(Date, out var dt))
+        if (DateTime.TryParse(Date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
             return $"{dt:HH:mm UTC} — {Image}";
         return Image;
     }

@@ -87,16 +87,20 @@ public class TrayApplicationContext : ApplicationContext
 
         var settings = _settingsManager.Settings;
 
-        // Check if already favorited
-        if (settings.Favorites.Any(f => f.Source == fav.Source && f.ImageId == fav.ImageId))
+        // Thread-safe access to Favorites list (render thread may be iterating it)
+        lock (settings.FavoritesLock)
         {
-            _trayIcon.BalloonTipTitle = "Blue Marble Desktop";
-            _trayIcon.BalloonTipText = "This image is already in your favorites.";
-            _trayIcon.ShowBalloonTip(3000);
-            return;
-        }
+            // Check if already favorited
+            if (settings.Favorites.Any(f => f.Source == fav.Source && f.ImageId == fav.ImageId))
+            {
+                _trayIcon.BalloonTipTitle = "Blue Marble Desktop";
+                _trayIcon.BalloonTipText = "This image is already in your favorites.";
+                _trayIcon.ShowBalloonTip(3000);
+                return;
+            }
 
-        settings.Favorites.Add(fav);
+            settings.Favorites.Add(fav);
+        }
         _settingsManager.Save();
 
         _trayIcon.BalloonTipTitle = "Blue Marble Desktop";
