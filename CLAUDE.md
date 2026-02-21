@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 4.3.2
+**Current version:** 4.3.5
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -191,6 +191,9 @@ lib/
 - **v4.3** - My Collection tab (view/export/manage all favorites with source badges), user-imported custom images as wallpaper source, settings presets (save/load named appearance configurations), storage location disclaimer
 - **v4.3.1** - Bug fixes (crash-resistant settings, wallpaper persistence on restart, correct image selection for NPS/Smithsonian, no render on source/quality change), sequential favorites cycling, EPIC latest date indicator, configurable cache duration, improved HD texture description, fixed window size, tab reorder
 - **v4.3.2** - Critical fixes (wallpaper truly persists across restarts, API key saves immediately, Add Images crash fix, EPIC date shows correct latest), settings auto-open on launch, "Favorite Current Wallpaper" tray button, 3-tab layout (API Keys merged into System, Storage Locations moved to System)
+- **v4.3.3** - Pre-release polish: fix per-display settings UI (load/save/switch monitors correctly), fix Moon mode crash when texture missing, thread-safe favorites list, cache size display fix, quality filter no longer triggers re-render, version label, InvariantCulture for date parsing, HTTP response disposal, temp file cleanup
+- **v4.3.4** - Fix per-display wallpaper resetting to primary display's image on app restart (startup re-apply now uses SpanAcross style for PerDisplay composite images)
+- **v4.3.5** - View/Source selector accent panel for clearer visual hierarchy, brighter daytime light default (0.40), city lights default to center (1.5), extended zoom range (2x closer max zoom via 10-degree FOV floor)
 
 ---
 
@@ -200,7 +203,8 @@ lib/
 - NPS photos often include people (park rangers, visitors, buildings) rather than nature landscapes -- no API-level filter exists for this
 - Smithsonian search results depend on the art_design category -- some terms work better than others
 - EPIC images are sometimes delayed 24-48 hours from NASA
-- The SettingsForm is one large file (~2800 lines) -- could benefit from being split into partial classes or user controls if it grows further
+- The SettingsForm is one large file (~2900 lines) -- could benefit from being split into partial classes or user controls if it grows further
+- Per-display rendering uses logical pixels (post-DPI-scaling), so wallpapers may look slightly soft on high-DPI monitors at >100% scaling
 
 ### Potential Future Features
 - Filter NPS results to exclude photos with people (would need image analysis or metadata heuristics)

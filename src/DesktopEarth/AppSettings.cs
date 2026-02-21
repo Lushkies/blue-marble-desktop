@@ -31,7 +31,7 @@ public class AppSettings
 
     // Night lights
     public bool NightLightsEnabled { get; set; } = true;
-    public float NightLightsBrightness { get; set; } = 1.7f;
+    public float NightLightsBrightness { get; set; } = 1.5f;
 
     // Image style
     public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
@@ -47,7 +47,7 @@ public class AppSettings
     public int RenderHeight { get; set; } = 0;
 
     // Ambient light level
-    public float AmbientLight { get; set; } = 0.15f;
+    public float AmbientLight { get; set; } = 0.40f;
 
     // NASA EPIC settings
     public EpicImageType EpicImageType { get; set; } = EpicImageType.Natural;
@@ -128,8 +128,8 @@ public class DisplayConfig
     public float CameraTilt { get; set; } = 42.0f;
     public float LongitudeOffset { get; set; } = 88.0f;
     public bool NightLightsEnabled { get; set; } = true;
-    public float NightLightsBrightness { get; set; } = 1.7f;
-    public float AmbientLight { get; set; } = 0.15f;
+    public float NightLightsBrightness { get; set; } = 1.5f;
+    public float AmbientLight { get; set; } = 0.40f;
     public float ImageOffsetX { get; set; } = 0.0f;
     public float ImageOffsetY { get; set; } = 0.0f;
     public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
@@ -198,8 +198,8 @@ public class SettingsPreset
     public float ImageOffsetX { get; set; } = 0f;
     public float ImageOffsetY { get; set; } = 0f;
     public bool NightLightsEnabled { get; set; } = true;
-    public float NightLightsBrightness { get; set; } = 1.7f;
-    public float AmbientLight { get; set; } = 0.15f;
+    public float NightLightsBrightness { get; set; } = 1.5f;
+    public float AmbientLight { get; set; } = 0.40f;
     public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
     public EpicImageType EpicImageType { get; set; } = EpicImageType.Natural;
     public ImageQualityTier MinImageQuality { get; set; } = ImageQualityTier.SD;

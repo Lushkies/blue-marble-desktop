@@ -66,6 +66,11 @@ public class SettingsForm : Form
     private Panel _globeControlsPanel = null!;
     private Panel _stillImagePanel = null!;
 
+    // View accent panel and promoted controls
+    private Panel _viewAccentPanel = null!;
+    private Label _sourceLabel = null!;
+    private Label _qualityFilterLabel = null!;
+
     // Still Image source sub-dropdown
     private ComboBox _stillImageSourceCombo = null!;
 
@@ -229,7 +234,7 @@ public class SettingsForm : Form
     {
         float t = (sliderValue - 1) / 99f;
         float distance = 6.0f * MathF.Pow(1.15f / 6.0f, t);
-        float fov = 60f - t * 40f;
+        float fov = 60f - t * 50f; // 60° at min zoom → 10° at max zoom
         return (distance, fov);
     }
 
@@ -528,18 +533,95 @@ public class SettingsForm : Form
         tab.Controls.Add(monitorGroup);
         y += 120;
 
-        // -- VIEW MODE --
-        tab.Controls.Add(MakeLabel("View:", LeftMargin, y + 3));
+        // -- VIEW MODE (accent panel with blue left bar) --
+        _viewAccentPanel = CreateAccentPanel(LeftMargin, y, 490, 40);
+
+        var viewLabel = new Label
+        {
+            Text = "View:",
+            AutoSize = true,
+            Location = new Point(10, 11),
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            BackColor = Color.Transparent
+        };
+        _viewAccentPanel.Controls.Add(viewLabel);
+
         _displayModeCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(100, y),
+            Location = new Point(70, 8),
             Width = 170
         };
         _displayModeCombo.Items.AddRange(["Globe", "Flat Map", "Moon", "Still Image"]);
         _displayModeCombo.SelectedIndexChanged += (_, _) => { UpdateModeVisibility(); SchedulePreview(); };
-        tab.Controls.Add(_displayModeCombo);
-        y += 30;
+        _viewAccentPanel.Controls.Add(_displayModeCombo);
+
+        // Source row (inside accent panel, visible only for Still Image mode)
+        _sourceLabel = new Label
+        {
+            Text = "Source:",
+            AutoSize = true,
+            Location = new Point(10, 42),
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            BackColor = Color.Transparent,
+            Visible = false
+        };
+        _viewAccentPanel.Controls.Add(_sourceLabel);
+
+        _stillImageSourceCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(75, 39),
+            Width = 180,
+            Visible = false
+        };
+        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images"]);
+        _stillImageSourceCombo.SelectedIndex = 0;
+        _stillImageSourceCombo.SelectedIndexChanged += (_, _) =>
+        {
+            UpdateStillImageSubPanel();
+            // Don't trigger render — user must click an image to set wallpaper
+        };
+        _viewAccentPanel.Controls.Add(_stillImageSourceCombo);
+
+        _qualityFilterLabel = new Label
+        {
+            Text = "Min quality:",
+            AutoSize = true,
+            Location = new Point(275, 42),
+            Font = new Font("Segoe UI", 9),
+            BackColor = Color.Transparent,
+            Visible = false
+        };
+        _viewAccentPanel.Controls.Add(_qualityFilterLabel);
+
+        _qualityFilterCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(365, 39),
+            Width = 90,
+            Visible = false
+        };
+        _qualityFilterCombo.Items.AddRange(["Any", "SD (1080p+)", "HD (2160p+)", "UD (4K+)"]);
+        _qualityFilterCombo.SelectedIndex = 1; // Default: SD
+        _qualityFilterCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_isLoading)
+            {
+                _settings.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
+                {
+                    1 => ImageQualityTier.SD,
+                    2 => ImageQualityTier.HD,
+                    3 => ImageQualityTier.UD,
+                    _ => ImageQualityTier.Unknown
+                };
+                _settingsManager.Save();
+            }
+        };
+        _viewAccentPanel.Controls.Add(_qualityFilterCombo);
+
+        tab.Controls.Add(_viewAccentPanel);
+        y += 45; // accent panel (40) + gap (5)
 
         // -- RANDOM ROTATION (visible for still image mode only) --
         _randomRotationCheck = new CheckBox
@@ -726,12 +808,12 @@ public class SettingsForm : Form
         panel.Controls.Add(_nightLightsCheck);
         gy += 22;
 
-        gy = AddSliderRow(panel, "Brightness:", "1.7", IndentMargin, gy, 1, 30, 17, IndentSliderWidth,
+        gy = AddSliderRow(panel, "Brightness:", "1.5", IndentMargin, gy, 1, 30, 15, IndentSliderWidth,
             out _nightBrightnessSlider, out _nightBrightnessValue,
             (s, v) => v.Text = (s.Value / 10f).ToString("F1"));
 
         // Daytime light
-        gy = AddSliderRow(panel, "Daytime light:", "0.15", LeftMargin, gy, 0, 50, 15, SliderWidth,
+        gy = AddSliderRow(panel, "Daytime light:", "0.40", LeftMargin, gy, 0, 50, 40, SliderWidth,
             out _ambientSlider, out _ambientValue,
             (s, v) => v.Text = (s.Value / 100f).ToString("F2"));
 
@@ -766,57 +848,10 @@ public class SettingsForm : Form
     private Panel CreateStillImagePanel(int y)
     {
         var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 430), Visible = false };
-        int py = 0;
 
-        // Source sub-dropdown
-        panel.Controls.Add(MakeLabel("Source:", LeftMargin, py + 3));
-        _stillImageSourceCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(85, py),
-            Width = 180
-        };
-        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images"]);
-        _stillImageSourceCombo.SelectedIndex = 0;
-        _stillImageSourceCombo.SelectedIndexChanged += (_, _) =>
-        {
-            UpdateStillImageSubPanel();
-            // Don't trigger render — user must click an image to set wallpaper
-        };
-        panel.Controls.Add(_stillImageSourceCombo);
-
-        // Min quality filter
-        panel.Controls.Add(MakeLabel("Min quality:", 290, py + 3));
-        _qualityFilterCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(380, py),
-            Width = 90
-        };
-        _qualityFilterCombo.Items.AddRange(["Any", "SD (1080p+)", "HD (2160p+)", "UD (4K+)"]);
-        _qualityFilterCombo.SelectedIndex = 1; // Default: SD
-        _qualityFilterCombo.SelectedIndexChanged += (_, _) =>
-        {
-            // Save the quality filter setting without triggering a render.
-            // Uses Save() directly instead of ApplyAndSave() to avoid firing
-            // SettingsChanged (which would trigger RenderScheduler.TriggerUserUpdate).
-            if (!_isLoading)
-            {
-                _settings.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
-                {
-                    1 => ImageQualityTier.SD,
-                    2 => ImageQualityTier.HD,
-                    3 => ImageQualityTier.UD,
-                    _ => ImageQualityTier.Unknown
-                };
-                _settingsManager.Save();
-            }
-        };
-        panel.Controls.Add(_qualityFilterCombo);
-        py += 30;
-
-        // Sub-panels (all start at same Y inside the still image panel)
-        int subPanelY = py;
+        // Source and quality filter are now in the accent panel above.
+        // Sub-panels start at the top of this panel.
+        int subPanelY = 0;
 
         _epicSubPanel = CreateEpicSubPanel(subPanelY);
         panel.Controls.Add(_epicSubPanel);
@@ -1680,15 +1715,39 @@ public class SettingsForm : Form
     private void UpdateModeVisibility()
     {
         int mode = _displayModeCombo.SelectedIndex;
+        bool isStillImage = mode == 3;
 
         _globeControlsPanel.Visible = mode <= 2;
-        _stillImagePanel.Visible = mode == 3;
-        _resetButton.Visible = mode != 3;
+        _stillImagePanel.Visible = isStillImage;
+        _resetButton.Visible = !isStillImage;
 
-        // Random rotation visible for still image mode (always visible, greyed out when not checked)
-        _randomRotationCheck.Visible = mode == 3;
-        _randomFavoritesOnlyCheck.Visible = mode == 3;
+        // Random rotation visible for still image mode
+        _randomRotationCheck.Visible = isStillImage;
+        _randomFavoritesOnlyCheck.Visible = isStillImage;
         _randomFavoritesOnlyCheck.Enabled = _randomRotationCheck.Checked;
+
+        // Source row in accent panel — visible only for Still Image
+        _sourceLabel.Visible = isStillImage;
+        _stillImageSourceCombo.Visible = isStillImage;
+        _qualityFilterLabel.Visible = isStillImage;
+        _qualityFilterCombo.Visible = isStillImage;
+
+        // Resize accent panel: 2 rows for Still Image, 1 row otherwise
+        int accentHeight = isStillImage ? 72 : 40;
+        if (_viewAccentPanel.Height != accentHeight)
+        {
+            _viewAccentPanel.Height = accentHeight;
+            _viewAccentPanel.Invalidate();
+
+            // Reposition controls below the accent panel
+            int belowAccent = _viewAccentPanel.Bottom + 5;
+            _randomRotationCheck.Top = belowAccent;
+            _randomFavoritesOnlyCheck.Top = belowAccent;
+
+            int panelTop = belowAccent + (isStillImage ? 25 : 0);
+            _globeControlsPanel.Top = panelTop;
+            _stillImagePanel.Top = panelTop;
+        }
 
         // Globe-specific logic
         if (mode <= 2)
@@ -1708,7 +1767,7 @@ public class SettingsForm : Form
         }
 
         // Auto-load content when switching to still image
-        if (mode == 3)
+        if (isStillImage)
         {
             UpdateStillImageSubPanel();
         }
@@ -2170,21 +2229,21 @@ public class SettingsForm : Form
                 _offsetYSlider.Value = 0;
                 _offsetYValue.Text = "0";
                 _nightLightsCheck.Checked = true;
-                _nightBrightnessSlider.Value = 17;
-                _nightBrightnessValue.Text = "1.7";
+                _nightBrightnessSlider.Value = 15;
+                _nightBrightnessValue.Text = "1.5";
                 _nightBrightnessSlider.Enabled = true;
-                _ambientSlider.Value = 15;
-                _ambientValue.Text = "0.15";
+                _ambientSlider.Value = 40;
+                _ambientValue.Text = "0.40";
                 _topoBathyRadio.Checked = true;
                 break;
 
             case 1: // Flat Map
                 _nightLightsCheck.Checked = true;
-                _nightBrightnessSlider.Value = 17;
-                _nightBrightnessValue.Text = "1.7";
+                _nightBrightnessSlider.Value = 15;
+                _nightBrightnessValue.Text = "1.5";
                 _nightBrightnessSlider.Enabled = true;
-                _ambientSlider.Value = 15;
-                _ambientValue.Text = "0.15";
+                _ambientSlider.Value = 40;
+                _ambientValue.Text = "0.40";
                 _topoBathyRadio.Checked = true;
                 break;
 
@@ -2316,6 +2375,29 @@ public class SettingsForm : Form
         Location = new Point(x, y),
         Font = new Font("Segoe UI", 9)
     };
+
+    private static Panel CreateAccentPanel(int x, int y, int width, int height)
+    {
+        var panel = new Panel
+        {
+            Location = new Point(x, y),
+            Size = new Size(width, height),
+            BackColor = Color.FromArgb(248, 250, 253)
+        };
+        panel.Paint += (_, e) =>
+        {
+            var g = e.Graphics;
+            // Blue accent bar on left edge
+            using var accentBrush = new SolidBrush(Color.FromArgb(74, 144, 217));
+            g.FillRectangle(accentBrush, 0, 0, 3, panel.Height);
+            // Gray border on top, right, bottom
+            using var borderPen = new Pen(Color.FromArgb(204, 204, 204), 1);
+            g.DrawLine(borderPen, 3, 0, panel.Width - 1, 0);              // top
+            g.DrawLine(borderPen, panel.Width - 1, 0, panel.Width - 1, panel.Height - 1); // right
+            g.DrawLine(borderPen, 3, panel.Height - 1, panel.Width - 1, panel.Height - 1); // bottom
+        };
+        return panel;
+    }
 
     private static TrackBar MakeSlider(int x, int y, int min, int max, int value, int width = SliderWidth) => new()
     {
