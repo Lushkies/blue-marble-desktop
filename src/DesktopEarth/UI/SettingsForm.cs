@@ -2426,21 +2426,58 @@ public class SettingsForm : Form
             Width = 110,
             Height = 28
         };
-        addButton.Click += (_, _) =>
+        addButton.Click += async (_, _) =>
         {
-            using var dialog = new OpenFileDialog
-            {
-                Title = "Select Images",
-                Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files|*.*",
-                Multiselect = true
-            };
-            if (dialog.ShowDialog() != DialogResult.OK) return;
-
             try
             {
-                int count = _userImageManager.ImportImages(dialog.FileNames);
-                _userImagesStatusLabel.Text = $"Added {count} image{(count != 1 ? "s" : "")}";
-                RefreshUserImages();
+                // Run file dialog on a dedicated STA thread to avoid UI thread blocking
+                var tcs = new TaskCompletionSource<string[]?>();
+                var dialogThread = new Thread(() =>
+                {
+                    try
+                    {
+                        using var dialog = new OpenFileDialog
+                        {
+                            Title = "Select Images to Import",
+                            Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files|*.*",
+                            Multiselect = true
+                        };
+                        tcs.SetResult(dialog.ShowDialog() == DialogResult.OK
+                            ? dialog.FileNames : null);
+                    }
+                    catch (Exception ex) { tcs.SetException(ex); }
+                });
+                dialogThread.SetApartmentState(ApartmentState.STA);
+                dialogThread.Start();
+
+                var filePaths = await tcs.Task;
+                if (filePaths == null || filePaths.Length == 0) return;
+
+                addButton.Enabled = false;
+                addButton.Text = "Importing...";
+
+                try
+                {
+                    int count = await Task.Run(() => _userImageManager.ImportImages(filePaths));
+                    if (IsDisposed) return;
+                    _userImagesStatusLabel.Text = $"Added {count} image{(count != 1 ? "s" : "")}";
+
+                    var images = await Task.Run(() => _userImageManager.GetAllImages());
+                    if (IsDisposed) return;
+
+                    foreach (var img in images)
+                        img.IsFavorited = _settings.Favorites.Any(f =>
+                            f.Source == ImageSource.UserImages && f.ImageId == img.Id);
+                    _userImagesGrid.SetImages(images);
+                }
+                finally
+                {
+                    if (!IsDisposed)
+                    {
+                        addButton.Enabled = true;
+                        addButton.Text = "Add Images...";
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -2472,9 +2509,11 @@ public class SettingsForm : Form
         return panel;
     }
 
-    private void RefreshUserImages()
+    private async void RefreshUserImages()
     {
-        var images = _userImageManager.GetAllImages();
+        var images = await Task.Run(() => _userImageManager.GetAllImages());
+        if (IsDisposed) return;
+
         foreach (var img in images)
             img.IsFavorited = _settings.Favorites.Any(f =>
                 f.Source == ImageSource.UserImages && f.ImageId == img.Id);
@@ -2566,20 +2605,74 @@ public class SettingsForm : Form
             Location = new Point(LeftMargin, y),
             Width = 110, Height = 28
         };
-        addImagesButton.Click += (_, _) =>
+        addImagesButton.Click += async (_, _) =>
         {
-            using var dialog = new OpenFileDialog
-            {
-                Title = "Select Images",
-                Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files|*.*",
-                Multiselect = true
-            };
-            if (dialog.ShowDialog() != DialogResult.OK) return;
-
             try
             {
-                int count = _userImageManager.ImportImages(dialog.FileNames);
-                RefreshMyCollectionTab();
+                // Run file dialog on a dedicated STA thread to avoid UI thread blocking
+                var tcs = new TaskCompletionSource<string[]?>();
+                var dialogThread = new Thread(() =>
+                {
+                    try
+                    {
+                        using var dialog = new OpenFileDialog
+                        {
+                            Title = "Select Images to Import",
+                            Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files|*.*",
+                            Multiselect = true
+                        };
+                        tcs.SetResult(dialog.ShowDialog() == DialogResult.OK
+                            ? dialog.FileNames : null);
+                    }
+                    catch (Exception ex) { tcs.SetException(ex); }
+                });
+                dialogThread.SetApartmentState(ApartmentState.STA);
+                dialogThread.Start();
+
+                var filePaths = await tcs.Task;
+                if (filePaths == null || filePaths.Length == 0) return;
+
+                addImagesButton.Enabled = false;
+                addImagesButton.Text = "Importing...";
+
+                try
+                {
+                    int count = await Task.Run(() => _userImageManager.ImportImages(filePaths));
+
+                    // Refresh with images loaded on background thread
+                    var userImages = await Task.Run(() => _userImageManager.GetAllImages());
+                    if (IsDisposed) return;
+
+                    foreach (var img in userImages)
+                        img.IsFavorited = _settings.Favorites.Any(f =>
+                            f.Source == ImageSource.UserImages && f.ImageId == img.Id);
+
+                    if (_favoritesGrid != null && _userImagesCollectionGrid != null)
+                    {
+                        var favImages = _settings.Favorites.Select(fav => new ImageSourceInfo
+                        {
+                            Source = fav.Source,
+                            Id = fav.ImageId,
+                            Title = !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId,
+                            ThumbnailUrl = fav.ThumbnailUrl,
+                            FullImageUrl = fav.FullImageUrl,
+                            IsFavorited = true
+                        }).ToList();
+
+                        _favoritesGrid.SetImages(favImages);
+                        _favoritesCountLabel!.Text = $"Favorites ({favImages.Count})";
+                        _userImagesCollectionGrid.SetImages(userImages);
+                        _userImagesCountLabel!.Text = $"User Images ({userImages.Count})";
+                    }
+                }
+                finally
+                {
+                    if (!IsDisposed)
+                    {
+                        addImagesButton.Enabled = true;
+                        addImagesButton.Text = "Add Images...";
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -2602,11 +2695,11 @@ public class SettingsForm : Form
         return tab;
     }
 
-    private void RefreshMyCollectionTab()
+    private async void RefreshMyCollectionTab()
     {
         if (_favoritesGrid == null || _userImagesCollectionGrid == null) return;
 
-        // Favorites section
+        // Favorites section (lightweight, no I/O)
         var favImages = _settings.Favorites.Select(fav => new ImageSourceInfo
         {
             Source = fav.Source,
@@ -2620,8 +2713,10 @@ public class SettingsForm : Form
         _favoritesGrid.SetImages(favImages);
         _favoritesCountLabel!.Text = $"Favorites ({favImages.Count})";
 
-        // User images section
-        var userImages = _userImageManager.GetAllImages();
+        // User images section (heavy I/O: Image.Identify + EnsureThumbnail for each file)
+        var userImages = await Task.Run(() => _userImageManager.GetAllImages());
+        if (IsDisposed) return;
+
         foreach (var img in userImages)
             img.IsFavorited = _settings.Favorites.Any(f =>
                 f.Source == ImageSource.UserImages && f.ImageId == img.Id);
@@ -2756,20 +2851,22 @@ public class SettingsForm : Form
         RefreshMyCollectionTab();
     }
 
-    private void ClearAllUserImages()
+    private async void ClearAllUserImages()
     {
-        var images = _userImageManager.GetAllImages();
-        if (images.Count == 0) return;
+        var imagePaths = _userImageManager.GetAllImagePaths();
+        if (imagePaths.Count == 0) return;
 
         if (MessageBox.Show(
-            $"Delete all {images.Count} user images?\n\nThis permanently removes the files.",
+            $"Delete all {imagePaths.Count} user images?\n\nThis permanently removes the files.",
             "Clear User Images", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             return;
 
         // Also remove any user image favorites
         _settings.Favorites.RemoveAll(f => f.Source == ImageSource.UserImages);
 
-        _userImageManager.DeleteAllImages();
+        await Task.Run(() => _userImageManager.DeleteAllImages());
+        if (IsDisposed) return;
+
         _settingsManager.Save();
         RefreshMyCollectionTab();
     }
