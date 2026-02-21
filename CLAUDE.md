@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 4.3.5
+**Current version:** 4.3.6
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -194,6 +194,7 @@ lib/
 - **v4.3.3** - Pre-release polish: fix per-display settings UI (load/save/switch monitors correctly), fix Moon mode crash when texture missing, thread-safe favorites list, cache size display fix, quality filter no longer triggers re-render, version label, InvariantCulture for date parsing, HTTP response disposal, temp file cleanup
 - **v4.3.4** - Fix per-display wallpaper resetting to primary display's image on app restart (startup re-apply now uses SpanAcross style for PerDisplay composite images)
 - **v4.3.5** - View/Source selector accent panel for clearer visual hierarchy, brighter daytime light default (0.40), city lights default to center (1.5), extended zoom range (2x closer max zoom via 10-degree FOV floor)
+- **v4.3.6** - Remove unused minimum quality filter dropdown (badges still shown on thumbnails), remove HD texture download time estimate
 
 ---
 

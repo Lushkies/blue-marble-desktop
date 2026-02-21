@@ -69,7 +69,6 @@ public class SettingsForm : Form
     // View accent panel and promoted controls
     private Panel _viewAccentPanel = null!;
     private Label _sourceLabel = null!;
-    private Label _qualityFilterLabel = null!;
 
     // Still Image source sub-dropdown
     private ComboBox _stillImageSourceCombo = null!;
@@ -144,9 +143,6 @@ public class SettingsForm : Form
 
     // Shared Reset button
     private Button _resetButton = null!;
-
-    // Quality filter
-    private ComboBox _qualityFilterCombo = null!;
 
     // Presets controls
     private ComboBox _presetCombo = null!;
@@ -297,15 +293,6 @@ public class SettingsForm : Form
                 _userImagesGrid.SelectedImage.Id) ?? "";
         }
 
-        // Quality filter
-        s.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
-        {
-            1 => ImageQualityTier.SD,
-            2 => ImageQualityTier.HD,
-            3 => ImageQualityTier.UD,
-            _ => ImageQualityTier.Unknown // "Any"
-        };
-
         // Rotation
         s.RandomRotationEnabled = _randomRotationCheck.Checked;
         s.RandomFromFavoritesOnly = _randomFavoritesOnlyCheck.Checked;
@@ -369,15 +356,6 @@ public class SettingsForm : Form
             config.UserImageSelectedPath = _userImageManager.GetImagePath(
                 _userImagesGrid.SelectedImage.Id) ?? "";
         }
-
-        // Quality filter
-        config.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
-        {
-            1 => ImageQualityTier.SD,
-            2 => ImageQualityTier.HD,
-            3 => ImageQualityTier.UD,
-            _ => ImageQualityTier.Unknown
-        };
 
         // Rotation
         config.RandomRotationEnabled = _randomRotationCheck.Checked;
@@ -583,42 +561,6 @@ public class SettingsForm : Form
             // Don't trigger render — user must click an image to set wallpaper
         };
         _viewAccentPanel.Controls.Add(_stillImageSourceCombo);
-
-        _qualityFilterLabel = new Label
-        {
-            Text = "Min quality:",
-            AutoSize = true,
-            Location = new Point(275, 42),
-            Font = new Font("Segoe UI", 9),
-            BackColor = Color.Transparent,
-            Visible = false
-        };
-        _viewAccentPanel.Controls.Add(_qualityFilterLabel);
-
-        _qualityFilterCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(365, 39),
-            Width = 90,
-            Visible = false
-        };
-        _qualityFilterCombo.Items.AddRange(["Any", "SD (1080p+)", "HD (2160p+)", "UD (4K+)"]);
-        _qualityFilterCombo.SelectedIndex = 1; // Default: SD
-        _qualityFilterCombo.SelectedIndexChanged += (_, _) =>
-        {
-            if (!_isLoading)
-            {
-                _settings.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
-                {
-                    1 => ImageQualityTier.SD,
-                    2 => ImageQualityTier.HD,
-                    3 => ImageQualityTier.UD,
-                    _ => ImageQualityTier.Unknown
-                };
-                _settingsManager.Save();
-            }
-        };
-        _viewAccentPanel.Controls.Add(_qualityFilterCombo);
 
         tab.Controls.Add(_viewAccentPanel);
         y += 45; // accent panel (40) + gap (5)
@@ -1310,7 +1252,7 @@ public class SettingsForm : Form
         {
             Text = hdAvailable
                 ? "\u2713 HD textures installed \u2014 Globe and Flat Map using ultra-high resolution."
-                : $"Standard textures in use. Download ~{HiResTextureManager.GetEstimatedDownloadSizeMB()} MB for HD (may take 10\u201330 min).",
+                : $"Standard textures in use. Download ~{HiResTextureManager.GetEstimatedDownloadSizeMB()} MB for HD.",
             AutoSize = true,
             Location = new Point(15, 52),
             Font = new Font("Segoe UI", 8.5f)
@@ -1729,8 +1671,6 @@ public class SettingsForm : Form
         // Source row in accent panel — visible only for Still Image
         _sourceLabel.Visible = isStillImage;
         _stillImageSourceCombo.Visible = isStillImage;
-        _qualityFilterLabel.Visible = isStillImage;
-        _qualityFilterCombo.Visible = isStillImage;
 
         // Resize accent panel: 2 rows for Still Image, 1 row otherwise
         int accentHeight = isStillImage ? 72 : 40;
@@ -2191,15 +2131,6 @@ public class SettingsForm : Form
         if (!string.IsNullOrEmpty(config.SmithsonianSearchQuery))
             _smithsonianSearchBox.Text = config.SmithsonianSearchQuery;
 
-        // Quality filter
-        _qualityFilterCombo.SelectedIndex = config.MinImageQuality switch
-        {
-            ImageQualityTier.SD => 1,
-            ImageQualityTier.HD => 2,
-            ImageQualityTier.UD => 3,
-            _ => 0
-        };
-
         // Rotation
         _randomRotationCheck.Checked = config.RandomRotationEnabled;
         _randomFavoritesOnlyCheck.Checked = config.RandomFromFavoritesOnly;
@@ -2301,15 +2232,6 @@ public class SettingsForm : Form
 
         // API key
         _apiKeyBox.Text = _settings.ApiDataGovKey;
-
-        // Quality filter
-        _qualityFilterCombo.SelectedIndex = _settings.MinImageQuality switch
-        {
-            ImageQualityTier.SD => 1,
-            ImageQualityTier.HD => 2,
-            ImageQualityTier.UD => 3,
-            _ => 0 // Any
-        };
 
         // Rotation
         _randomRotationCheck.Checked = _settings.RandomRotationEnabled;
@@ -2447,14 +2369,7 @@ public class SettingsForm : Form
             NightLightsBrightness = _nightBrightnessSlider.Value / 10f,
             AmbientLight = _ambientSlider.Value / 100f,
             ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo,
-            EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex,
-            MinImageQuality = _qualityFilterCombo.SelectedIndex switch
-            {
-                1 => ImageQualityTier.SD,
-                2 => ImageQualityTier.HD,
-                3 => ImageQualityTier.UD,
-                _ => ImageQualityTier.Unknown
-            }
+            EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex
         };
 
         var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
@@ -2497,13 +2412,6 @@ public class SettingsForm : Form
         if (preset.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
         else _topoRadio.Checked = true;
         _epicTypeCombo.SelectedIndex = (int)preset.EpicImageType;
-        _qualityFilterCombo.SelectedIndex = preset.MinImageQuality switch
-        {
-            ImageQualityTier.SD => 1,
-            ImageQualityTier.HD => 2,
-            ImageQualityTier.UD => 3,
-            _ => 0
-        };
 
         _isLoading = false;
         UpdateModeVisibility();

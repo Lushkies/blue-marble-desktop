@@ -75,9 +75,6 @@ public class AppSettings
     // Unified api.data.gov API key (works for NASA APOD, NPS, and Smithsonian)
     public string ApiDataGovKey { get; set; } = "DEMO_KEY";
 
-    // Image quality filter (minimum quality for still images)
-    public ImageQualityTier MinImageQuality { get; set; } = ImageQualityTier.SD;
-
     // Random rotation
     public bool RandomRotationEnabled { get; set; } = false;
     public bool RandomFromFavoritesOnly { get; set; } = false;
@@ -157,9 +154,6 @@ public class DisplayConfig
     public string SmithsonianSelectedId { get; set; } = "";
     public string SmithsonianSelectedImageUrl { get; set; } = "";
 
-    // Image quality filter
-    public ImageQualityTier MinImageQuality { get; set; } = ImageQualityTier.SD;
-
     // Random rotation
     public bool RandomRotationEnabled { get; set; } = false;
     public bool RandomFromFavoritesOnly { get; set; } = false;
@@ -202,7 +196,6 @@ public class SettingsPreset
     public float AmbientLight { get; set; } = 0.40f;
     public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
     public EpicImageType EpicImageType { get; set; } = EpicImageType.Natural;
-    public ImageQualityTier MinImageQuality { get; set; } = ImageQualityTier.SD;
 }
 
 public enum DisplayMode { Spherical, FlatMap, Moon, StillImage }
