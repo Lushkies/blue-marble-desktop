@@ -68,9 +68,14 @@ public class RenderScheduler : IDisposable
 
         // Re-apply persisted wallpaper immediately on startup (no re-render needed).
         // The BMP survives across restarts in %AppData%, so we just tell Windows to use it again.
+        // PerDisplay is internally implemented as a composite image with SpanAcross,
+        // so we must re-apply with Span style (not the PerDisplay enum, which has no wallpaper style).
         if (File.Exists(_wallpaperPath) && new FileInfo(_wallpaperPath).Length > 0)
         {
-            WallpaperSetter.SetWallpaper(_wallpaperPath, _settingsManager.Settings.MultiMonitorMode);
+            var wallpaperMode = _settingsManager.Settings.MultiMonitorMode == MultiMonitorMode.PerDisplay
+                ? MultiMonitorMode.SpanAcross
+                : _settingsManager.Settings.MultiMonitorMode;
+            WallpaperSetter.SetWallpaper(_wallpaperPath, wallpaperMode);
         }
 
         _stopRequested = false;
