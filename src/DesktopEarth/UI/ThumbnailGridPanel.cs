@@ -89,6 +89,27 @@ public class ThumbnailGridPanel : Panel
     }
 
     /// <summary>
+    /// Select an image by its ID. Used to restore saved selection after SetImages().
+    /// Returns true if the image was found and selected.
+    /// </summary>
+    public bool SelectById(string? imageId)
+    {
+        if (string.IsNullOrEmpty(imageId))
+            return false;
+
+        for (int i = 0; i < _images.Count; i++)
+        {
+            if (_images[i].Id == imageId)
+            {
+                _selectedIndex = i;
+                _innerPanel.Invalidate();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Update the favorite status of a specific image in the grid.
     /// </summary>
     public void UpdateFavoriteStatus(string imageId, bool isFavorited)

@@ -50,7 +50,9 @@ public class RenderScheduler : IDisposable
     {
         _settingsManager = settingsManager;
         _assets = assets;
-        _wallpaperPath = Path.Combine(Path.GetTempPath(), "BlueMarbleDesktop_wallpaper.bmp");
+        _wallpaperPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BlueMarbleDesktop", "wallpaper.bmp");
 
         // On subsequent launches, don't render until user explicitly changes something
         if (_settingsManager.SkipFirstRender)
@@ -63,6 +65,13 @@ public class RenderScheduler : IDisposable
     public void Start()
     {
         if (_renderThread != null) return;
+
+        // Re-apply persisted wallpaper immediately on startup (no re-render needed).
+        // The BMP survives across restarts in %AppData%, so we just tell Windows to use it again.
+        if (File.Exists(_wallpaperPath) && new FileInfo(_wallpaperPath).Length > 0)
+        {
+            WallpaperSetter.SetWallpaper(_wallpaperPath, _settingsManager.Settings.MultiMonitorMode);
+        }
 
         _stopRequested = false;
         _renderThread = new Thread(RenderLoop)
@@ -263,6 +272,7 @@ public class RenderScheduler : IDisposable
                         ClearCurrentImage(); // Globe/Flat Map/Moon are not favoritable
                     }
 
+                    Directory.CreateDirectory(Path.GetDirectoryName(_wallpaperPath)!);
                     SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
                     WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
                 }
@@ -444,6 +454,7 @@ public class RenderScheduler : IDisposable
         }
 
         // Save composite and set as spanned wallpaper
+        Directory.CreateDirectory(Path.GetDirectoryName(_wallpaperPath)!);
         composite.SaveAsBmp(_wallpaperPath);
         WallpaperSetter.SetWallpaper(_wallpaperPath, MultiMonitorMode.SpanAcross);
     }
