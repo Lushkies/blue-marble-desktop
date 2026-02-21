@@ -85,6 +85,10 @@ public class AppSettings
     // Favorites
     public List<FavoriteImage> Favorites { get; set; } = new();
 
+    /// <summary>Lock object for thread-safe access to the Favorites list.</summary>
+    [JsonIgnore]
+    public readonly object FavoritesLock = new();
+
     // Settings presets (appearance-only saved configurations)
     public List<SettingsPreset> Presets { get; set; } = new();
 

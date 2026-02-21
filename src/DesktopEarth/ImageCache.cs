@@ -69,6 +69,7 @@ public class ImageCache
         ImageSource source, string imageId, string url,
         string extension = ".jpg", CancellationToken ct = default)
     {
+        string? tempPath = null;
         try
         {
             var cachePath = GetCachePath(source, imageId, extension);
@@ -81,10 +82,10 @@ public class ImageCache
             Directory.CreateDirectory(dir);
 
             Console.WriteLine($"ImageCache: Downloading {source}/{imageId}...");
-            var response = await Http.GetAsync(url, ct);
+            using var response = await Http.GetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
-            var tempPath = cachePath + ".tmp";
+            tempPath = cachePath + ".tmp";
             await using (var fs = File.Create(tempPath))
             {
                 await response.Content.CopyToAsync(fs, ct);
@@ -97,6 +98,7 @@ public class ImageCache
         catch (Exception ex)
         {
             Console.WriteLine($"ImageCache download error ({source}/{imageId}): {ex.Message}");
+            try { if (tempPath != null) File.Delete(tempPath); } catch { }
             return null;
         }
     }
@@ -109,6 +111,7 @@ public class ImageCache
         ImageSource source, string imageId, string thumbnailUrl,
         CancellationToken ct = default)
     {
+        string? tempPath = null;
         try
         {
             var cachePath = GetThumbCachePath(source, imageId);
@@ -119,10 +122,10 @@ public class ImageCache
             var dir = Path.GetDirectoryName(cachePath)!;
             Directory.CreateDirectory(dir);
 
-            var response = await Http.GetAsync(thumbnailUrl, ct);
+            using var response = await Http.GetAsync(thumbnailUrl, ct);
             response.EnsureSuccessStatusCode();
 
-            var tempPath = cachePath + ".tmp";
+            tempPath = cachePath + ".tmp";
             await using (var fs = File.Create(tempPath))
             {
                 await response.Content.CopyToAsync(fs, ct);
@@ -134,6 +137,7 @@ public class ImageCache
         catch (Exception ex)
         {
             Console.WriteLine($"ImageCache thumb error ({source}/{imageId}): {ex.Message}");
+            try { if (tempPath != null) File.Delete(tempPath); } catch { }
             return null;
         }
     }

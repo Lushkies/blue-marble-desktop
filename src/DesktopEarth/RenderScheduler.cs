@@ -266,7 +266,7 @@ public class RenderScheduler : IDisposable
                         pixels = settings.DisplayMode switch
                         {
                             DisplayMode.FlatMap => flatMapRenderer!.Render(renderWidth, renderHeight),
-                            DisplayMode.Moon => moonRenderer!.Render(renderWidth, renderHeight),
+                            DisplayMode.Moon when moonRenderer != null => moonRenderer.Render(renderWidth, renderHeight),
                             _ => earthRenderer!.Render(renderWidth, renderHeight),
                         };
                         ClearCurrentImage(); // Globe/Flat Map/Moon are not favoritable
@@ -422,7 +422,7 @@ public class RenderScheduler : IDisposable
                 pixels = displaySettings.DisplayMode switch
                 {
                     DisplayMode.FlatMap => flatMapRenderer!.Render(sw, sh),
-                    DisplayMode.Moon => moonRenderer!.Render(sw, sh),
+                    DisplayMode.Moon when moonRenderer != null => moonRenderer.Render(sw, sh),
                     _ => earthRenderer!.Render(sw, sh),
                 };
             }
@@ -676,8 +676,13 @@ public class RenderScheduler : IDisposable
 
             if (settings.RandomFromFavoritesOnly)
             {
-                var sourceFavs = settings.Favorites
-                    .Where(f => f.Source == source).ToList();
+                // Snapshot favorites under lock (UI thread may modify the list concurrently)
+                List<FavoriteImage> sourceFavs;
+                lock (settings.FavoritesLock)
+                {
+                    sourceFavs = settings.Favorites
+                        .Where(f => f.Source == source).ToList();
+                }
 
                 if (sourceFavs.Count > 0)
                 {

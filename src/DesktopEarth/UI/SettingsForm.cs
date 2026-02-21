@@ -1735,6 +1735,15 @@ public class SettingsForm : Form
         bool perDisplay = _perDisplayRadio.Checked;
         _monitorSelectLabel.Enabled = perDisplay;
         _monitorSelectCombo.Enabled = perDisplay;
+
+        // When switching modes, reload the correct settings into the UI
+        if (!_isLoading)
+        {
+            if (perDisplay && !string.IsNullOrEmpty(_selectedMonitorDevice))
+                LoadAppearanceFromDisplayConfig(_selectedMonitorDevice);
+            else if (!perDisplay)
+                LoadAppearanceFromGlobalSettings();
+        }
     }
 
     // -- REFRESH METHODS --
@@ -1753,7 +1762,8 @@ public class SettingsForm : Form
 
                 // Parse the most recent date (first in the list — API returns newest first)
                 var lastDateStr = dates[0].Date;
-                if (!DateTime.TryParse(lastDateStr, out var latestDate)) return;
+                if (!DateTime.TryParse(lastDateStr, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var latestDate)) return;
 
                 _epicLatestAvailableDate = latestDate;
 
@@ -1827,7 +1837,8 @@ public class SettingsForm : Form
                     var collection = imageType == EpicImageType.Enhanced ? "enhanced" : "natural";
                     var sourceInfos = images.Select(img =>
                     {
-                        DateTime.TryParse(img.Date, out var dt);
+                        DateTime.TryParse(img.Date, System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out var dt);
                         var yyyy = dt.Year.ToString("D4");
                         var mm = dt.Month.ToString("D2");
                         var dd = dt.Day.ToString("D2");
@@ -2100,8 +2111,26 @@ public class SettingsForm : Form
         _epicTypeCombo.SelectedIndex = (int)config.EpicImageType;
         _epicLatestRadio.Checked = config.EpicUseLatest;
         _epicDateRadio.Checked = !config.EpicUseLatest;
-        if (!string.IsNullOrEmpty(config.EpicSelectedDate) && DateTime.TryParse(config.EpicSelectedDate, out var epicDate))
+        if (!string.IsNullOrEmpty(config.EpicSelectedDate) &&
+            DateTime.TryParse(config.EpicSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var epicDate))
             _epicDatePicker.Value = epicDate;
+
+        // APOD
+        _apodLatestRadio.Checked = config.ApodUseLatest;
+        _apodDateRadio.Checked = !config.ApodUseLatest;
+        if (!string.IsNullOrEmpty(config.ApodSelectedDate) &&
+            DateTime.TryParse(config.ApodSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var apodDate))
+            _apodDatePicker.Value = apodDate;
+
+        // NPS
+        if (!string.IsNullOrEmpty(config.NpsSearchQuery))
+            _npsSearchBox.Text = config.NpsSearchQuery;
+
+        // Smithsonian
+        if (!string.IsNullOrEmpty(config.SmithsonianSearchQuery))
+            _smithsonianSearchBox.Text = config.SmithsonianSearchQuery;
 
         // Quality filter
         _qualityFilterCombo.SelectedIndex = config.MinImageQuality switch
@@ -2206,7 +2235,9 @@ public class SettingsForm : Form
         _epicTypeCombo.SelectedIndex = (int)_settings.EpicImageType;
         _epicLatestRadio.Checked = _settings.EpicUseLatest;
         _epicDateRadio.Checked = !_settings.EpicUseLatest;
-        if (!string.IsNullOrEmpty(_settings.EpicSelectedDate) && DateTime.TryParse(_settings.EpicSelectedDate, out var epicDate))
+        if (!string.IsNullOrEmpty(_settings.EpicSelectedDate) &&
+            DateTime.TryParse(_settings.EpicSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var epicDate))
             _epicDatePicker.Value = epicDate;
 
         // API key
@@ -2266,6 +2297,15 @@ public class SettingsForm : Form
         };
 
         UpdatePerDisplayVisibility();
+
+        // If per-display mode is active, load the first monitor's config into UI
+        // (LoadAppearanceFromGlobalSettings was called earlier, but those are the wrong values)
+        if (_settings.MultiMonitorMode == MultiMonitorMode.PerDisplay &&
+            !string.IsNullOrEmpty(_selectedMonitorDevice))
+        {
+            LoadAppearanceFromDisplayConfig(_selectedMonitorDevice);
+        }
+
         _isLoading = false;
     }
 

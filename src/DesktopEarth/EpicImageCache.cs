@@ -1,10 +1,12 @@
+using System.Globalization;
+
 namespace DesktopEarth;
 
 /// <summary>
 /// Manages cached EPIC images in %AppData%/BlueMarbleDesktop/epic_images/.
 /// Images are organized by type and date:
 ///   epic_images/natural/2026-02-18/epic_1b_20260218001751.jpg
-/// Old images are cleaned up after 7 days.
+/// Old images are cleaned up after 14 days (configurable).
 /// </summary>
 public class EpicImageCache
 {
@@ -23,7 +25,7 @@ public class EpicImageCache
 
         // Parse date from image's Date field
         string dateFolder;
-        if (DateTime.TryParse(image.Date, out var dt))
+        if (DateTime.TryParse(image.Date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
             dateFolder = dt.ToString("yyyy-MM-dd");
         else
             dateFolder = "unknown";
@@ -64,7 +66,7 @@ public class EpicImageCache
                 foreach (var dateDir in Directory.GetDirectories(collectionDir))
                 {
                     var dirName = Path.GetFileName(dateDir);
-                    if (DateTime.TryParse(dirName, out var dirDate) && dirDate < cutoff)
+                    if (DateTime.TryParse(dirName, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dirDate) && dirDate < cutoff)
                     {
                         try
                         {
@@ -102,7 +104,7 @@ public class EpicImageCache
             // Get date directories sorted newest first
             var dateDirs = Directory.GetDirectories(collectionDir)
                 .Select(d => new { Path = d, Name = Path.GetFileName(d) })
-                .Where(d => DateTime.TryParse(d.Name, out _))
+                .Where(d => DateTime.TryParse(d.Name, CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
                 .OrderByDescending(d => d.Name)
                 .ToList();
 
