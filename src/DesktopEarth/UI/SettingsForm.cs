@@ -399,7 +399,9 @@ public class SettingsForm : Form
 
         var tabControl = new TabControl
         {
-            Dock = DockStyle.Fill,
+            Location = new Point(0, 0),
+            Size = new Size(ClientSize.Width, ClientSize.Height - 20),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
             Padding = new Point(8, 4)
         };
 
@@ -414,6 +416,19 @@ public class SettingsForm : Form
         };
 
         Controls.Add(tabControl);
+
+        // Version label at bottom-left of window (visible on all tabs)
+        var version = System.Reflection.Assembly.GetExecutingAssembly()
+            .GetName().Version?.ToString(3) ?? "0.0.0";
+        Controls.Add(new Label
+        {
+            Text = $"v{version}",
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Color.FromArgb(170, 170, 170),
+            AutoSize = true,
+            Location = new Point(8, ClientSize.Height - 18),
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Left
+        });
     }
 
     private int AddSliderRow(Control parent, string labelText, string defaultValue,
@@ -783,17 +798,19 @@ public class SettingsForm : Form
         _qualityFilterCombo.SelectedIndexChanged += (_, _) =>
         {
             // Save the quality filter setting without triggering a render.
-            // The filter only affects which thumbnails are visible in the grid.
-            if (!_isLoading) _settingsManager.ApplyAndSave(s =>
+            // Uses Save() directly instead of ApplyAndSave() to avoid firing
+            // SettingsChanged (which would trigger RenderScheduler.TriggerUserUpdate).
+            if (!_isLoading)
             {
-                s.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
+                _settings.MinImageQuality = _qualityFilterCombo.SelectedIndex switch
                 {
                     1 => ImageQualityTier.SD,
                     2 => ImageQualityTier.HD,
                     3 => ImageQualityTier.UD,
                     _ => ImageQualityTier.Unknown
                 };
-            });
+                _settingsManager.Save();
+            }
         };
         panel.Controls.Add(_qualityFilterCombo);
         py += 30;
@@ -1379,19 +1396,7 @@ public class SettingsForm : Form
             ForeColor = Color.Gray
         };
         cacheGroup.Controls.Add(cacheSizeLabel);
-        Task.Run(() =>
-        {
-            long totalBytes = GetDirectorySize(Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "BlueMarbleDesktop"));
-            string sizeText = totalBytes switch
-            {
-                < 1024 * 1024 => $"{totalBytes / 1024} KB used",
-                < 1024L * 1024 * 1024 => $"{totalBytes / (1024 * 1024)} MB used",
-                _ => $"{totalBytes / (1024L * 1024 * 1024):F1} GB used"
-            };
-            try { Invoke(() => cacheSizeLabel.Text = sizeText); } catch { }
-        });
+        UpdateCacheSizeLabelAsync(cacheSizeLabel);
 
         var clearCacheButton = new Button
         {
@@ -1641,6 +1646,20 @@ public class SettingsForm : Form
         tab.AutoScrollMinSize = new Size(510, y);
 
         return tab;
+    }
+
+    private async void UpdateCacheSizeLabelAsync(Label label)
+    {
+        long totalBytes = await Task.Run(() => GetDirectorySize(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "BlueMarbleDesktop")));
+        if (IsDisposed) return;
+        label.Text = totalBytes switch
+        {
+            < 1024 * 1024 => $"{totalBytes / 1024} KB used",
+            < 1024L * 1024 * 1024 => $"{totalBytes / (1024 * 1024)} MB used",
+            _ => $"{totalBytes / (1024L * 1024 * 1024):F1} GB used"
+        };
     }
 
     private static long GetDirectorySize(string path)
