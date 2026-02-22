@@ -758,22 +758,22 @@ public class RenderScheduler : IDisposable
 
     /// <summary>
     /// Build a weighted rotation pool from all sources.
-    /// Weights (base 40): Gallery 13 (32.5%), APOD 7 (17.5%), EPIC 4 (10%),
-    ///   NPS 4 (10%), Smithsonian 4 (10%), User Images 0-8 (0-20% scaled by collection size).
+    /// Weights (base 20): Gallery 10 (50%), APOD 4 (20%), EPIC 2 (10%),
+    ///   NPS 2 (10%), Smithsonian 2 (10%), User Images 0-4 (0-17% scaled by collection size).
     /// Shuffled deterministically so sequential cycling produces mixed order.
     /// </summary>
     private List<string> BuildWeightedAllPool(AppSettings settings)
     {
         var pool = new List<string>();
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaGallery), 13);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod), 7);
-        AddWeighted(pool, _epicCache.GetAllCachedImagePaths(settings.EpicImageType), 4);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks), 4);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian), 4);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaGallery), 10);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod), 4);
+        AddWeighted(pool, _epicCache.GetAllCachedImagePaths(settings.EpicImageType), 2);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks), 2);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian), 2);
 
-        // User images: scaled by collection size (0=skip, 1=single copy, 2-14=10%, 15+=20%)
+        // User images: scaled by collection size (0=skip, 1=single copy, 2-14=10%, 15+=17%)
         var userPaths = new UserImageManager().GetAllImagePaths();
-        int userWeight = userPaths.Count switch { 0 => 0, 1 => 1, < 15 => 4, _ => 8 };
+        int userWeight = userPaths.Count switch { 0 => 0, 1 => 1, < 15 => 2, _ => 4 };
         if (userWeight > 0) AddWeighted(pool, userPaths, userWeight);
 
         // Add favorites that aren't already in the pool (e.g., from sources without local cache)
@@ -829,15 +829,18 @@ public class RenderScheduler : IDisposable
 
         int currentPoolSize = BuildRotationPool(settings, source).Count;
 
-        // Determine fetch frequency based on pool size and API key
+        // Determine fetch frequency based on pool size, API key, and source
         bool isDemoKey = settings.ApiDataGovKey == "DEMO_KEY";
+        bool isNoKeySource = source == RotationSource.NasaGallery; // No API key, no rate limit
         bool shouldFetch;
-        if (isDemoKey)
-            shouldFetch = (_poolBuildCycleCount % 5) == 0; // Conservative for DEMO_KEY
-        else if (currentPoolSize < 20)
+        if (currentPoolSize < 20)
             shouldFetch = true; // Aggressive when pool is small
+        else if (isDemoKey && !isNoKeySource)
+            shouldFetch = (_poolBuildCycleCount % 5) == 0; // Conservative for DEMO_KEY sources
+        else if (isNoKeySource || source == RotationSource.All)
+            shouldFetch = (_poolBuildCycleCount % 3) == 0; // Gallery + All: more frequent
         else
-            shouldFetch = (_poolBuildCycleCount % 5) == 0; // Maintenance
+            shouldFetch = (_poolBuildCycleCount % 5) == 0; // Maintenance for keyed sources
 
         if (!shouldFetch) return;
 
@@ -928,28 +931,31 @@ public class RenderScheduler : IDisposable
             }
             case RotationSource.NasaGallery:
             {
-                // Fetch images from a random curated query
+                // Fetch images from a random curated query — more aggressive caching
+                // since Gallery is the primary rotation source (50% of weighted pool)
                 var queries = NasaGalleryApiClient.SuggestedQueries;
                 var randomQuery = queries[Random.Shared.Next(queries.Length)];
                 var galleryClient = new NasaGalleryApiClient();
-                var images = await galleryClient.SearchImagesAsync(randomQuery, 10);
+                var images = await galleryClient.SearchImagesAsync(randomQuery, 20);
                 if (images != null)
                 {
-                    foreach (var img in images.Take(3))
+                    // Fetch 5 images per call (higher than other sources) to build cache faster
+                    foreach (var img in images.Take(5))
                     {
                         var bestUrl = await galleryClient.GetBestImageUrlAsync(img.Id);
                         if (!string.IsNullOrEmpty(bestUrl))
                             await _imageCache.DownloadToCache(ImageSource.NasaGallery, img.Id, bestUrl);
                     }
-                    Console.WriteLine($"Pool build: Fetched NASA Gallery \"{randomQuery}\"");
+                    Console.WriteLine($"Pool build: Fetched NASA Gallery \"{randomQuery}\" ({Math.Min(5, images.Count)} images)");
                 }
                 break;
             }
             case RotationSource.All:
             {
-                // Pick a random source (weighted: Gallery 3x, APOD 2x, EPIC 1x, NPS 1x, SI 1x)
+                // Pick a random source (weighted: Gallery 5x, APOD 2x, EPIC 1x, NPS 1x, SI 1x)
                 var sources = new[] {
                     RotationSource.NasaGallery, RotationSource.NasaGallery, RotationSource.NasaGallery,
+                    RotationSource.NasaGallery, RotationSource.NasaGallery,
                     RotationSource.NasaApod, RotationSource.NasaApod,
                     RotationSource.NasaEpic,
                     RotationSource.NationalParks,

@@ -447,7 +447,7 @@ public class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(560, 790);
+        ClientSize = new Size(560, 820);
         ShowInTaskbar = true;
         BackColor = Theme.FormBackground;
         ForeColor = Theme.PrimaryText;
