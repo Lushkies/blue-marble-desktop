@@ -2519,6 +2519,9 @@ public class SettingsForm : Form
                 case DateTimePicker dtp:
                     Theme.StyleDateTimePicker(dtp);
                     break;
+                case TrackBar tb:
+                    Theme.StyleTrackBar(tb);
+                    break;
             }
 
             // Recurse into child controls (panels, groupboxes, tabpages, etc.)

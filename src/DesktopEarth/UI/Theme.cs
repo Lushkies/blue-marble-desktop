@@ -27,6 +27,10 @@ public static partial class Theme
     [DllImport("uxtheme.dll", EntryPoint = "#133", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool AllowDarkModeForWindow(IntPtr hwnd, bool allow);
 
+    // SetWindowTheme — apply a visual style theme class to a specific control
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr hwnd, string? pszSubAppName, string? pszSubIdList);
+
     private const int AllowDark = 1;
 
     /// <summary>
@@ -222,6 +226,21 @@ public static partial class Theme
         {
             radio.ForeColor = Color.FromArgb(220, 220, 220);
         }
+    }
+
+    /// <summary>
+    /// Style a TrackBar (slider) for the current theme.
+    /// Uses SetWindowTheme to apply the same dark Explorer theme that Windows File Explorer uses.
+    /// </summary>
+    public static void StyleTrackBar(TrackBar trackBar)
+    {
+        if (!IsDarkMode) return;
+        try
+        {
+            SetWindowTheme(trackBar.Handle, "DarkMode_Explorer", null);
+            trackBar.BackColor = FormBackground;
+        }
+        catch { } // Graceful fallback
     }
 
     /// <summary>
