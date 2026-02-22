@@ -33,6 +33,7 @@ public class RenderScheduler : IDisposable
     private string? _randomImageOverride;
     private ImageSource? _randomImageSource;
     private int _poolBuildCycleCount;
+    private bool _isTimerTick; // Distinguishes timer ticks from user-triggered renders
 
     // Gate: prevents all rendering until user explicitly triggers an update.
     // Defaults to true (first-ever run renders immediately).
@@ -219,6 +220,7 @@ public class RenderScheduler : IDisposable
             }
 
             _renderNowSignal.Reset();
+            _isTimerTick = !signaled; // Timer tick (not user-triggered) — safe to advance rotation
             firstRender = false;
 
             try
@@ -246,8 +248,8 @@ public class RenderScheduler : IDisposable
                         InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
                     }
 
-                    // Handle image rotation for still image sources
-                    if (settings.DisplayMode == DisplayMode.StillImage && settings.RandomRotationEnabled)
+                    // Handle image rotation for still image sources (only on timer ticks, not user-triggered renders)
+                    if (settings.DisplayMode == DisplayMode.StillImage && settings.RandomRotationEnabled && _isTimerTick)
                     {
                         PickNextImage(settings, settings.RandomRotationSource);
                         MaybeProactiveFetch(settings);
@@ -320,6 +322,7 @@ public class RenderScheduler : IDisposable
             ImageSource.NationalParks => "National Parks",
             ImageSource.Smithsonian => "Smithsonian",
             ImageSource.UserImages => "user image",
+            ImageSource.NasaGallery => "NASA Gallery",
             _ => "still image"
         },
         _ => "earth"
@@ -389,6 +392,10 @@ public class RenderScheduler : IDisposable
                 SmithsonianSearchQuery = displayConfig?.SmithsonianSearchQuery ?? settings.SmithsonianSearchQuery,
                 SmithsonianSelectedId = displayConfig?.SmithsonianSelectedId ?? settings.SmithsonianSelectedId,
                 SmithsonianSelectedImageUrl = displayConfig?.SmithsonianSelectedImageUrl ?? settings.SmithsonianSelectedImageUrl,
+                // NASA Gallery per-display
+                NasaGallerySearchQuery = displayConfig?.NasaGallerySearchQuery ?? settings.NasaGallerySearchQuery,
+                NasaGallerySelectedId = displayConfig?.NasaGallerySelectedId ?? settings.NasaGallerySelectedId,
+                NasaGallerySelectedImageUrl = displayConfig?.NasaGallerySelectedImageUrl ?? settings.NasaGallerySelectedImageUrl,
                 // API key (always from global settings)
                 ApiDataGovKey = settings.ApiDataGovKey,
                 // Auto-rotation per-display
@@ -406,8 +413,8 @@ public class RenderScheduler : IDisposable
             currentImageStyle = displaySettings.ImageStyle;
             InitializeRenderers(gl, displaySettings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
 
-            // Handle image rotation for this display
-            if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled)
+            // Handle image rotation for this display (only on timer ticks, not user-triggered renders)
+            if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled && _isTimerTick)
             {
                 PickNextImage(displaySettings, displaySettings.RandomRotationSource);
                 MaybeProactiveFetch(displaySettings);
@@ -508,7 +515,7 @@ public class RenderScheduler : IDisposable
     }
 
     /// <summary>
-    /// Render an image from a non-EPIC image source (APOD, NPS, Smithsonian).
+    /// Render an image from a non-EPIC image source (APOD, NPS, Smithsonian, NASA Gallery).
     /// Downloads to cache if needed, falls back to cached images on error.
     /// </summary>
     private byte[] RenderImageSource(GL gl, AppSettings settings, ImageSource source,
@@ -591,6 +598,23 @@ public class RenderScheduler : IDisposable
             return new byte[width * height * 4];
         }
 
+        // For NASA Gallery, resolve the best image URL from the asset manifest
+        // (search results only return thumbnail URLs)
+        if (source == ImageSource.NasaGallery && !_imageCache.IsCached(source, imageId))
+        {
+            try
+            {
+                var bestUrl = new NasaGalleryApiClient().GetBestImageUrlAsync(imageId)
+                    .GetAwaiter().GetResult();
+                if (!string.IsNullOrEmpty(bestUrl))
+                    imageUrl = bestUrl;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"NASA Gallery URL resolve error: {ex.Message}");
+            }
+        }
+
         // Try to download or use cache
         string? imagePath = null;
         try
@@ -650,6 +674,7 @@ public class RenderScheduler : IDisposable
         ImageSource.NationalParks => settings.NpsSelectedImageUrl,
         ImageSource.Smithsonian => settings.SmithsonianSelectedImageUrl,
         ImageSource.UserImages => settings.UserImageSelectedPath,
+        ImageSource.NasaGallery => settings.NasaGallerySelectedImageUrl,
         _ => null
     };
 
@@ -662,6 +687,7 @@ public class RenderScheduler : IDisposable
         ImageSource.NationalParks => settings.NpsSelectedImageId,
         ImageSource.Smithsonian => settings.SmithsonianSelectedId,
         ImageSource.UserImages => settings.UserImageSelectedId,
+        ImageSource.NasaGallery => settings.NasaGallerySelectedId,
         _ => null
     };
 
@@ -700,6 +726,7 @@ public class RenderScheduler : IDisposable
             RotationSource.NationalParks => _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks),
             RotationSource.Smithsonian => _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian),
             RotationSource.UserImages => new UserImageManager().GetAllImagePaths(),
+            RotationSource.NasaGallery => _imageCache.GetAllCachedImagePaths(ImageSource.NasaGallery),
             RotationSource.Favorites => GetFavoriteImagePaths(settings),
             RotationSource.All => BuildWeightedAllPool(settings),
             _ => new List<string>()
@@ -739,6 +766,7 @@ public class RenderScheduler : IDisposable
         AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod), 3);
         AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks), 3);
         AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian), 1);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaGallery), 3);
         AddWeighted(pool, new UserImageManager().GetAllImagePaths(), 2);
 
         // Add favorites that aren't already in the pool (e.g., from sources without local cache)
@@ -775,6 +803,7 @@ public class RenderScheduler : IDisposable
         if (path.Contains("nationalparks")) return ImageSource.NationalParks;
         if (path.Contains("smithsonian")) return ImageSource.Smithsonian;
         if (path.Contains("user_images")) return ImageSource.UserImages;
+        if (path.Contains("nasagallery")) return ImageSource.NasaGallery;
         return null;
     }
 
@@ -890,6 +919,25 @@ public class RenderScheduler : IDisposable
                 }
                 break;
             }
+            case RotationSource.NasaGallery:
+            {
+                // Fetch images from a random curated query
+                var queries = NasaGalleryApiClient.SuggestedQueries;
+                var randomQuery = queries[Random.Shared.Next(queries.Length)];
+                var galleryClient = new NasaGalleryApiClient();
+                var images = await galleryClient.SearchImagesAsync(randomQuery, 10);
+                if (images != null)
+                {
+                    foreach (var img in images.Take(3))
+                    {
+                        var bestUrl = await galleryClient.GetBestImageUrlAsync(img.Id);
+                        if (!string.IsNullOrEmpty(bestUrl))
+                            await _imageCache.DownloadToCache(ImageSource.NasaGallery, img.Id, bestUrl);
+                    }
+                    Console.WriteLine($"Pool build: Fetched NASA Gallery \"{randomQuery}\"");
+                }
+                break;
+            }
             case RotationSource.All:
             {
                 // Pick a random source (weighted toward nature/space)
@@ -897,6 +945,7 @@ public class RenderScheduler : IDisposable
                     RotationSource.NasaApod, RotationSource.NasaApod,
                     RotationSource.NationalParks, RotationSource.NationalParks,
                     RotationSource.NasaEpic,
+                    RotationSource.NasaGallery, RotationSource.NasaGallery,
                     RotationSource.Smithsonian
                 };
                 await FetchNewImageForPool(sources[Random.Shared.Next(sources.Length)], apiKey, epicType);

@@ -262,6 +262,7 @@ public class ImageCache
         ImageSource.NationalParks => "nationalparks",
         ImageSource.Smithsonian => "smithsonian",
         ImageSource.UserImages => "userimages",
+        ImageSource.NasaGallery => "nasagallery",
         _ => "other"
     };
 

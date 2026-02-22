@@ -279,6 +279,7 @@ public class ThumbnailGridPanel : Panel
             ImageSource.NationalParks => "NPS",
             ImageSource.Smithsonian => "SI",
             ImageSource.UserImages => "USER",
+            ImageSource.NasaGallery => "NASA",
             _ => ""
         };
         if (string.IsNullOrEmpty(text)) return;

@@ -73,6 +73,11 @@ public class AppSettings
     public string SmithsonianSelectedId { get; set; } = "";
     public string SmithsonianSelectedImageUrl { get; set; } = "";
 
+    // NASA Gallery settings (images-api.nasa.gov — no API key needed)
+    public string NasaGallerySearchQuery { get; set; } = "nebula";
+    public string NasaGallerySelectedId { get; set; } = "";
+    public string NasaGallerySelectedImageUrl { get; set; } = "";
+
     // Unified api.data.gov API key (works for NASA APOD, NPS, and Smithsonian)
     public string ApiDataGovKey { get; set; } = "DEMO_KEY";
 
@@ -156,6 +161,11 @@ public class DisplayConfig
     public string SmithsonianSelectedId { get; set; } = "";
     public string SmithsonianSelectedImageUrl { get; set; } = "";
 
+    // NASA Gallery settings (images-api.nasa.gov — no API key needed)
+    public string NasaGallerySearchQuery { get; set; } = "nebula";
+    public string NasaGallerySelectedId { get; set; } = "";
+    public string NasaGallerySelectedImageUrl { get; set; } = "";
+
     // Auto-rotation
     public bool RandomRotationEnabled { get; set; } = false;
     public RotationSource RandomRotationSource { get; set; } = RotationSource.Favorites;
@@ -201,9 +211,9 @@ public class SettingsPreset
 }
 
 public enum DisplayMode { Spherical, FlatMap, Moon, StillImage }
-public enum ImageSource { NasaEpic, NasaApod, NationalParks, Smithsonian, UserImages }
+public enum ImageSource { NasaEpic, NasaApod, NationalParks, Smithsonian, UserImages, NasaGallery }
 public enum ImageStyle { Topo, TopoBathy }
 public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
 public enum EpicImageType { Natural, Enhanced }
 public enum ImageQualityTier { Unknown, SD, HD, UD }
-public enum RotationSource { NasaEpic, NasaApod, NationalParks, Smithsonian, UserImages, Favorites, All }
+public enum RotationSource { NasaEpic, NasaApod, NationalParks, Smithsonian, UserImages, Favorites, All, NasaGallery }

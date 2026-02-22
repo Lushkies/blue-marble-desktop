@@ -119,8 +119,21 @@ public class SettingsForm : Form
     private FlowLayoutPanel _smithsonianChipsPanel = null!;
     private readonly SmithsonianApiClient _smithsonianApi = new();
 
+    // NASA Gallery controls
+    private Panel _nasaGallerySubPanel = null!;
+    private TextBox _nasaGallerySearchBox = null!;
+    private ThumbnailGridPanel _nasaGalleryGrid = null!;
+    private Label _nasaGalleryStatusLabel = null!;
+    private Button _nasaGallerySearchButton = null!;
+    private FlowLayoutPanel _nasaGalleryChipsPanel = null!;
+    private readonly NasaGalleryApiClient _nasaGalleryApi = new();
+
     // Unified image cache for new sources
     private readonly ImageCache _imageCache = new();
+
+    // Cache size periodic refresh
+    private System.Windows.Forms.Timer? _cacheSizeTimer;
+    private Label? _cacheSizeLabel;
 
     // Auto-rotation controls
     private CheckBox _randomRotationCheck = null!;
@@ -286,6 +299,16 @@ public class SettingsForm : Form
             s.SmithsonianSelectedImageUrl = _smithsonianGrid.SelectedImage.HdImageUrl;
         }
 
+        // NASA Gallery
+        s.NasaGallerySearchQuery = _nasaGallerySearchBox.Text;
+        if (_nasaGalleryGrid.SelectedImage != null)
+        {
+            s.NasaGallerySelectedId = _nasaGalleryGrid.SelectedImage.Id;
+            s.NasaGallerySelectedImageUrl = !string.IsNullOrEmpty(_nasaGalleryGrid.SelectedImage.HdImageUrl)
+                ? _nasaGalleryGrid.SelectedImage.HdImageUrl
+                : _nasaGalleryGrid.SelectedImage.ThumbnailUrl;
+        }
+
         // User images
         if (_userImagesGrid?.SelectedImage != null)
         {
@@ -364,6 +387,16 @@ public class SettingsForm : Form
         {
             config.SmithsonianSelectedId = _smithsonianGrid.SelectedImage.Id;
             config.SmithsonianSelectedImageUrl = _smithsonianGrid.SelectedImage.HdImageUrl;
+        }
+
+        // NASA Gallery
+        config.NasaGallerySearchQuery = _nasaGallerySearchBox.Text;
+        if (_nasaGalleryGrid.SelectedImage != null)
+        {
+            config.NasaGallerySelectedId = _nasaGalleryGrid.SelectedImage.Id;
+            config.NasaGallerySelectedImageUrl = !string.IsNullOrEmpty(_nasaGalleryGrid.SelectedImage.HdImageUrl)
+                ? _nasaGalleryGrid.SelectedImage.HdImageUrl
+                : _nasaGalleryGrid.SelectedImage.ThumbnailUrl;
         }
 
         // User images
@@ -573,7 +606,7 @@ public class SettingsForm : Form
             Width = 180,
             Visible = false
         };
-        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images"]);
+        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images", "NASA Gallery"]);
         _stillImageSourceCombo.SelectedIndex = 0;
         _stillImageSourceCombo.SelectedIndexChanged += (_, _) =>
         {
@@ -608,7 +641,7 @@ public class SettingsForm : Form
             Visible = false,
             Enabled = false
         };
-        _rotationSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images", "Favorites", "All Sources"]);
+        _rotationSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images", "Favorites", "All Sources", "NASA Gallery"]);
         _rotationSourceCombo.SelectedIndex = 5; // Favorites default
         _rotationSourceCombo.SelectedIndexChanged += (_, _) => { if (!_isLoading) SchedulePreview(); };
         tab.Controls.Add(_rotationSourceCombo);
@@ -831,6 +864,9 @@ public class SettingsForm : Form
 
         _userImagesSubPanel = CreateUserImagesSubPanel(subPanelY);
         panel.Controls.Add(_userImagesSubPanel);
+
+        _nasaGallerySubPanel = CreateNasaGallerySubPanel(subPanelY);
+        panel.Controls.Add(_nasaGallerySubPanel);
 
         return panel;
     }
@@ -1310,18 +1346,38 @@ public class SettingsForm : Form
             Location = new Point(15, 72), Width = 200, Height = 26
         };
 
+        var hdProgressBar = new ProgressBar
+        {
+            Location = new Point(220, 74),
+            Size = new Size(255, 22),
+            Minimum = 0, Maximum = 100,
+            Style = ProgressBarStyle.Continuous,
+            Visible = false
+        };
+
         var hdManager = new HiResTextureManager();
         hdManager.ProgressChanged += (progress, message) =>
         {
+            void UpdateProgress()
+            {
+                hdProgressLabel.Text = message;
+                hdProgressLabel.Visible = true;
+                hdProgressBar.Visible = true;
+                if (progress >= 0)
+                    hdProgressBar.Value = Math.Clamp((int)(progress * 100), 0, 100);
+            }
             if (hdProgressLabel.InvokeRequired)
-                hdProgressLabel.Invoke(() => { hdProgressLabel.Text = message; hdProgressLabel.Visible = true; });
-            else { hdProgressLabel.Text = message; hdProgressLabel.Visible = true; }
+                hdProgressLabel.Invoke(UpdateProgress);
+            else
+                UpdateProgress();
         };
         hdManager.DownloadCompleted += (success, message) =>
         {
             void UpdateUI()
             {
                 hdProgressLabel.Text = message;
+                hdProgressBar.Visible = false;
+                hdProgressBar.Value = 0;
                 hdButton.Enabled = true;
                 hdButton.Text = success ? "Re-download HD Textures" : "Retry Download";
                 if (success)
@@ -1339,6 +1395,8 @@ public class SettingsForm : Form
                 hdManager.CancelDownload();
                 hdButton.Text = "Download HD Textures";
                 hdProgressLabel.Visible = false;
+                hdProgressBar.Visible = false;
+                hdProgressBar.Value = 0;
             }
             else
             {
@@ -1348,6 +1406,7 @@ public class SettingsForm : Form
             }
         };
         hdGroup.Controls.Add(hdButton);
+        hdGroup.Controls.Add(hdProgressBar);
         tab.Controls.Add(hdGroup);
         y += 115;
 
@@ -1411,7 +1470,20 @@ public class SettingsForm : Form
             ForeColor = Color.Gray
         };
         cacheGroup.Controls.Add(cacheSizeLabel);
+        _cacheSizeLabel = cacheSizeLabel;
         UpdateCacheSizeLabelAsync(cacheSizeLabel);
+
+        // Periodically refresh cache size while the settings form is open
+        _cacheSizeTimer = new System.Windows.Forms.Timer
+        {
+            Interval = Math.Max(60000, _settings.UpdateIntervalSeconds * 1000)
+        };
+        _cacheSizeTimer.Tick += (_, _) =>
+        {
+            if (_cacheSizeLabel != null && !IsDisposed)
+                UpdateCacheSizeLabelAsync(_cacheSizeLabel);
+        };
+        _cacheSizeTimer.Start();
 
         var clearCacheButton = new Button
         {
@@ -1760,11 +1832,13 @@ public class SettingsForm : Form
         _npsSubPanel.Visible = source == 2;
         _smithsonianSubPanel.Visible = source == 3;
         _userImagesSubPanel.Visible = source == 4;
+        _nasaGallerySubPanel.Visible = source == 5;
 
         // Auto-load on first view
         if (source == 0 && _epicGrid.SelectedImage == null) RefreshEpicImages();
         if (source == 1 && _apodGrid.SelectedImage == null) RefreshApodImages();
         if (source == 4) RefreshUserImages(); // Always refresh (files may change externally)
+        if (source == 5 && _nasaGalleryGrid.SelectedImage == null) RefreshNasaGalleryImages();
     }
 
     private void UpdatePerDisplayVisibility()
@@ -2170,6 +2244,10 @@ public class SettingsForm : Form
         if (!string.IsNullOrEmpty(config.SmithsonianSearchQuery))
             _smithsonianSearchBox.Text = config.SmithsonianSearchQuery;
 
+        // NASA Gallery
+        if (!string.IsNullOrEmpty(config.NasaGallerySearchQuery))
+            _nasaGallerySearchBox.Text = config.NasaGallerySearchQuery;
+
         // Auto-rotation
         _randomRotationCheck.Checked = config.RandomRotationEnabled;
         _rotationSourceCombo.SelectedIndex = Math.Clamp((int)config.RandomRotationSource, 0, _rotationSourceCombo.Items.Count - 1);
@@ -2289,6 +2367,10 @@ public class SettingsForm : Form
         // Smithsonian search query
         if (!string.IsNullOrEmpty(_settings.SmithsonianSearchQuery))
             _smithsonianSearchBox.Text = _settings.SmithsonianSearchQuery;
+
+        // NASA Gallery search query
+        if (!string.IsNullOrEmpty(_settings.NasaGallerySearchQuery))
+            _nasaGallerySearchBox.Text = _settings.NasaGallerySearchQuery;
 
         _locationCombo.SelectedIndex = 0;
         UpdateModeVisibility();
@@ -2511,6 +2593,131 @@ public class SettingsForm : Form
 
         return dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(textBox.Text)
             ? textBox.Text.Trim() : null;
+    }
+
+    // -- NASA GALLERY SUB-PANEL (6th source in Still Image dropdown) --
+
+    private Panel CreateNasaGallerySubPanel(int y)
+    {
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
+        int py = 0;
+
+        panel.Controls.Add(MakeLabel("Search:", LeftMargin, py + 3));
+        _nasaGallerySearchBox = new TextBox
+        {
+            Location = new Point(80, py), Width = 320,
+            Text = "nebula"
+        };
+        _nasaGallerySearchBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; RefreshNasaGalleryImages(); } };
+        panel.Controls.Add(_nasaGallerySearchBox);
+
+        _nasaGallerySearchButton = new Button
+        {
+            Text = "Search", Location = new Point(410, py), Width = 80, Height = 24
+        };
+        _nasaGallerySearchButton.Click += (_, _) => RefreshNasaGalleryImages();
+        panel.Controls.Add(_nasaGallerySearchButton);
+        py += 28;
+
+        // Suggestion chips (space/astronomy themed)
+        _nasaGalleryChipsPanel = new FlowLayoutPanel
+        {
+            Location = new Point(LeftMargin, py),
+            Size = new Size(490, 56),
+            WrapContents = true,
+            AutoScroll = true
+        };
+        foreach (var chip in NasaGalleryApiClient.SuggestedQueries)
+        {
+            var chipText = chip;
+            var btn = new Button
+            {
+                Text = chipText,
+                AutoSize = true,
+                Height = 24,
+                Padding = new Padding(2, 0, 2, 0),
+                Margin = new Padding(0, 0, 4, 2),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 7.5f),
+                BackColor = Color.FromArgb(225, 235, 245),
+                ForeColor = Color.FromArgb(30, 60, 100),
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderColor = Color.FromArgb(170, 190, 220);
+            btn.FlatAppearance.BorderSize = 1;
+            btn.Click += (_, _) =>
+            {
+                _nasaGallerySearchBox.Text = chipText;
+                RefreshNasaGalleryImages();
+            };
+            _nasaGalleryChipsPanel.Controls.Add(btn);
+        }
+        panel.Controls.Add(_nasaGalleryChipsPanel);
+        py += 60;
+
+        _nasaGalleryGrid = new ThumbnailGridPanel(_imageCache)
+        {
+            Location = new Point(LeftMargin, py),
+            Size = new Size(490, 245)
+        };
+        _nasaGalleryGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
+        _nasaGalleryGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
+        panel.Controls.Add(_nasaGalleryGrid);
+        py += 250;
+
+        _nasaGalleryStatusLabel = new Label
+        {
+            Text = "Search NASA's image library. Free, no API key needed.",
+            Location = new Point(LeftMargin, py),
+            Size = new Size(490, 35),
+            Font = new Font("Segoe UI", 8.5f),
+            ForeColor = Color.Gray
+        };
+        panel.Controls.Add(_nasaGalleryStatusLabel);
+
+        return panel;
+    }
+
+    private void RefreshNasaGalleryImages()
+    {
+        var query = _nasaGallerySearchBox.Text.Trim();
+        if (string.IsNullOrEmpty(query)) return;
+
+        _nasaGalleryStatusLabel.Text = $"Searching NASA for \"{query}\"...";
+        _nasaGalleryStatusLabel.ForeColor = Color.Gray;
+        _nasaGallerySearchButton.Enabled = false;
+
+        Task.Run(async () =>
+        {
+            var images = await _nasaGalleryApi.SearchImagesAsync(query);
+            if (IsDisposed) return;
+            try
+            {
+                Invoke(() =>
+                {
+                    _nasaGallerySearchButton.Enabled = true;
+                    if (images == null || images.Count == 0)
+                    {
+                        _nasaGalleryStatusLabel.Text = images == null
+                            ? "Could not connect to NASA Gallery. Check your connection."
+                            : $"No images found for \"{query}\". Try a different search.";
+                        _nasaGalleryStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                        _nasaGalleryGrid.SetImages(new List<ImageSourceInfo>());
+                        return;
+                    }
+
+                    foreach (var img in images)
+                        img.IsFavorited = _settings.Favorites.Any(
+                            f => f.Source == ImageSource.NasaGallery && f.ImageId == img.Id);
+
+                    _nasaGalleryGrid.SetImages(images);
+                    _nasaGalleryGrid.SelectById(_settings.NasaGallerySelectedId);
+                    _nasaGalleryStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found. No API key needed.";
+                    _nasaGalleryStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
+                });
+            }
+            catch (ObjectDisposedException) { }
+        });
     }
 
     // -- USER IMAGES SUB-PANEL (5th source in Still Image dropdown) --
@@ -2982,6 +3189,8 @@ public class SettingsForm : Form
         {
             _debounceTimer.Stop();
             _debounceTimer.Dispose();
+            _cacheSizeTimer?.Stop();
+            _cacheSizeTimer?.Dispose();
         }
         base.Dispose(disposing);
     }
