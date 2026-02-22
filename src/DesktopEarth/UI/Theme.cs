@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 
 namespace DesktopEarth.UI;
 
@@ -7,9 +8,49 @@ namespace DesktopEarth.UI;
 /// When IsDarkMode is false, returns the original light-mode colors.
 /// When IsDarkMode is true, returns dark-mode equivalents.
 /// </summary>
-public static class Theme
+public static partial class Theme
 {
     public static bool IsDarkMode { get; set; }
+
+    // --- Win32 dark mode APIs ---
+
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+    // uxtheme ordinal 135 — SetPreferredAppMode (undocumented, used by VS Code, Windows Terminal, Notepad++)
+    // Must use [DllImport] because [LibraryImport] doesn't support ordinal imports
+    [DllImport("uxtheme.dll", EntryPoint = "#135", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern int SetPreferredAppMode(int preferredAppMode);
+
+    private const int AllowDark = 1;
+
+    /// <summary>
+    /// Apply dark title bar and window borders via DWM. Call after form handle is created.
+    /// Works on Windows 10 1809+ and Windows 11.
+    /// </summary>
+    public static void ApplyDarkTitleBar(Form form)
+    {
+        if (!IsDarkMode) return;
+        try
+        {
+            int value = 1;
+            DwmSetWindowAttribute(form.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int));
+        }
+        catch { } // Graceful fallback on older Windows versions
+    }
+
+    /// <summary>
+    /// Tell Windows to use dark theme for common controls (scrollbars, dropdown menus, date pickers).
+    /// Must be called before any forms are created. Works on Windows 10 1903+.
+    /// </summary>
+    public static void EnableDarkScrollbars()
+    {
+        if (!IsDarkMode) return;
+        try { SetPreferredAppMode(AllowDark); }
+        catch { } // Graceful fallback on older Windows versions
+    }
 
     // --- Backgrounds ---
 
@@ -191,13 +232,39 @@ public static class Theme
     }
 
     /// <summary>
-    /// Style a TabControl for the current theme.
+    /// Style a TabControl for the current theme, including owner-drawn tab headers in dark mode.
     /// </summary>
     public static void StyleTabControl(TabControl tabControl)
     {
         if (IsDarkMode)
         {
             tabControl.BackColor = TabBackground;
+
+            // Owner-draw tab headers for dark mode
+            tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tabControl.DrawItem += (sender, e) =>
+            {
+                if (sender is not TabControl tc) return;
+                var page = tc.TabPages[e.Index];
+                var bounds = e.Bounds;
+
+                bool isSelected = tc.SelectedIndex == e.Index;
+
+                using var bgBrush = new SolidBrush(isSelected
+                    ? Color.FromArgb(48, 48, 48)
+                    : Color.FromArgb(32, 32, 32));
+                e.Graphics.FillRectangle(bgBrush, bounds);
+
+                using var textBrush = new SolidBrush(isSelected
+                    ? Color.FromArgb(230, 230, 230)
+                    : Color.FromArgb(150, 150, 150));
+                var textFormat = new StringFormat
+                {
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center
+                };
+                e.Graphics.DrawString(page.Text, tc.Font, textBrush, bounds, textFormat);
+            };
         }
     }
 }

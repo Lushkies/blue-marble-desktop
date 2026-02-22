@@ -440,6 +440,9 @@ public class SettingsForm : Form
         BackColor = Theme.FormBackground;
         ForeColor = Theme.PrimaryText;
 
+        // Dark title bar and window borders (Windows 10 1809+ / Windows 11)
+        Theme.ApplyDarkTitleBar(this);
+
         var tabControl = new TabControl
         {
             Location = new Point(0, 0),
@@ -579,7 +582,7 @@ public class SettingsForm : Form
         y += 120;
 
         // -- VIEW MODE (accent panel with blue left bar) --
-        _viewAccentPanel = CreateAccentPanel(LeftMargin, y, 490, 40);
+        _viewAccentPanel = CreateAccentPanel(LeftMargin, y, 490, 72);
 
         var viewLabel = new Label
         {
@@ -601,15 +604,14 @@ public class SettingsForm : Form
         _displayModeCombo.SelectedIndexChanged += (_, _) => { UpdateModeVisibility(); SchedulePreview(); };
         _viewAccentPanel.Controls.Add(_displayModeCombo);
 
-        // Source row (inside accent panel, visible only for Still Image mode)
+        // Source row (inside accent panel, always visible — disabled when not Still Image)
         _sourceLabel = new Label
         {
             Text = "Source:",
             AutoSize = true,
             Location = new Point(10, 42),
             Font = new Font("Segoe UI", 10, FontStyle.Bold),
-            BackColor = Color.Transparent,
-            Visible = false
+            BackColor = Color.Transparent
         };
         _viewAccentPanel.Controls.Add(_sourceLabel);
 
@@ -618,7 +620,7 @@ public class SettingsForm : Form
             DropDownStyle = ComboBoxStyle.DropDownList,
             Location = new Point(75, 39),
             Width = 180,
-            Visible = false
+            Enabled = false // Disabled by default, enabled when Still Image selected
         };
         _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "NASA Gallery", "National Parks", "Smithsonian", "My Images"]);
         _stillImageSourceCombo.SelectedIndex = 0;
@@ -629,25 +631,28 @@ public class SettingsForm : Form
         };
         _viewAccentPanel.Controls.Add(_stillImageSourceCombo);
 
-        // Hint label shown when NOT on Still Image — draws attention to the image sources feature
+        // Accent panel always shows both rows (View + Source)
+        _viewAccentPanel.Height = 72;
+
+        tab.Controls.Add(_viewAccentPanel);
+        y += 77; // accent panel (72) + gap (5)
+
+        // Hint label below accent panel — visible when NOT on Still Image, clickable to switch
         _sourceHintLabel = new Label
         {
             Text = "Select Still Image to explore NASA, National Parks, and more.",
-            AutoSize = true,
-            Location = new Point(250, 12),
+            Size = new Size(490, 18),
+            Location = new Point(LeftMargin, y),
             Font = new Font("Segoe UI", 7.5f),
             ForeColor = Theme.SecondaryText,
-            BackColor = Color.Transparent,
             Cursor = Cursors.Hand
         };
         _sourceHintLabel.Click += (_, _) =>
         {
             _displayModeCombo.SelectedIndex = 3; // Switch to Still Image
         };
-        _viewAccentPanel.Controls.Add(_sourceHintLabel);
-
-        tab.Controls.Add(_viewAccentPanel);
-        y += 45; // accent panel (40) + gap (5)
+        tab.Controls.Add(_sourceHintLabel);
+        y += 20;
 
         // -- AUTO-ROTATION (visible for still image mode only) --
         _randomRotationCheck = new CheckBox
@@ -1838,29 +1843,11 @@ public class SettingsForm : Form
         _rotationSourceCombo.Visible = isStillImage;
         _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
 
-        // Source row in accent panel — visible only for Still Image
-        _sourceLabel.Visible = isStillImage;
-        _stillImageSourceCombo.Visible = isStillImage;
+        // Source dropdown — always visible, enabled only for Still Image
+        _stillImageSourceCombo.Enabled = isStillImage;
 
-        // Hint label — visible only when NOT on Still Image
+        // Hint label below accent panel — visible only when NOT on Still Image
         _sourceHintLabel.Visible = !isStillImage;
-
-        // Resize accent panel: 2 rows for Still Image, 1 row otherwise
-        int accentHeight = isStillImage ? 72 : 40;
-        if (_viewAccentPanel.Height != accentHeight)
-        {
-            _viewAccentPanel.Height = accentHeight;
-            _viewAccentPanel.Invalidate();
-
-            // Reposition controls below the accent panel
-            int belowAccent = _viewAccentPanel.Bottom + 5;
-            _randomRotationCheck.Top = belowAccent;
-            _rotationSourceCombo.Top = belowAccent - 2;
-
-            int panelTop = belowAccent + (isStillImage ? 25 : 0);
-            _globeControlsPanel.Top = panelTop;
-            _stillImagePanel.Top = panelTop;
-        }
 
         // Globe-specific logic
         if (mode <= 2)
@@ -2702,6 +2689,7 @@ public class SettingsForm : Form
         dialog.Controls.AddRange([label, textBox, okButton, cancelButton]);
         dialog.AcceptButton = okButton;
         dialog.CancelButton = cancelButton;
+        Theme.ApplyDarkTitleBar(dialog);
 
         return dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(textBox.Text)
             ? textBox.Text.Trim() : null;

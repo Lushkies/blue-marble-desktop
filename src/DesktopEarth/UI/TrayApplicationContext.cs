@@ -16,6 +16,7 @@ public class TrayApplicationContext : ApplicationContext
 
         // Initialize UI theme from saved settings
         Theme.IsDarkMode = _settingsManager.Settings.DarkModeEnabled;
+        Theme.EnableDarkScrollbars();
 
         _trayIcon = new NotifyIcon
         {
@@ -80,17 +81,31 @@ public class TrayApplicationContext : ApplicationContext
 
     /// <summary>
     /// Close and recreate the settings form (used for theme changes that require full repaint).
+    /// Preserves window position so the form doesn't jump to center-screen.
     /// </summary>
     internal void RecreateSettingsForm()
     {
+        Point? savedLocation = null;
         if (_settingsForm != null && !_settingsForm.IsDisposed)
         {
+            savedLocation = _settingsForm.Location;
             _settingsForm.RequestReopen -= RecreateSettingsForm;
             _settingsForm.Close();
             _settingsForm.Dispose();
         }
         _settingsForm = null;
+
+        // Re-enable dark scrollbars (needed when toggling dark mode on)
+        Theme.EnableDarkScrollbars();
+
         ShowSettings();
+
+        // Restore previous window position
+        if (savedLocation.HasValue && _settingsForm != null && !_settingsForm.IsDisposed)
+        {
+            _settingsForm.StartPosition = FormStartPosition.Manual;
+            _settingsForm.Location = savedLocation.Value;
+        }
     }
 
     private void FavoriteCurrentWallpaper()
