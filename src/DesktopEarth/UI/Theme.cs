@@ -231,15 +231,35 @@ public static partial class Theme
     /// <summary>
     /// Style a TrackBar (slider) for the current theme.
     /// Uses SetWindowTheme to apply the same dark Explorer theme that Windows File Explorer uses.
+    /// Deferred via HandleCreated event since SetWindowTheme needs a valid HWND.
     /// </summary>
     public static void StyleTrackBar(TrackBar trackBar)
     {
         if (!IsDarkMode) return;
-        try
+        trackBar.BackColor = FormBackground;
+
+        // SetWindowTheme requires a valid window handle. If the handle doesn't exist yet
+        // (control not shown), defer until it's created. If it already exists, apply now.
+        if (trackBar.IsHandleCreated)
         {
-            SetWindowTheme(trackBar.Handle, "DarkMode_Explorer", null);
-            trackBar.BackColor = FormBackground;
+            ApplyDarkThemeToControl(trackBar);
         }
+        else
+        {
+            trackBar.HandleCreated += (sender, _) =>
+            {
+                if (sender is Control c)
+                    ApplyDarkThemeToControl(c);
+            };
+        }
+    }
+
+    /// <summary>
+    /// Apply DarkMode_Explorer theme to an individual control's window handle.
+    /// </summary>
+    private static void ApplyDarkThemeToControl(Control control)
+    {
+        try { SetWindowTheme(control.Handle, "DarkMode_Explorer", null); }
         catch { } // Graceful fallback
     }
 
