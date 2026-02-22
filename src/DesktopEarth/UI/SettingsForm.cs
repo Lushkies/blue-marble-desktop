@@ -1106,7 +1106,7 @@ public class SettingsForm : Form
             SchedulePreview();
         };
         panel.Controls.Add(_apodRecentDaysCombo);
-        py += 22;
+        py += 26;
 
         _apodDateRadio = new RadioButton
         {
