@@ -180,6 +180,10 @@ public class RenderScheduler : IDisposable
             gl = GL.GetApi(window);
             InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
             ReportStatus("Renderer initialized.");
+            // Clean blacklisted images from cache on startup
+            _imageCache.CleanBlacklistedImages(settings.BlacklistedIdPrefixes);
+            _epicCache.CleanBlacklistedImages(settings.BlacklistedIdPrefixes);
+
             // Clean old caches on startup (protect favorited images)
             int epicDays = settings.EpicCacheDurationDays;
             int imageDays = settings.CacheDurationDays;
@@ -718,10 +722,11 @@ public class RenderScheduler : IDisposable
 
     /// <summary>
     /// Build a list of local file paths that form the rotation pool for a given source.
+    /// Filters out images matching blacklisted ID prefixes.
     /// </summary>
     private List<string> BuildRotationPool(AppSettings settings, RotationSource source)
     {
-        return source switch
+        var pool = source switch
         {
             RotationSource.NasaEpic => _epicCache.GetAllCachedImagePaths(settings.EpicImageType),
             RotationSource.NasaApod => _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod),
@@ -733,6 +738,16 @@ public class RenderScheduler : IDisposable
             RotationSource.All => BuildWeightedAllPool(settings),
             _ => new List<string>()
         };
+
+        // Filter out blacklisted images
+        var blacklist = settings.BlacklistedIdPrefixes;
+        if (blacklist != null && blacklist.Count > 0)
+        {
+            pool.RemoveAll(path => ImageCache.IsBlacklisted(
+                Path.GetFileNameWithoutExtension(path), blacklist));
+        }
+
+        return pool;
     }
 
     /// <summary>
@@ -760,27 +775,41 @@ public class RenderScheduler : IDisposable
     /// Build a weighted rotation pool from all sources.
     /// Weights (base 20): Gallery 10 (50%), APOD 4 (20%), EPIC 2 (10%),
     ///   NPS 2 (10%), Smithsonian 2 (10%), User Images 0-4 (0-17% scaled by collection size).
+    /// Respects ExcludedRotationSources — excluded sources are skipped entirely.
     /// Shuffled deterministically so sequential cycling produces mixed order.
     /// </summary>
     private List<string> BuildWeightedAllPool(AppSettings settings)
     {
+        var excluded = settings.ExcludedRotationSources;
         var pool = new List<string>();
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaGallery), 10);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod), 4);
-        AddWeighted(pool, _epicCache.GetAllCachedImagePaths(settings.EpicImageType), 2);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks), 2);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian), 2);
+
+        if (!excluded.Contains(RotationSource.NasaGallery))
+            AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaGallery), 10);
+        if (!excluded.Contains(RotationSource.NasaApod))
+            AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod), 4);
+        if (!excluded.Contains(RotationSource.NasaEpic))
+            AddWeighted(pool, _epicCache.GetAllCachedImagePaths(settings.EpicImageType), 2);
+        if (!excluded.Contains(RotationSource.NationalParks))
+            AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks), 2);
+        if (!excluded.Contains(RotationSource.Smithsonian))
+            AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian), 2);
 
         // User images: scaled by collection size (0=skip, 1=single copy, 2-14=10%, 15+=17%)
-        var userPaths = new UserImageManager().GetAllImagePaths();
-        int userWeight = userPaths.Count switch { 0 => 0, 1 => 1, < 15 => 2, _ => 4 };
-        if (userWeight > 0) AddWeighted(pool, userPaths, userWeight);
+        if (!excluded.Contains(RotationSource.UserImages))
+        {
+            var userPaths = new UserImageManager().GetAllImagePaths();
+            int userWeight = userPaths.Count switch { 0 => 0, 1 => 1, < 15 => 2, _ => 4 };
+            if (userWeight > 0) AddWeighted(pool, userPaths, userWeight);
+        }
 
         // Add favorites that aren't already in the pool (e.g., from sources without local cache)
-        foreach (var path in GetFavoriteImagePaths(settings))
+        if (!excluded.Contains(RotationSource.Favorites))
         {
-            if (!pool.Contains(path))
-                pool.Add(path);
+            foreach (var path in GetFavoriteImagePaths(settings))
+            {
+                if (!pool.Contains(path))
+                    pool.Add(path);
+            }
         }
 
         // Deterministic shuffle so cycling through with _rotationIndex gives mixed order
@@ -847,11 +876,13 @@ public class RenderScheduler : IDisposable
         // Fire-and-forget background fetch (doesn't block render)
         var apiKey = settings.ApiDataGovKey;
         var epicType = settings.EpicImageType;
+        var blacklist = settings.BlacklistedIdPrefixes;
+        var excluded = settings.ExcludedRotationSources;
         Task.Run(async () =>
         {
             try
             {
-                await FetchNewImageForPool(source, apiKey, epicType);
+                await FetchNewImageForPool(source, apiKey, epicType, blacklist, excluded);
             }
             catch (Exception ex)
             {
@@ -862,8 +893,10 @@ public class RenderScheduler : IDisposable
 
     /// <summary>
     /// Download new images from a source to grow the rotation pool.
+    /// Respects blacklisted ID prefixes and excluded rotation sources.
     /// </summary>
-    private async Task FetchNewImageForPool(RotationSource source, string apiKey, EpicImageType epicType)
+    private async Task FetchNewImageForPool(RotationSource source, string apiKey, EpicImageType epicType,
+        List<string>? blacklist = null, List<RotationSource>? excluded = null)
     {
         switch (source)
         {
@@ -872,7 +905,7 @@ public class RenderScheduler : IDisposable
                 // Fetch a random APOD from the last 2 years
                 var randomDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(1, 730));
                 var apodImage = await new ApodApiClient().GetByDateAsync(apiKey, randomDate.ToString("yyyy-MM-dd"));
-                if (apodImage != null)
+                if (apodImage != null && !ImageCache.IsBlacklisted(apodImage.Id, blacklist))
                 {
                     var url = ApodApiClient.GetBestUrl(apodImage);
                     await _imageCache.DownloadToCache(ImageSource.NasaApod, apodImage.Id, url);
@@ -888,7 +921,7 @@ public class RenderScheduler : IDisposable
                 var images = await new NpsApiClient().GetParkImagesAsync(apiKey, randomPark);
                 if (images != null)
                 {
-                    foreach (var img in images.Take(3))
+                    foreach (var img in images.Where(i => !ImageCache.IsBlacklisted(i.Id, blacklist)).Take(3))
                     {
                         var url = !string.IsNullOrEmpty(img.HdImageUrl) ? img.HdImageUrl : img.FullImageUrl;
                         if (!string.IsNullOrEmpty(url))
@@ -904,13 +937,13 @@ public class RenderScheduler : IDisposable
                 var images = await new SmithsonianApiClient().SearchImagesAsync(apiKey, "landscape painting", 0, 5);
                 if (images != null)
                 {
-                    foreach (var img in images.Take(3))
+                    foreach (var img in images.Where(i => !ImageCache.IsBlacklisted(i.Id, blacklist)).Take(3))
                     {
                         var url = !string.IsNullOrEmpty(img.HdImageUrl) ? img.HdImageUrl : img.FullImageUrl;
                         if (!string.IsNullOrEmpty(url))
                             await _imageCache.DownloadToCache(ImageSource.Smithsonian, img.Id, url);
                     }
-                    Console.WriteLine($"Pool build: Fetched {images.Count} Smithsonian images");
+                    Console.WriteLine($"Pool build: Fetched Smithsonian images");
                 }
                 break;
             }
@@ -920,12 +953,12 @@ public class RenderScheduler : IDisposable
                 var epicImages = await _epicApi.GetLatestImagesAsync(epicType);
                 if (epicImages != null)
                 {
-                    foreach (var img in epicImages.Take(3))
+                    foreach (var img in epicImages.Where(i => !ImageCache.IsBlacklisted(i.Image, blacklist)).Take(3))
                     {
                         if (!_epicCache.IsCached(img, epicType))
                             await _epicApi.DownloadImageAsync(img, epicType, _epicCache);
                     }
-                    Console.WriteLine($"Pool build: Fetched {Math.Min(3, epicImages.Count)} EPIC images");
+                    Console.WriteLine($"Pool build: Fetched EPIC images");
                 }
                 break;
             }
@@ -939,29 +972,38 @@ public class RenderScheduler : IDisposable
                 var images = await galleryClient.SearchImagesAsync(randomQuery, 20);
                 if (images != null)
                 {
+                    // Filter blacklisted IDs before downloading
+                    var filtered = images.Where(i => !ImageCache.IsBlacklisted(i.Id, blacklist)).ToList();
+
                     // Fetch 5 images per call (higher than other sources) to build cache faster
-                    foreach (var img in images.Take(5))
+                    foreach (var img in filtered.Take(5))
                     {
                         var bestUrl = await galleryClient.GetBestImageUrlAsync(img.Id);
                         if (!string.IsNullOrEmpty(bestUrl))
                             await _imageCache.DownloadToCache(ImageSource.NasaGallery, img.Id, bestUrl);
                     }
-                    Console.WriteLine($"Pool build: Fetched NASA Gallery \"{randomQuery}\" ({Math.Min(5, images.Count)} images)");
+                    Console.WriteLine($"Pool build: Fetched NASA Gallery \"{randomQuery}\" ({Math.Min(5, filtered.Count)} images)");
                 }
                 break;
             }
             case RotationSource.All:
             {
                 // Pick a random source (weighted: Gallery 5x, APOD 2x, EPIC 1x, NPS 1x, SI 1x)
-                var sources = new[] {
-                    RotationSource.NasaGallery, RotationSource.NasaGallery, RotationSource.NasaGallery,
-                    RotationSource.NasaGallery, RotationSource.NasaGallery,
-                    RotationSource.NasaApod, RotationSource.NasaApod,
-                    RotationSource.NasaEpic,
-                    RotationSource.NationalParks,
-                    RotationSource.Smithsonian
-                };
-                await FetchNewImageForPool(sources[Random.Shared.Next(sources.Length)], apiKey, epicType);
+                // Respects excluded sources
+                var sources = new List<RotationSource>();
+                if (excluded == null || !excluded.Contains(RotationSource.NasaGallery))
+                    sources.AddRange(Enumerable.Repeat(RotationSource.NasaGallery, 5));
+                if (excluded == null || !excluded.Contains(RotationSource.NasaApod))
+                    sources.AddRange(Enumerable.Repeat(RotationSource.NasaApod, 2));
+                if (excluded == null || !excluded.Contains(RotationSource.NasaEpic))
+                    sources.Add(RotationSource.NasaEpic);
+                if (excluded == null || !excluded.Contains(RotationSource.NationalParks))
+                    sources.Add(RotationSource.NationalParks);
+                if (excluded == null || !excluded.Contains(RotationSource.Smithsonian))
+                    sources.Add(RotationSource.Smithsonian);
+
+                if (sources.Count > 0)
+                    await FetchNewImageForPool(sources[Random.Shared.Next(sources.Count)], apiKey, epicType, blacklist, excluded);
                 break;
             }
         }

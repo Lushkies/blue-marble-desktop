@@ -88,6 +88,42 @@ public class EpicImageCache
     }
 
     /// <summary>
+    /// Delete cached EPIC images whose IDs match blacklisted prefixes.
+    /// </summary>
+    public void CleanBlacklistedImages(List<string>? prefixes)
+    {
+        if (prefixes == null || prefixes.Count == 0) return;
+
+        try
+        {
+            if (!Directory.Exists(CacheDir)) return;
+
+            int deleted = 0;
+            foreach (var collectionDir in Directory.GetDirectories(CacheDir))
+            {
+                foreach (var dateDir in Directory.GetDirectories(collectionDir))
+                {
+                    foreach (var file in Directory.GetFiles(dateDir, "*.jpg"))
+                    {
+                        var fileId = Path.GetFileNameWithoutExtension(file);
+                        if (ImageCache.IsBlacklisted(fileId, prefixes))
+                        {
+                            try { File.Delete(file); deleted++; } catch { }
+                        }
+                    }
+                }
+            }
+
+            if (deleted > 0)
+                Console.WriteLine($"EPIC cache: Cleaned {deleted} blacklisted images");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"EPIC cache blacklist cleanup error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Get all cached image paths for a given EPIC image type.
     /// Used by the rotation system to build a pool of available images.
     /// </summary>

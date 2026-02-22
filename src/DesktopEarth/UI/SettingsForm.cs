@@ -140,6 +140,7 @@ public class SettingsForm : Form
     private GroupBox _autoRotateGroup = null!;
     private CheckBox _randomRotationCheck = null!;
     private ComboBox _rotationSourceCombo = null!;
+    private readonly CheckBox[] _rotationSourceChecks = new CheckBox[7];
 
     // System tab controls
     private ComboBox _updateIntervalCombo = null!;
@@ -692,6 +693,8 @@ public class SettingsForm : Form
         _randomRotationCheck.CheckedChanged += (_, _) =>
         {
             _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
+            UpdateRotationExclusionVisibility();
+            UpdateModeVisibility(); // Re-layout for exclusion panel visibility change
             SchedulePreview();
         };
         _autoRotateGroup.Controls.Add(_randomRotationCheck);
@@ -705,8 +708,40 @@ public class SettingsForm : Form
         };
         _rotationSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "NASA Gallery", "National Parks", "Smithsonian", "My Images", "Favorites", "All Sources"]);
         _rotationSourceCombo.SelectedIndex = 6; // Favorites default
-        _rotationSourceCombo.SelectedIndexChanged += (_, _) => { if (!_isLoading) SchedulePreview(); };
+        _rotationSourceCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_isLoading) SchedulePreview();
+            UpdateRotationExclusionVisibility();
+            UpdateModeVisibility(); // Re-layout for exclusion panel visibility change
+        };
         _autoRotateGroup.Controls.Add(_rotationSourceCombo);
+
+        // Source exclusion checkboxes (inside GroupBox, visible when "All Sources" selected)
+        string[] sourceLabels = ["EPIC", "APOD", "Gallery", "Parks", "Smithsonian", "My Images", "Favorites"];
+        RotationSource[] sourceValues = [
+            RotationSource.NasaEpic, RotationSource.NasaApod, RotationSource.NasaGallery,
+            RotationSource.NationalParks, RotationSource.Smithsonian, RotationSource.UserImages,
+            RotationSource.Favorites
+        ];
+
+        for (int i = 0; i < 7; i++)
+        {
+            int col = i % 4;
+            int row = i / 4;
+            var check = new CheckBox
+            {
+                Text = sourceLabels[i],
+                Checked = true,
+                AutoSize = true,
+                Font = new Font("Segoe UI", 7.5f),
+                Location = new Point(10 + col * 118, 46 + row * 20),
+                Visible = false,
+                Tag = sourceValues[i]
+            };
+            check.CheckedChanged += OnRotationExclusionChanged;
+            _rotationSourceChecks[i] = check;
+            _autoRotateGroup.Controls.Add(check);
+        }
 
         tab.Controls.Add(_autoRotateGroup);
 
@@ -1902,6 +1937,7 @@ public class SettingsForm : Form
         // Auto-rotation GroupBox visible for still image mode
         _autoRotateGroup.Visible = isStillImage;
         _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
+        UpdateRotationExclusionVisibility();
 
         // Source dropdown — always visible, enabled only for Still Image
         _stillImageSourceCombo.Enabled = isStillImage;
@@ -1911,11 +1947,12 @@ public class SettingsForm : Form
 
         // Dynamic panel positioning based on which controls are visible.
         // Globe/FlatMap/Moon: hint label (18px) + gap → panels start close
-        // Still Image: auto-rotate GroupBox (48px) + gap → panels start lower
+        // Still Image: auto-rotate GroupBox (variable height) + gap → panels start lower
         int panelY;
         if (isStillImage)
         {
-            panelY = _controlsBaseY + 53; // GroupBox (48px) + 5px gap
+            int groupHeight = _autoRotateGroup.Height; // 48 or 82 depending on exclusion
+            panelY = _controlsBaseY + groupHeight + 5;
             _stillImagePanel.Top = panelY;
             _presetsPanel.Top = panelY + 435; // tight below still image panel
         }
@@ -1948,6 +1985,42 @@ public class SettingsForm : Form
         if (isStillImage)
         {
             UpdateStillImageSubPanel();
+        }
+    }
+
+    private void UpdateRotationExclusionVisibility()
+    {
+        bool showExclusion = _autoRotateGroup.Visible
+            && _randomRotationCheck.Checked
+            && _rotationSourceCombo.SelectedIndex == 7; // "All Sources"
+
+        foreach (var check in _rotationSourceChecks)
+            check.Visible = showExclusion;
+
+        // Resize GroupBox: 48px compact, 88px with exclusion checkboxes (2 rows + spacing)
+        _autoRotateGroup.Height = showExclusion ? 88 : 48;
+    }
+
+    private void OnRotationExclusionChanged(object? sender, EventArgs e)
+    {
+        if (_isLoading) return;
+
+        var excluded = new List<RotationSource>();
+        foreach (var check in _rotationSourceChecks)
+        {
+            if (!check.Checked && check.Tag is RotationSource src)
+                excluded.Add(src);
+        }
+        _settings.ExcludedRotationSources = excluded;
+        _settingsManager.Save();
+    }
+
+    private void LoadRotationExclusion(List<RotationSource> excluded)
+    {
+        foreach (var check in _rotationSourceChecks)
+        {
+            if (check.Tag is RotationSource src)
+                check.Checked = !excluded.Contains(src);
         }
     }
 
@@ -2484,6 +2557,9 @@ public class SettingsForm : Form
         // Auto-rotation
         _randomRotationCheck.Checked = _settings.RandomRotationEnabled;
         _rotationSourceCombo.SelectedIndex = Math.Clamp((int)_settings.RandomRotationSource, 0, _rotationSourceCombo.Items.Count - 1);
+
+        // Rotation source exclusion (load which sources are excluded)
+        LoadRotationExclusion(_settings.ExcludedRotationSources);
 
         // APOD recent days
         _apodRecentDaysCombo.SelectedIndex = ApodDaysToIndex(_settings.ApodRecentDays);

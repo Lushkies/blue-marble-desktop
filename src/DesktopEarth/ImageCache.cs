@@ -61,6 +61,15 @@ public class ImageCache
     }
 
     /// <summary>
+    /// Check if an image ID matches any blacklisted prefix (case-insensitive).
+    /// </summary>
+    public static bool IsBlacklisted(string imageId, List<string>? prefixes)
+    {
+        if (prefixes == null || prefixes.Count == 0) return false;
+        return prefixes.Any(p => imageId.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// Download a URL to the full-size image cache.
     /// Uses temp-file-then-rename for atomic writes.
     /// Returns local file path on success, null on failure.
@@ -289,6 +298,58 @@ public class ImageCache
             return path;
 
         return null;
+    }
+
+    /// <summary>
+    /// Delete cached images (full-size + thumbnails) whose IDs match blacklisted prefixes.
+    /// Called on startup to clean up previously cached unwanted images.
+    /// </summary>
+    public void CleanBlacklistedImages(List<string>? prefixes)
+    {
+        if (prefixes == null || prefixes.Count == 0) return;
+
+        try
+        {
+            if (!Directory.Exists(CacheDir)) return;
+
+            int deleted = 0;
+            foreach (var dir in Directory.GetDirectories(CacheDir))
+            {
+                if (Path.GetFileName(dir) == "thumbnails") continue;
+
+                foreach (var file in Directory.GetFiles(dir))
+                {
+                    var fileId = Path.GetFileNameWithoutExtension(file);
+                    if (IsBlacklisted(fileId, prefixes))
+                    {
+                        try { File.Delete(file); deleted++; } catch { }
+                    }
+                }
+            }
+
+            // Clean matching thumbnails too
+            if (Directory.Exists(ThumbCacheDir))
+            {
+                foreach (var dir in Directory.GetDirectories(ThumbCacheDir))
+                {
+                    foreach (var file in Directory.GetFiles(dir))
+                    {
+                        var fileId = Path.GetFileNameWithoutExtension(file);
+                        if (IsBlacklisted(fileId, prefixes))
+                        {
+                            try { File.Delete(file); } catch { }
+                        }
+                    }
+                }
+            }
+
+            if (deleted > 0)
+                Console.WriteLine($"ImageCache: Cleaned {deleted} blacklisted images");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"ImageCache blacklist cleanup error: {ex.Message}");
+        }
     }
 
     public static string SanitizeFileName(string name)

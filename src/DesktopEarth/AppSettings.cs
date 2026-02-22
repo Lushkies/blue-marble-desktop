@@ -84,6 +84,11 @@ public class AppSettings
     // Auto-rotation
     public bool RandomRotationEnabled { get; set; } = false;
     public RotationSource RandomRotationSource { get; set; } = RotationSource.Favorites;
+    public List<RotationSource> ExcludedRotationSources { get; set; } = new();
+
+    // Image ID prefix blacklist (blocks download/caching of images with matching prefixes)
+    // Default blocks NHQ (NASA HQ event photos). Edit settings.json to customize.
+    public List<string> BlacklistedIdPrefixes { get; set; } = new() { "NHQ" };
 
     // Favorites
     public List<FavoriteImage> Favorites { get; set; } = new();
