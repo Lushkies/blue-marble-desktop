@@ -1201,10 +1201,12 @@ public class SettingsForm : Form
         _npsChipsPanel = new FlowLayoutPanel
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 66),
+            Size = new Size(490, 78),
             WrapContents = true,
             AutoScroll = true
         };
+        _npsChipsPanel.HorizontalScroll.Enabled = false;
+        _npsChipsPanel.HorizontalScroll.Visible = false;
         foreach (var parkName in NpsApiClient.ParkCodes.Keys.OrderBy(k => k))
         {
             var chipName = parkName; // capture for closure
@@ -1231,17 +1233,17 @@ public class SettingsForm : Form
             _npsChipsPanel.Controls.Add(btn);
         }
         panel.Controls.Add(_npsChipsPanel);
-        py += 70;
+        py += 82;
 
         _npsGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 230)
+            Size = new Size(490, 218)
         };
         _npsGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _npsGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_npsGrid);
-        py += 250;
+        py += 223;
 
         _npsStatusLabel = new Label
         {
@@ -1293,10 +1295,12 @@ public class SettingsForm : Form
         _smithsonianChipsPanel = new FlowLayoutPanel
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 66),
+            Size = new Size(490, 78),
             WrapContents = true,
             AutoScroll = true
         };
+        _smithsonianChipsPanel.HorizontalScroll.Enabled = false;
+        _smithsonianChipsPanel.HorizontalScroll.Visible = false;
         string[] smithChips = ["Landscape Painting", "Sunset", "Mountain", "Ocean", "Forest",
             "Butterfly", "Architecture", "Waterfall", "Desert", "Volcano",
             "Coral Reef", "Glacier", "Photography", "Parthenon", "Night Sky"];
@@ -1326,17 +1330,17 @@ public class SettingsForm : Form
             _smithsonianChipsPanel.Controls.Add(btn);
         }
         panel.Controls.Add(_smithsonianChipsPanel);
-        py += 70;
+        py += 82;
 
         _smithsonianGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 230)
+            Size = new Size(490, 218)
         };
         _smithsonianGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _smithsonianGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_smithsonianGrid);
-        py += 250;
+        py += 223;
 
         _smithsonianStatusLabel = new Label
         {
@@ -1903,7 +1907,7 @@ public class SettingsForm : Form
         _globeControlsPanel.Top = panelY;
         _stillImagePanel.Top = panelY;
         _resetButton.Top = panelY + 430;
-        _presetsPanel.Top = panelY + 460;
+        _presetsPanel.Top = panelY + 468; // 430 + 28 (reset btn) + 10 gap
 
         // Globe-specific logic
         if (mode <= 2)
@@ -2762,7 +2766,7 @@ public class SettingsForm : Form
 
     private Panel CreateNasaGallerySubPanel(int y)
     {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 410), Visible = false };
         int py = 0;
 
         panel.Controls.Add(MakeLabel("Search:", LeftMargin, py + 3));
@@ -2797,10 +2801,12 @@ public class SettingsForm : Form
         _nasaGalleryChipsPanel = new FlowLayoutPanel
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 66),
+            Size = new Size(490, 78),
             WrapContents = true,
             AutoScroll = true
         };
+        _nasaGalleryChipsPanel.HorizontalScroll.Enabled = false;
+        _nasaGalleryChipsPanel.HorizontalScroll.Visible = false;
         foreach (var chip in NasaGalleryApiClient.SuggestedQueries)
         {
             var chipText = chip;
@@ -2827,17 +2833,17 @@ public class SettingsForm : Form
             _nasaGalleryChipsPanel.Controls.Add(btn);
         }
         panel.Controls.Add(_nasaGalleryChipsPanel);
-        py += 70;
+        py += 82;
 
         _nasaGalleryGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 230)
+            Size = new Size(490, 218)
         };
         _nasaGalleryGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _nasaGalleryGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_nasaGalleryGrid);
-        py += 250;
+        py += 223;
 
         panel.Controls.Add(new Label
         {
