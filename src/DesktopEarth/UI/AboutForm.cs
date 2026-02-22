@@ -9,6 +9,7 @@ public class AboutForm : Form
     public AboutForm()
     {
         Text = "About Blue Marble Desktop";
+        Icon = TrayApplicationContext.LoadAppIcon();
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;

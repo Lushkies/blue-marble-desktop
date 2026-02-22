@@ -427,6 +427,7 @@ public class SettingsForm : Form
     private void InitializeForm()
     {
         Text = "Blue Marble Desktop Settings";
+        Icon = TrayApplicationContext.LoadAppIcon();
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -606,7 +607,7 @@ public class SettingsForm : Form
             Width = 180,
             Visible = false
         };
-        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images", "NASA Gallery"]);
+        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "NASA Gallery", "National Parks", "Smithsonian", "My Images"]);
         _stillImageSourceCombo.SelectedIndex = 0;
         _stillImageSourceCombo.SelectedIndexChanged += (_, _) =>
         {
@@ -641,8 +642,8 @@ public class SettingsForm : Form
             Visible = false,
             Enabled = false
         };
-        _rotationSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "National Parks", "Smithsonian", "My Images", "Favorites", "All Sources", "NASA Gallery"]);
-        _rotationSourceCombo.SelectedIndex = 5; // Favorites default
+        _rotationSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "NASA Gallery", "National Parks", "Smithsonian", "My Images", "Favorites", "All Sources"]);
+        _rotationSourceCombo.SelectedIndex = 6; // Favorites default
         _rotationSourceCombo.SelectedIndexChanged += (_, _) => { if (!_isLoading) SchedulePreview(); };
         tab.Controls.Add(_rotationSourceCombo);
         y += 25;
@@ -1829,16 +1830,16 @@ public class SettingsForm : Form
 
         _epicSubPanel.Visible = source == 0;
         _apodSubPanel.Visible = source == 1;
-        _npsSubPanel.Visible = source == 2;
-        _smithsonianSubPanel.Visible = source == 3;
-        _userImagesSubPanel.Visible = source == 4;
-        _nasaGallerySubPanel.Visible = source == 5;
+        _nasaGallerySubPanel.Visible = source == 2;
+        _npsSubPanel.Visible = source == 3;
+        _smithsonianSubPanel.Visible = source == 4;
+        _userImagesSubPanel.Visible = source == 5;
 
         // Auto-load on first view
         if (source == 0 && _epicGrid.SelectedImage == null) RefreshEpicImages();
         if (source == 1 && _apodGrid.SelectedImage == null) RefreshApodImages();
-        if (source == 4) RefreshUserImages(); // Always refresh (files may change externally)
-        if (source == 5 && _nasaGalleryGrid.SelectedImage == null) RefreshNasaGalleryImages();
+        if (source == 2 && _nasaGalleryGrid.SelectedImage == null) RefreshNasaGalleryImages();
+        if (source == 5) RefreshUserImages(); // Always refresh (files may change externally)
     }
 
     private void UpdatePerDisplayVisibility()

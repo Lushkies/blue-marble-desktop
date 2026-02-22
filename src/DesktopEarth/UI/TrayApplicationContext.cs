@@ -133,7 +133,7 @@ public class TrayApplicationContext : ApplicationContext
         catch { /* Ignore cross-thread issues during shutdown */ }
     }
 
-    private static Icon LoadAppIcon()
+    internal static Icon LoadAppIcon()
     {
         string iconPath = Path.Combine(AppContext.BaseDirectory, "Resources", "bluemarbledesktop.ico");
         if (File.Exists(iconPath))

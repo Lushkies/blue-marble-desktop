@@ -211,9 +211,9 @@ public class SettingsPreset
 }
 
 public enum DisplayMode { Spherical, FlatMap, Moon, StillImage }
-public enum ImageSource { NasaEpic, NasaApod, NationalParks, Smithsonian, UserImages, NasaGallery }
+public enum ImageSource { NasaEpic, NasaApod, NasaGallery, NationalParks, Smithsonian, UserImages }
 public enum ImageStyle { Topo, TopoBathy }
 public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
 public enum EpicImageType { Natural, Enhanced }
 public enum ImageQualityTier { Unknown, SD, HD, UD }
-public enum RotationSource { NasaEpic, NasaApod, NationalParks, Smithsonian, UserImages, Favorites, All, NasaGallery }
+public enum RotationSource { NasaEpic, NasaApod, NasaGallery, NationalParks, Smithsonian, UserImages, Favorites, All }

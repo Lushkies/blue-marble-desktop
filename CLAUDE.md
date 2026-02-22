@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 4.3.6
+**Current version:** 2.1.0
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -46,7 +46,7 @@ Build installers with Inno Setup:
 
 ```
 DisplayMode:   Spherical | FlatMap | Moon | StillImage
-ImageSource:   NasaEpic | NasaApod | NationalParks | Smithsonian | UserImages
+ImageSource:   NasaEpic | NasaApod | NasaGallery | NationalParks | Smithsonian | UserImages
 ImageStyle:    Topo | TopoBathy
 MultiMonitorMode: SameForAll | SpanAcross | PerDisplay
 EpicImageType: Natural | Enhanced
@@ -58,12 +58,12 @@ When `DisplayMode == StillImage`, the `StillImageSource` property selects which 
 
 1. **SettingsForm** (UI) writes to `AppSettings` via `SettingsManager.ApplyAndSave()`
 2. **RenderScheduler** reads settings, routes to the correct renderer
-3. For still images: RenderScheduler checks `StillImageSource` to pick EPIC/APOD/NPS/Smithsonian/UserImages
+3. For still images: RenderScheduler checks `StillImageSource` to pick EPIC/APOD/NPS/Smithsonian/UserImages/NasaGallery
 4. Rendered output saved as BMP, then **WallpaperSetter** applies it via Windows API
 
 ### API Keys
 
-All still image sources (except EPIC, which needs no key) use a **single api.data.gov API key** stored in `AppSettings.ApiDataGovKey`. Default is `DEMO_KEY` (50 requests/day). Users get a free key at https://api.data.gov/signup/
+All still image sources (except EPIC and NASA Gallery, which need no key) use a **single api.data.gov API key** stored in `AppSettings.ApiDataGovKey`. Default is `DEMO_KEY` (50 requests/day). Users get a free key at https://api.data.gov/signup/
 
 ### Settings Migration (SettingsManager.cs)
 
@@ -76,7 +76,7 @@ The app auto-migrates old settings JSON:
 
 Two separate caches:
 - **EpicImageCache** (`%AppData%/BlueMarbleDesktop/epic_images/`): Organized by type/date, 14-day retention
-- **ImageCache** (`%AppData%/BlueMarbleDesktop/image_cache/`): For APOD/NPS/Smithsonian, 30-day retention, protects favorited images, always keeps at least 1 image per source for offline fallback
+- **ImageCache** (`%AppData%/BlueMarbleDesktop/image_cache/`): For APOD/NPS/Smithsonian/NasaGallery, 30-day retention, protects favorited images, always keeps at least 1 image per source for offline fallback
 - **User Images** (`%AppData%/BlueMarbleDesktop/user_images/`): User-imported images, thumbnails in `image_cache/thumbnails/userimages/`
 
 ---
@@ -98,11 +98,12 @@ src/DesktopEarth/
   EpicApiClient.cs          # NASA EPIC satellite imagery API
   EpicImageCache.cs         # EPIC-specific image cache (by date/type)
   HiResTextureManager.cs    # HD texture download manager
-  ImageCache.cs             # Unified cache for APOD/NPS/Smithsonian
+  ImageCache.cs             # Unified cache for APOD/NPS/Smithsonian/NasaGallery
   ImageSourceInfo.cs        # Shared image metadata model
   UserImageManager.cs       # User-imported image directory management
   NpsApiClient.cs           # National Park Service API
   SmithsonianApiClient.cs   # Smithsonian Open Access API
+  NasaGalleryApiClient.cs   # NASA Image and Video Library API (no key needed)
   Rendering/
     EarthRenderer.cs        # 3D globe (specular, night lights, bathy mask)
     FlatMapRenderer.cs      # 2D equirectangular projection
@@ -179,22 +180,9 @@ lib/
 
 ## Version History
 
-- **v1.0** - Basic 3D globe renderer, desktop wallpaper setter
-- **v2.0** - System tray, settings UI, flat map + moon views, multi-monitor
-- **v2.1** - ARM64 support, Mesa3D fallback, build scripts
-- **v3.0** - Inno Setup installers, auto-updater, rename to "Blue Marble Desktop"
-- **v3.1** - NASA EPIC satellite imagery, per-monitor resolution fix
-- **v3.2** - HD texture download (21600x10800), zoom slider
-- **v4.0** - Multiple image sources (APOD, NPS, Smithsonian, Unsplash), thumbnail grids, favorites, random rotation
-- **v4.1** - Remove Unsplash, combine still images into unified view with sub-dropdown, consolidate API keys to single api.data.gov key, search suggestion chips, cache improvements (30-day retention, protected favorites, offline fallback), UI polish
-- **v4.2** - Resizable settings window, fix Smithsonian API (correct endpoint + Solr query syntax), fix NPS search (exact park codes for chips), image quality tiers (SD/HD/UD badges + filter), minimum 1080p enforcement, 28 curated national park chips
-- **v4.3** - My Collection tab (view/export/manage all favorites with source badges), user-imported custom images as wallpaper source, settings presets (save/load named appearance configurations), storage location disclaimer
-- **v4.3.1** - Bug fixes (crash-resistant settings, wallpaper persistence on restart, correct image selection for NPS/Smithsonian, no render on source/quality change), sequential favorites cycling, EPIC latest date indicator, configurable cache duration, improved HD texture description, fixed window size, tab reorder
-- **v4.3.2** - Critical fixes (wallpaper truly persists across restarts, API key saves immediately, Add Images crash fix, EPIC date shows correct latest), settings auto-open on launch, "Favorite Current Wallpaper" tray button, 3-tab layout (API Keys merged into System, Storage Locations moved to System)
-- **v4.3.3** - Pre-release polish: fix per-display settings UI (load/save/switch monitors correctly), fix Moon mode crash when texture missing, thread-safe favorites list, cache size display fix, quality filter no longer triggers re-render, version label, InvariantCulture for date parsing, HTTP response disposal, temp file cleanup
-- **v4.3.4** - Fix per-display wallpaper resetting to primary display's image on app restart (startup re-apply now uses SpanAcross style for PerDisplay composite images)
-- **v4.3.5** - View/Source selector accent panel for clearer visual hierarchy, brighter daytime light default (0.40), city lights default to center (1.5), extended zoom range (2x closer max zoom via 10-degree FOV floor)
-- **v4.3.6** - Remove unused minimum quality filter dropdown (badges still shown on thumbnails), remove HD texture download time estimate
+*Prior development versions (internal) covered: basic 3D globe renderer, system tray UI, flat map + moon views, multi-monitor support, ARM64 + Mesa3D fallback, Inno Setup installers, NASA EPIC satellite imagery, HD textures (21600x10800), zoom slider, multiple image sources (APOD, NPS, Smithsonian), thumbnail grids, favorites, search chips, quality badges, My Collection tab, user-imported images, settings presets, auto-rotate wallpaper system, configurable APOD date range.*
+
+- **v2.1.0** - First public release. 3D Earth globe with real-time day/night illumination, flat map, moon, and still images from 6 sources (NASA EPIC, NASA APOD, NASA Gallery, National Parks, Smithsonian, user images). Auto-rotate wallpaper, favorites, per-display settings, HD textures, x64 + ARM64 support.
 
 ---
 
@@ -204,12 +192,11 @@ lib/
 - NPS photos often include people (park rangers, visitors, buildings) rather than nature landscapes -- no API-level filter exists for this
 - Smithsonian search results depend on the art_design category -- some terms work better than others
 - EPIC images are sometimes delayed 24-48 hours from NASA
-- The SettingsForm is one large file (~2900 lines) -- could benefit from being split into partial classes or user controls if it grows further
+- The SettingsForm is one large file (~3100 lines) -- could benefit from being split into partial classes or user controls if it grows further
 - Per-display rendering uses logical pixels (post-DPI-scaling), so wallpapers may look slightly soft on high-DPI monitors at >100% scaling
 
 ### Potential Future Features
 - Filter NPS results to exclude photos with people (would need image analysis or metadata heuristics)
-- Pexels or Pixabay as image sources (free APIs, less restrictive than Unsplash was)
 - Seasonal/holiday themes
 - Wallpaper scheduling (different wallpapers at different times of day)
 - Cloud sync for favorites
