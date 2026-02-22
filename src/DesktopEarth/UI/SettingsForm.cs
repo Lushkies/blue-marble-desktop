@@ -69,6 +69,7 @@ public class SettingsForm : Form
     // View accent panel and promoted controls
     private Panel _viewAccentPanel = null!;
     private Label _sourceLabel = null!;
+    private Label _sourceHintLabel = null!;
 
     // Still Image source sub-dropdown
     private ComboBox _stillImageSourceCombo = null!;
@@ -460,6 +461,9 @@ public class SettingsForm : Form
 
         Controls.Add(tabControl);
 
+        // Apply theme to all controls recursively (buttons, comboboxes, groupboxes, etc.)
+        ThemeAllControls(this);
+
         // Version label at bottom-left of window (visible on all tabs)
         var version = System.Reflection.Assembly.GetExecutingAssembly()
             .GetName().Version?.ToString(3) ?? "0.0.0";
@@ -624,6 +628,23 @@ public class SettingsForm : Form
             // Don't trigger render — user must click an image to set wallpaper
         };
         _viewAccentPanel.Controls.Add(_stillImageSourceCombo);
+
+        // Hint label shown when NOT on Still Image — draws attention to the image sources feature
+        _sourceHintLabel = new Label
+        {
+            Text = "Select Still Image to explore NASA, National Parks, and more.",
+            AutoSize = true,
+            Location = new Point(250, 12),
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Theme.SecondaryText,
+            BackColor = Color.Transparent,
+            Cursor = Cursors.Hand
+        };
+        _sourceHintLabel.Click += (_, _) =>
+        {
+            _displayModeCombo.SelectedIndex = 3; // Switch to Still Image
+        };
+        _viewAccentPanel.Controls.Add(_sourceHintLabel);
 
         tab.Controls.Add(_viewAccentPanel);
         y += 45; // accent panel (40) + gap (5)
@@ -1821,6 +1842,9 @@ public class SettingsForm : Form
         _sourceLabel.Visible = isStillImage;
         _stillImageSourceCombo.Visible = isStillImage;
 
+        // Hint label — visible only when NOT on Still Image
+        _sourceHintLabel.Visible = !isStillImage;
+
         // Resize accent panel: 2 rows for Still Image, 1 row otherwise
         int accentHeight = isStillImage ? 72 : 40;
         if (_viewAccentPanel.Height != accentHeight)
@@ -2456,6 +2480,50 @@ public class SettingsForm : Form
         _isLoading = false;
     }
 
+    /// <summary>
+    /// Recursively apply Theme styling to all controls in the tree.
+    /// Called once after form construction; handles buttons, combos, textboxes, groupboxes, checkboxes.
+    /// </summary>
+    private static void ThemeAllControls(Control parent)
+    {
+        foreach (Control c in parent.Controls)
+        {
+            switch (c)
+            {
+                case Button btn when btn.FlatStyle != FlatStyle.Flat:
+                    // Only style buttons that haven't been explicitly styled (e.g., chip buttons)
+                    Theme.StyleButton(btn);
+                    break;
+                case GroupBox grp:
+                    Theme.StyleGroupBox(grp);
+                    break;
+                case ComboBox cmb:
+                    Theme.StyleComboBox(cmb);
+                    break;
+                case TextBox txt:
+                    Theme.StyleTextBox(txt);
+                    break;
+                case CheckBox chk:
+                    Theme.StyleCheckBox(chk);
+                    break;
+                case RadioButton rb:
+                    Theme.StyleRadioButton(rb);
+                    break;
+                case LinkLabel lnk:
+                    if (Theme.IsDarkMode)
+                    {
+                        lnk.LinkColor = Color.FromArgb(100, 160, 255);
+                        lnk.VisitedLinkColor = Color.FromArgb(140, 130, 220);
+                    }
+                    break;
+            }
+
+            // Recurse into child controls (panels, groupboxes, tabpages, etc.)
+            if (c.HasChildren)
+                ThemeAllControls(c);
+        }
+    }
+
     private static Label MakeLabel(string text, int x, int y) => new()
     {
         Text = text,
@@ -2608,23 +2676,28 @@ public class SettingsForm : Form
             FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = FormStartPosition.CenterParent,
             MaximizeBox = false,
-            MinimizeBox = false
+            MinimizeBox = false,
+            BackColor = Theme.FormBackground,
+            ForeColor = Theme.PrimaryText
         };
 
         var label = new Label { Text = prompt, Left = 15, Top = 15, AutoSize = true };
         var textBox = new TextBox { Left = 15, Top = 40, Width = 300 };
+        Theme.StyleTextBox(textBox);
         var okButton = new Button
         {
             Text = "OK",
             DialogResult = DialogResult.OK,
             Left = 155, Top = 75, Width = 75
         };
+        Theme.StyleButton(okButton);
         var cancelButton = new Button
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
             Left = 240, Top = 75, Width = 75
         };
+        Theme.StyleButton(cancelButton);
 
         dialog.Controls.AddRange([label, textBox, okButton, cancelButton]);
         dialog.AcceptButton = okButton;

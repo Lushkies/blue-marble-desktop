@@ -180,6 +180,17 @@ public static class Theme
     }
 
     /// <summary>
+    /// Style a RadioButton for the current theme.
+    /// </summary>
+    public static void StyleRadioButton(RadioButton radio)
+    {
+        if (IsDarkMode)
+        {
+            radio.ForeColor = Color.FromArgb(220, 220, 220);
+        }
+    }
+
+    /// <summary>
     /// Style a TabControl for the current theme.
     /// </summary>
     public static void StyleTabControl(TabControl tabControl)
