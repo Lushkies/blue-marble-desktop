@@ -137,6 +137,7 @@ public class SettingsForm : Form
     private Label? _cacheSizeLabel;
 
     // Auto-rotation controls
+    private GroupBox _autoRotateGroup = null!;
     private CheckBox _randomRotationCheck = null!;
     private ComboBox _rotationSourceCombo = null!;
 
@@ -673,33 +674,41 @@ public class SettingsForm : Form
         };
         tab.Controls.Add(_sourceHintLabel);
 
-        // -- AUTO-ROTATION (visible for still image mode only, same Y as hint) --
+        // -- AUTO-ROTATION (grouped in its own box, visible for still image mode only) --
+        _autoRotateGroup = new GroupBox
+        {
+            Text = "Auto-Rotate",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(490, 48),
+            Visible = false
+        };
+
         _randomRotationCheck = new CheckBox
         {
             Text = "Auto-rotate wallpaper",
             AutoSize = true,
-            Location = new Point(LeftMargin, y),
-            Visible = false
+            Location = new Point(10, 18)
         };
         _randomRotationCheck.CheckedChanged += (_, _) =>
         {
             _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
             SchedulePreview();
         };
-        tab.Controls.Add(_randomRotationCheck);
+        _autoRotateGroup.Controls.Add(_randomRotationCheck);
 
         _rotationSourceCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(250, y - 2),
+            Location = new Point(230, 16),
             Width = 160,
-            Visible = false,
             Enabled = false
         };
         _rotationSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "NASA Gallery", "National Parks", "Smithsonian", "My Images", "Favorites", "All Sources"]);
         _rotationSourceCombo.SelectedIndex = 6; // Favorites default
         _rotationSourceCombo.SelectedIndexChanged += (_, _) => { if (!_isLoading) SchedulePreview(); };
-        tab.Controls.Add(_rotationSourceCombo);
+        _autoRotateGroup.Controls.Add(_rotationSourceCombo);
+
+        tab.Controls.Add(_autoRotateGroup);
 
         // -- MODE PANELS (positioned dynamically by UpdateModeVisibility) --
         // Initial Y will be adjusted when UpdateModeVisibility runs
@@ -1024,7 +1033,7 @@ public class SettingsForm : Form
         _epicGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, ey),
-            Size = new Size(490, 220)
+            Size = new Size(490, 250)
         };
         _epicGrid.ImageSelected += (_, img) =>
         {
@@ -1032,7 +1041,7 @@ public class SettingsForm : Form
         };
         _epicGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_epicGrid);
-        ey += 225;
+        ey += 255;
 
         _epicStatusLabel = new Label
         {
@@ -1132,12 +1141,12 @@ public class SettingsForm : Form
         _apodGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 250)
+            Size = new Size(490, 280)
         };
         _apodGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _apodGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_apodGrid);
-        py += 255;
+        py += 285;
 
         _apodStatusLabel = new Label
         {
@@ -1238,12 +1247,12 @@ public class SettingsForm : Form
         _npsGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 218)
+            Size = new Size(490, 234)
         };
         _npsGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _npsGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_npsGrid);
-        py += 223;
+        py += 239;
 
         _npsStatusLabel = new Label
         {
@@ -1303,7 +1312,7 @@ public class SettingsForm : Form
         _smithsonianChipsPanel.HorizontalScroll.Visible = false;
         string[] smithChips = ["Landscape Painting", "Sunset", "Mountain", "Ocean", "Forest",
             "Butterfly", "Architecture", "Waterfall", "Desert", "Volcano",
-            "Coral Reef", "Glacier", "Photography", "Parthenon", "Night Sky"];
+            "Glacier", "Photography", "Parthenon", "Night Sky"];
         foreach (var chip in smithChips)
         {
             var chipText = chip; // capture for closure
@@ -1335,12 +1344,12 @@ public class SettingsForm : Form
         _smithsonianGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 218)
+            Size = new Size(490, 234)
         };
         _smithsonianGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _smithsonianGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_smithsonianGrid);
-        py += 223;
+        py += 239;
 
         _smithsonianStatusLabel = new Label
         {
@@ -1890,9 +1899,8 @@ public class SettingsForm : Form
         _stillImagePanel.Visible = isStillImage;
         _resetButton.Visible = !isStillImage;
 
-        // Auto-rotation visible for still image mode
-        _randomRotationCheck.Visible = isStillImage;
-        _rotationSourceCombo.Visible = isStillImage;
+        // Auto-rotation GroupBox visible for still image mode
+        _autoRotateGroup.Visible = isStillImage;
         _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
 
         // Source dropdown — always visible, enabled only for Still Image
@@ -1901,13 +1909,23 @@ public class SettingsForm : Form
         // Hint label below accent panel — visible only when NOT on Still Image
         _sourceHintLabel.Visible = !isStillImage;
 
-        // Dynamic panel positioning: hint and auto-rotate share the same Y slot.
-        // Only one is visible at a time, so panels start right after the visible control.
-        int panelY = _controlsBaseY + 28; // 28px for either hint (18px + gap) or checkbox (22px + gap)
-        _globeControlsPanel.Top = panelY;
-        _stillImagePanel.Top = panelY;
-        _resetButton.Top = panelY + 430;
-        _presetsPanel.Top = panelY + 468; // 430 + 28 (reset btn) + 10 gap
+        // Dynamic panel positioning based on which controls are visible.
+        // Globe/FlatMap/Moon: hint label (18px) + gap → panels start close
+        // Still Image: auto-rotate GroupBox (48px) + gap → panels start lower
+        int panelY;
+        if (isStillImage)
+        {
+            panelY = _controlsBaseY + 53; // GroupBox (48px) + 5px gap
+            _stillImagePanel.Top = panelY;
+            _presetsPanel.Top = panelY + 435; // tight below still image panel
+        }
+        else
+        {
+            panelY = _controlsBaseY + 26; // hint (18px) + 8px gap
+            _globeControlsPanel.Top = panelY;
+            _resetButton.Top = panelY + 430;
+            _presetsPanel.Top = panelY + 468; // 430 + 28 (reset btn) + 10 gap
+        }
 
         // Globe-specific logic
         if (mode <= 2)
@@ -2766,7 +2784,7 @@ public class SettingsForm : Form
 
     private Panel CreateNasaGallerySubPanel(int y)
     {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 410), Visible = false };
+        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 420), Visible = false };
         int py = 0;
 
         panel.Controls.Add(MakeLabel("Search:", LeftMargin, py + 3));
@@ -2838,12 +2856,12 @@ public class SettingsForm : Form
         _nasaGalleryGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 218)
+            Size = new Size(490, 234)
         };
         _nasaGalleryGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _nasaGalleryGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         panel.Controls.Add(_nasaGalleryGrid);
-        py += 223;
+        py += 239;
 
         panel.Controls.Add(new Label
         {
@@ -2995,7 +3013,7 @@ public class SettingsForm : Form
         _userImagesGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, uy),
-            Size = new Size(490, 340)
+            Size = new Size(490, 360)
         };
         _userImagesGrid.ImageSelected += (_, img) =>
         {
