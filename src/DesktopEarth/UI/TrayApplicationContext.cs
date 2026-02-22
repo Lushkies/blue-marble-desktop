@@ -14,6 +14,9 @@ public class TrayApplicationContext : ApplicationContext
         _settingsManager = settingsManager;
         _renderScheduler = renderScheduler;
 
+        // Initialize UI theme from saved settings
+        Theme.IsDarkMode = _settingsManager.Settings.DarkModeEnabled;
+
         _trayIcon = new NotifyIcon
         {
             Icon = LoadAppIcon(),
@@ -71,7 +74,23 @@ public class TrayApplicationContext : ApplicationContext
         }
 
         _settingsForm = new SettingsForm(_settingsManager, _renderScheduler);
+        _settingsForm.RequestReopen += RecreateSettingsForm;
         _settingsForm.Show();
+    }
+
+    /// <summary>
+    /// Close and recreate the settings form (used for theme changes that require full repaint).
+    /// </summary>
+    internal void RecreateSettingsForm()
+    {
+        if (_settingsForm != null && !_settingsForm.IsDisposed)
+        {
+            _settingsForm.RequestReopen -= RecreateSettingsForm;
+            _settingsForm.Close();
+            _settingsForm.Dispose();
+        }
+        _settingsForm = null;
+        ShowSettings();
     }
 
     private void FavoriteCurrentWallpaper()

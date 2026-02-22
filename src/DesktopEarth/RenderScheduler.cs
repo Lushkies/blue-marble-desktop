@@ -625,6 +625,7 @@ public class RenderScheduler : IDisposable
             }
             else
             {
+                ReportStatus($"Downloading {source} image...");
                 imagePath = _imageCache.DownloadToCache(source, imageId, imageUrl)
                     .GetAwaiter().GetResult();
             }
@@ -647,6 +648,7 @@ public class RenderScheduler : IDisposable
             else
             {
                 SetCurrentImage(source, imageId, imageUrl, imagePath);
+                ReportStatus("Wallpaper updated");
                 return renderer.Render(width, height);
             }
         }
@@ -756,18 +758,23 @@ public class RenderScheduler : IDisposable
 
     /// <summary>
     /// Build a weighted rotation pool from all sources.
-    /// Weights: EPIC 3x, APOD 3x, NPS 3x, Smithsonian 1x, User 2x.
+    /// Weights (base 40): Gallery 13 (32.5%), APOD 7 (17.5%), EPIC 4 (10%),
+    ///   NPS 4 (10%), Smithsonian 4 (10%), User Images 0-8 (0-20% scaled by collection size).
     /// Shuffled deterministically so sequential cycling produces mixed order.
     /// </summary>
     private List<string> BuildWeightedAllPool(AppSettings settings)
     {
         var pool = new List<string>();
-        AddWeighted(pool, _epicCache.GetAllCachedImagePaths(settings.EpicImageType), 3);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod), 3);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks), 3);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian), 1);
-        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaGallery), 3);
-        AddWeighted(pool, new UserImageManager().GetAllImagePaths(), 2);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaGallery), 13);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NasaApod), 7);
+        AddWeighted(pool, _epicCache.GetAllCachedImagePaths(settings.EpicImageType), 4);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.NationalParks), 4);
+        AddWeighted(pool, _imageCache.GetAllCachedImagePaths(ImageSource.Smithsonian), 4);
+
+        // User images: scaled by collection size (0=skip, 1=single copy, 2-14=10%, 15+=20%)
+        var userPaths = new UserImageManager().GetAllImagePaths();
+        int userWeight = userPaths.Count switch { 0 => 0, 1 => 1, < 15 => 4, _ => 8 };
+        if (userWeight > 0) AddWeighted(pool, userPaths, userWeight);
 
         // Add favorites that aren't already in the pool (e.g., from sources without local cache)
         foreach (var path in GetFavoriteImagePaths(settings))
@@ -940,12 +947,12 @@ public class RenderScheduler : IDisposable
             }
             case RotationSource.All:
             {
-                // Pick a random source (weighted toward nature/space)
+                // Pick a random source (weighted: Gallery 3x, APOD 2x, EPIC 1x, NPS 1x, SI 1x)
                 var sources = new[] {
+                    RotationSource.NasaGallery, RotationSource.NasaGallery, RotationSource.NasaGallery,
                     RotationSource.NasaApod, RotationSource.NasaApod,
-                    RotationSource.NationalParks, RotationSource.NationalParks,
                     RotationSource.NasaEpic,
-                    RotationSource.NasaGallery, RotationSource.NasaGallery,
+                    RotationSource.NationalParks,
                     RotationSource.Smithsonian
                 };
                 await FetchNewImageForPool(sources[Random.Shared.Next(sources.Length)], apiKey, epicType);

@@ -116,6 +116,7 @@ src/DesktopEarth/
     SunPosition.cs          # Astronomical sun position calculation
     GraphicsCapabilityDetector.cs  # ARM64/Mesa3D detection
   UI/
+    Theme.cs                   # Centralized dark/light mode color definitions
     TrayApplicationContext.cs  # System tray icon + context menu
     SettingsForm.cs            # Tabbed settings dialog (3 tabs)
     ThumbnailGridPanel.cs      # Reusable image grid with selection + favorites
@@ -182,7 +183,7 @@ lib/
 
 *Prior development versions (internal) covered: basic 3D globe renderer, system tray UI, flat map + moon views, multi-monitor support, ARM64 + Mesa3D fallback, Inno Setup installers, NASA EPIC satellite imagery, HD textures (21600x10800), zoom slider, multiple image sources (APOD, NPS, Smithsonian), thumbnail grids, favorites, search chips, quality badges, My Collection tab, user-imported images, settings presets, auto-rotate wallpaper system, configurable APOD date range.*
 
-- **v2.1.0** - First public release. 3D Earth globe with real-time day/night illumination, flat map, moon, and still images from 6 sources (NASA EPIC, NASA APOD, NASA Gallery, National Parks, Smithsonian, user images). Auto-rotate wallpaper, favorites, per-display settings, HD textures, x64 + ARM64 support.
+- **v2.1.0** - First public release. 3D Earth globe with real-time day/night illumination, flat map, moon, and still images from 6 sources (NASA EPIC, NASA APOD, NASA Gallery, National Parks, Smithsonian, user images). Auto-rotate wallpaper, favorites, per-display settings, HD textures, dark mode, download status feedback, x64 + ARM64 support.
 
 ---
 

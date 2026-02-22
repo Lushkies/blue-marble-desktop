@@ -424,6 +424,9 @@ public class SettingsForm : Form
         return config;
     }
 
+    // Event fired when the form needs to be recreated (e.g., theme change)
+    public event Action? RequestReopen;
+
     private void InitializeForm()
     {
         Text = "Blue Marble Desktop Settings";
@@ -433,6 +436,8 @@ public class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(560, 790);
         ShowInTaskbar = true;
+        BackColor = Theme.FormBackground;
+        ForeColor = Theme.PrimaryText;
 
         var tabControl = new TabControl
         {
@@ -441,6 +446,7 @@ public class SettingsForm : Form
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
             Padding = new Point(8, 4)
         };
+        Theme.StyleTabControl(tabControl);
 
         tabControl.TabPages.Add(CreateAppearanceTab());
         tabControl.TabPages.Add(CreateMyCollectionTab());
@@ -461,11 +467,14 @@ public class SettingsForm : Form
         {
             Text = $"v{version}",
             Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.FromArgb(170, 170, 170),
+            ForeColor = Theme.DimText,
             AutoSize = true,
             Location = new Point(8, ClientSize.Height - 18),
             Anchor = AnchorStyles.Bottom | AnchorStyles.Left
         });
+
+        // Listen for download/render status updates
+        _renderScheduler.StatusChanged += OnRenderStatusChanged;
     }
 
     private int AddSliderRow(Control parent, string labelText, string defaultValue,
@@ -491,7 +500,7 @@ public class SettingsForm : Form
 
     private TabPage CreateAppearanceTab()
     {
-        var tab = new TabPage("Appearance");
+        var tab = new TabPage("Appearance") { BackColor = Theme.TabBackground };
         int y = 10;
 
         // -- MULTI-DISPLAY MODE (with monitor selector merged inside) --
@@ -708,6 +717,15 @@ public class SettingsForm : Form
         tab.Controls.Add(presetDeleteBtn);
 
         RefreshPresetCombo();
+
+        tab.Controls.Add(new Label
+        {
+            Text = "Any view can be saved as a preset.",
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Theme.SecondaryText,
+            AutoSize = true,
+            Location = new Point(LeftMargin + 60, panelY + 490)
+        });
 
         return tab;
     }
@@ -943,7 +961,7 @@ public class SettingsForm : Form
             Location = new Point(320, ey + 1),
             AutoSize = true,
             Font = new Font("Segoe UI", 8f),
-            ForeColor = Color.FromArgb(100, 100, 100)
+            ForeColor = Theme.DetailText
         };
         panel.Controls.Add(_epicLatestDateLabel);
         ey += 30;
@@ -970,7 +988,7 @@ public class SettingsForm : Form
             Location = new Point(LeftMargin, ey),
             Size = new Size(490, 20),
             Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         panel.Controls.Add(_epicStatusLabel);
         ey += 22;
@@ -984,7 +1002,7 @@ public class SettingsForm : Form
             if ((DateTime.Now - _lastEpicRefresh).TotalSeconds < 5)
             {
                 _epicStatusLabel.Text = "Please wait a few seconds before refreshing.";
-                _epicStatusLabel.ForeColor = Color.Gray;
+                _epicStatusLabel.ForeColor = Theme.SecondaryText;
                 return;
             }
             RefreshEpicImages();
@@ -1075,7 +1093,7 @@ public class SettingsForm : Form
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 20),
             Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         panel.Controls.Add(_apodStatusLabel);
         py += 22;
@@ -1136,11 +1154,11 @@ public class SettingsForm : Form
                 Margin = new Padding(0, 0, 4, 2),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 7.5f),
-                BackColor = Color.FromArgb(235, 240, 250),
-                ForeColor = Color.FromArgb(40, 60, 100),
+                BackColor = Theme.BlueChipBackground,
+                ForeColor = Theme.BlueChipText,
                 Cursor = Cursors.Hand
             };
-            btn.FlatAppearance.BorderColor = Color.FromArgb(180, 195, 220);
+            btn.FlatAppearance.BorderColor = Theme.BlueChipBorder;
             btn.FlatAppearance.BorderSize = 1;
             btn.Click += (_, _) =>
             {
@@ -1168,7 +1186,7 @@ public class SettingsForm : Form
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 35),
             Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         panel.Controls.Add(_npsStatusLabel);
 
@@ -1220,11 +1238,11 @@ public class SettingsForm : Form
                 Margin = new Padding(0, 0, 4, 2),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 7.5f),
-                BackColor = Color.FromArgb(240, 235, 225),
-                ForeColor = Color.FromArgb(80, 60, 30),
+                BackColor = Theme.TanChipBackground,
+                ForeColor = Theme.TanChipText,
                 Cursor = Cursors.Hand
             };
-            btn.FlatAppearance.BorderColor = Color.FromArgb(210, 195, 170);
+            btn.FlatAppearance.BorderColor = Theme.TanChipBorder;
             btn.FlatAppearance.BorderSize = 1;
             btn.Click += (_, _) =>
             {
@@ -1252,7 +1270,7 @@ public class SettingsForm : Form
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 35),
             Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         panel.Controls.Add(_smithsonianStatusLabel);
 
@@ -1261,7 +1279,7 @@ public class SettingsForm : Form
 
     private TabPage CreateSystemTab()
     {
-        var tab = new TabPage("System");
+        var tab = new TabPage("System") { BackColor = Theme.TabBackground };
         int y = 15;
 
         tab.Controls.Add(MakeLabel("Update every:", LeftMargin, y + 3));
@@ -1319,7 +1337,7 @@ public class SettingsForm : Form
             Location = new Point(15, 20),
             Size = new Size(460, 30),
             Font = new Font("Segoe UI", 8f),
-            ForeColor = Color.FromArgb(80, 80, 80)
+            ForeColor = Theme.DescriptionText
         };
         hdGroup.Controls.Add(hdDescLabel);
 
@@ -1425,7 +1443,7 @@ public class SettingsForm : Form
             Location = new Point(15, 20),
             Size = new Size(460, 18),
             Font = new Font("Segoe UI", 8f),
-            ForeColor = Color.FromArgb(80, 80, 80)
+            ForeColor = Theme.DescriptionText
         };
         cacheGroup.Controls.Add(cacheDescLabel);
 
@@ -1468,7 +1486,7 @@ public class SettingsForm : Form
             Location = new Point(290, 44),
             AutoSize = true,
             Font = new Font("Segoe UI", 8f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         cacheGroup.Controls.Add(cacheSizeLabel);
         _cacheSizeLabel = cacheSizeLabel;
@@ -1527,7 +1545,7 @@ public class SettingsForm : Form
             Location = new Point(155, 75),
             AutoSize = true,
             Font = new Font("Segoe UI", 8f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         cacheGroup.Controls.Add(clearCacheNote);
         cacheGroup.Controls.Add(clearCacheButton);
@@ -1554,7 +1572,7 @@ public class SettingsForm : Form
             Location = new Point(10, 20),
             AutoSize = true,
             Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         storageGroup.Controls.Add(storageInfo);
 
@@ -1577,7 +1595,7 @@ public class SettingsForm : Form
             Location = new Point(120, 73),
             AutoSize = true,
             Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         storageGroup.Controls.Add(storageDisclaimer);
         tab.Controls.Add(storageGroup);
@@ -1599,7 +1617,7 @@ public class SettingsForm : Form
             Location = new Point(15, ay),
             Size = new Size(460, 32),
             Font = new Font("Segoe UI", 8f),
-            ForeColor = Color.FromArgb(80, 80, 80)
+            ForeColor = Theme.DescriptionText
         };
         apiKeyGroup.Controls.Add(apiInfoLabel);
         ay += 36;
@@ -1633,7 +1651,7 @@ public class SettingsForm : Form
             Location = new Point(80, ay),
             AutoSize = true,
             Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         apiKeyGroup.Controls.Add(apiKeyNote);
         ay += 18;
@@ -1676,13 +1694,13 @@ public class SettingsForm : Form
             if (string.IsNullOrWhiteSpace(key))
             {
                 apiVerifyStatus.Text = "Please enter an API key first.";
-                apiVerifyStatus.ForeColor = Color.FromArgb(180, 80, 80);
+                apiVerifyStatus.ForeColor = Theme.ErrorText;
                 return;
             }
 
             apiVerifyButton.Enabled = false;
             apiVerifyStatus.Text = "Verifying...";
-            apiVerifyStatus.ForeColor = Color.Gray;
+            apiVerifyStatus.ForeColor = Theme.SecondaryText;
 
             Task.Run(async () =>
             {
@@ -1698,12 +1716,12 @@ public class SettingsForm : Form
                             if (result != null)
                             {
                                 apiVerifyStatus.Text = "API key is valid!";
-                                apiVerifyStatus.ForeColor = Color.FromArgb(60, 130, 60);
+                                apiVerifyStatus.ForeColor = Theme.SuccessText;
                             }
                             else
                             {
                                 apiVerifyStatus.Text = "Key may be invalid or rate-limited.";
-                                apiVerifyStatus.ForeColor = Color.FromArgb(180, 120, 0);
+                                apiVerifyStatus.ForeColor = Theme.WarningText;
                             }
                         });
                     }
@@ -1718,7 +1736,7 @@ public class SettingsForm : Form
                         {
                             apiVerifyButton.Enabled = true;
                             apiVerifyStatus.Text = $"Error: {ex.Message}";
-                            apiVerifyStatus.ForeColor = Color.FromArgb(180, 80, 80);
+                            apiVerifyStatus.ForeColor = Theme.ErrorText;
                         });
                     }
                     catch (ObjectDisposedException) { }
@@ -1728,6 +1746,26 @@ public class SettingsForm : Form
         apiKeyGroup.Controls.Add(apiVerifyButton);
         tab.Controls.Add(apiKeyGroup);
         y += 185;
+
+        // Dark mode toggle
+        var darkModeCheck = new CheckBox
+        {
+            Text = "Dark mode",
+            AutoSize = true,
+            Location = new Point(LeftMargin, y),
+            ForeColor = Theme.PrimaryText
+        };
+        darkModeCheck.Checked = _settings.DarkModeEnabled;
+        darkModeCheck.CheckedChanged += (_, _) =>
+        {
+            if (_isLoading) return;
+            _settings.DarkModeEnabled = darkModeCheck.Checked;
+            Theme.IsDarkMode = darkModeCheck.Checked;
+            _settingsManager.Save();
+            RequestReopen?.Invoke();
+        };
+        tab.Controls.Add(darkModeCheck);
+        y += 35;
 
         // Enable scrolling for the system tab
         tab.AutoScroll = true;
@@ -1885,7 +1923,7 @@ public class SettingsForm : Form
                     Invoke(() =>
                     {
                         _epicLatestDateLabel.Text = $"Latest available: {latestDate:MMM d, yyyy}";
-                        _epicLatestDateLabel.ForeColor = Color.FromArgb(60, 120, 60);
+                        _epicLatestDateLabel.ForeColor = Theme.SuccessText;
                         _epicDatePicker.MaxDate = latestDate;
                     });
                 }
@@ -1900,7 +1938,7 @@ public class SettingsForm : Form
                     Invoke(() =>
                     {
                         _epicLatestDateLabel.Text = "Could not check latest date";
-                        _epicLatestDateLabel.ForeColor = Color.Gray;
+                        _epicLatestDateLabel.ForeColor = Theme.SecondaryText;
                     });
                 }
                 catch { }
@@ -1912,7 +1950,7 @@ public class SettingsForm : Form
     {
         _lastEpicRefresh = DateTime.Now;
         _epicStatusLabel.Text = "Loading images from NASA EPIC...";
-        _epicStatusLabel.ForeColor = Color.Gray;
+        _epicStatusLabel.ForeColor = Theme.SecondaryText;
         _epicRefreshButton.Enabled = false;
 
         var imageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
@@ -1940,7 +1978,7 @@ public class SettingsForm : Form
                         _epicStatusLabel.Text = images == null
                             ? "Could not connect to NASA EPIC. Check your internet connection."
                             : $"No images available for {(useLatest ? "the latest date" : date)}.";
-                        _epicStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                        _epicStatusLabel.ForeColor = Theme.ErrorText;
                         _epicGrid.SetImages(new List<ImageSourceInfo>());
                         return;
                     }
@@ -1976,7 +2014,7 @@ public class SettingsForm : Form
                     // Restore previously saved selection
                     _epicGrid.SelectById(_settings.EpicSelectedImage);
                     _epicStatusLabel.Text = $"{sourceInfos.Count} image{(sourceInfos.Count != 1 ? "s" : "")} available.";
-                    _epicStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
+                    _epicStatusLabel.ForeColor = Theme.SuccessText;
                 });
             }
             catch (ObjectDisposedException) { }
@@ -1987,7 +2025,7 @@ public class SettingsForm : Form
     {
         _lastApodRefresh = DateTime.Now;
         _apodStatusLabel.Text = "Loading from NASA APOD...";
-        _apodStatusLabel.ForeColor = Color.Gray;
+        _apodStatusLabel.ForeColor = Theme.SecondaryText;
         _apodRefreshButton.Enabled = false;
 
         var apiKey = _settings.ApiDataGovKey;
@@ -2019,7 +2057,7 @@ public class SettingsForm : Form
                         _apodStatusLabel.Text = images == null
                             ? "Could not connect to NASA APOD. Check API key and connection."
                             : "No images available.";
-                        _apodStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                        _apodStatusLabel.ForeColor = Theme.ErrorText;
                         _apodGrid.SetImages(new List<ImageSourceInfo>());
                         return;
                     }
@@ -2032,7 +2070,7 @@ public class SettingsForm : Form
                     // Restore previously saved selection
                     _apodGrid.SelectById(_settings.ApodSelectedImageId);
                     _apodStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} loaded.";
-                    _apodStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
+                    _apodStatusLabel.ForeColor = Theme.SuccessText;
                 });
             }
             catch (ObjectDisposedException) { }
@@ -2054,13 +2092,13 @@ public class SettingsForm : Form
             else
             {
                 _npsStatusLabel.Text = "API key required. Add it in the API Keys tab.";
-                _npsStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                _npsStatusLabel.ForeColor = Theme.ErrorText;
                 return;
             }
         }
 
         _npsStatusLabel.Text = $"Searching parks for \"{query}\"...";
-        _npsStatusLabel.ForeColor = Color.Gray;
+        _npsStatusLabel.ForeColor = Theme.SecondaryText;
         _npsSearchButton.Enabled = false;
 
         Task.Run(async () =>
@@ -2083,7 +2121,7 @@ public class SettingsForm : Form
                         _npsStatusLabel.Text = images == null
                             ? "Could not connect to NPS. Check API key and connection."
                             : "No park images found. Try a different search.";
-                        _npsStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                        _npsStatusLabel.ForeColor = Theme.ErrorText;
                         _npsGrid.SetImages(new List<ImageSourceInfo>());
                         return;
                     }
@@ -2095,7 +2133,7 @@ public class SettingsForm : Form
                     // Restore previously saved selection
                     _npsGrid.SelectById(_settings.NpsSelectedImageId);
                     _npsStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
-                    _npsStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
+                    _npsStatusLabel.ForeColor = Theme.SuccessText;
                 });
             }
             catch (ObjectDisposedException) { }
@@ -2111,12 +2149,12 @@ public class SettingsForm : Form
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             _smithsonianStatusLabel.Text = "API key required. Add it in the API Keys tab.";
-            _smithsonianStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+            _smithsonianStatusLabel.ForeColor = Theme.ErrorText;
             return;
         }
 
         _smithsonianStatusLabel.Text = $"Searching Smithsonian for \"{query}\"...";
-        _smithsonianStatusLabel.ForeColor = Color.Gray;
+        _smithsonianStatusLabel.ForeColor = Theme.SecondaryText;
         _smithsonianSearchButton.Enabled = false;
 
         Task.Run(async () =>
@@ -2134,7 +2172,7 @@ public class SettingsForm : Form
                         _smithsonianStatusLabel.Text = images == null
                             ? "Could not connect to Smithsonian. Check API key."
                             : "No images found. Try a different search or click a suggestion.";
-                        _smithsonianStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                        _smithsonianStatusLabel.ForeColor = Theme.ErrorText;
                         _smithsonianGrid.SetImages(new List<ImageSourceInfo>());
                         return;
                     }
@@ -2146,7 +2184,7 @@ public class SettingsForm : Form
                     // Restore previously saved selection
                     _smithsonianGrid.SelectById(_settings.SmithsonianSelectedId);
                     _smithsonianStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
-                    _smithsonianStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
+                    _smithsonianStatusLabel.ForeColor = Theme.SuccessText;
                 });
             }
             catch (ObjectDisposedException) { }
@@ -2432,16 +2470,16 @@ public class SettingsForm : Form
         {
             Location = new Point(x, y),
             Size = new Size(width, height),
-            BackColor = Color.FromArgb(248, 250, 253)
+            BackColor = Theme.AccentPanelBackground
         };
         panel.Paint += (_, e) =>
         {
             var g = e.Graphics;
             // Blue accent bar on left edge
-            using var accentBrush = new SolidBrush(Color.FromArgb(74, 144, 217));
+            using var accentBrush = new SolidBrush(Theme.AccentPanelStripe);
             g.FillRectangle(accentBrush, 0, 0, 3, panel.Height);
-            // Gray border on top, right, bottom
-            using var borderPen = new Pen(Color.FromArgb(204, 204, 204), 1);
+            // Border on top, right, bottom
+            using var borderPen = new Pen(Theme.AccentPanelBorder, 1);
             g.DrawLine(borderPen, 3, 0, panel.Width - 1, 0);              // top
             g.DrawLine(borderPen, panel.Width - 1, 0, panel.Width - 1, panel.Height - 1); // right
             g.DrawLine(borderPen, 3, panel.Height - 1, panel.Width - 1, panel.Height - 1); // bottom
@@ -2640,11 +2678,11 @@ public class SettingsForm : Form
                 Margin = new Padding(0, 0, 4, 2),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 7.5f),
-                BackColor = Color.FromArgb(225, 235, 245),
-                ForeColor = Color.FromArgb(30, 60, 100),
+                BackColor = Theme.GalleryChipBackground,
+                ForeColor = Theme.GalleryChipText,
                 Cursor = Cursors.Hand
             };
-            btn.FlatAppearance.BorderColor = Color.FromArgb(170, 190, 220);
+            btn.FlatAppearance.BorderColor = Theme.GalleryChipBorder;
             btn.FlatAppearance.BorderSize = 1;
             btn.Click += (_, _) =>
             {
@@ -2666,13 +2704,23 @@ public class SettingsForm : Form
         panel.Controls.Add(_nasaGalleryGrid);
         py += 250;
 
+        panel.Controls.Add(new Label
+        {
+            Text = "NASA Gallery images are high-resolution and may take a moment to download.",
+            Location = new Point(LeftMargin, py),
+            Size = new Size(490, 18),
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Theme.SecondaryText
+        });
+        py += 18;
+
         _nasaGalleryStatusLabel = new Label
         {
             Text = "Search NASA's image library. Free, no API key needed.",
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 35),
             Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.Gray
+            ForeColor = Theme.SecondaryText
         };
         panel.Controls.Add(_nasaGalleryStatusLabel);
 
@@ -2685,7 +2733,7 @@ public class SettingsForm : Form
         if (string.IsNullOrEmpty(query)) return;
 
         _nasaGalleryStatusLabel.Text = $"Searching NASA for \"{query}\"...";
-        _nasaGalleryStatusLabel.ForeColor = Color.Gray;
+        _nasaGalleryStatusLabel.ForeColor = Theme.SecondaryText;
         _nasaGallerySearchButton.Enabled = false;
 
         Task.Run(async () =>
@@ -2702,7 +2750,7 @@ public class SettingsForm : Form
                         _nasaGalleryStatusLabel.Text = images == null
                             ? "Could not connect to NASA Gallery. Check your connection."
                             : $"No images found for \"{query}\". Try a different search.";
-                        _nasaGalleryStatusLabel.ForeColor = Color.FromArgb(180, 80, 80);
+                        _nasaGalleryStatusLabel.ForeColor = Theme.ErrorText;
                         _nasaGalleryGrid.SetImages(new List<ImageSourceInfo>());
                         return;
                     }
@@ -2714,7 +2762,7 @@ public class SettingsForm : Form
                     _nasaGalleryGrid.SetImages(images);
                     _nasaGalleryGrid.SelectById(_settings.NasaGallerySelectedId);
                     _nasaGalleryStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found. No API key needed.";
-                    _nasaGalleryStatusLabel.ForeColor = Color.FromArgb(60, 130, 60);
+                    _nasaGalleryStatusLabel.ForeColor = Theme.SuccessText;
                 });
             }
             catch (ObjectDisposedException) { }
@@ -2798,7 +2846,7 @@ public class SettingsForm : Form
         panel.Controls.Add(addButton);
 
         _userImagesStatusLabel = MakeLabel("", 140, uy + 5);
-        _userImagesStatusLabel.ForeColor = Color.Gray;
+        _userImagesStatusLabel.ForeColor = Theme.SecondaryText;
         panel.Controls.Add(_userImagesStatusLabel);
         uy += 35;
 
@@ -2840,7 +2888,7 @@ public class SettingsForm : Form
 
     private TabPage CreateMyCollectionTab()
     {
-        var tab = new TabPage("My Collection");
+        var tab = new TabPage("My Collection") { BackColor = Theme.TabBackground };
         tab.AutoScroll = true;
         int y = 10;
 
@@ -3184,10 +3232,50 @@ public class SettingsForm : Form
         RefreshMyCollectionTab();
     }
 
+    private void OnRenderStatusChanged(string status)
+    {
+        if (IsDisposed) return;
+        try { Invoke(() => UpdateDownloadStatus(status)); }
+        catch (ObjectDisposedException) { }
+    }
+
+    private void UpdateDownloadStatus(string status)
+    {
+        // Route status messages to the active source's status label
+        var label = GetActiveStatusLabel();
+        if (label == null) return;
+
+        if (status.Contains("Downloading", StringComparison.OrdinalIgnoreCase))
+        {
+            label.Text = "Downloading image...";
+            label.ForeColor = Theme.SecondaryText;
+        }
+        else if (status.Contains("Wallpaper updated", StringComparison.OrdinalIgnoreCase))
+        {
+            label.Text = "Wallpaper set!";
+            label.ForeColor = Theme.SuccessText;
+        }
+    }
+
+    private Label? GetActiveStatusLabel()
+    {
+        if (_settings.DisplayMode != DisplayMode.StillImage) return null;
+        return _settings.StillImageSource switch
+        {
+            ImageSource.NasaEpic => _epicStatusLabel,
+            ImageSource.NasaApod => _apodStatusLabel,
+            ImageSource.NationalParks => _npsStatusLabel,
+            ImageSource.Smithsonian => _smithsonianStatusLabel,
+            ImageSource.NasaGallery => _nasaGalleryStatusLabel,
+            _ => null
+        };
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            _renderScheduler.StatusChanged -= OnRenderStatusChanged;
             _debounceTimer.Stop();
             _debounceTimer.Dispose();
             _cacheSizeTimer?.Stop();
