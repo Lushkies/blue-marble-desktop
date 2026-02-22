@@ -2519,10 +2519,11 @@ public class SettingsForm : Form
                 case DateTimePicker dtp:
                     Theme.StyleDateTimePicker(dtp);
                     break;
-                case TrackBar tb:
-                    Theme.StyleTrackBar(tb);
-                    break;
             }
+
+            // Apply dark scrollbars to any scrollable control (FlowLayoutPanels, TabPages, etc.)
+            if (c is ScrollableControl sc && sc.AutoScroll)
+                Theme.StyleScrollableControl(sc);
 
             // Recurse into child controls (panels, groupboxes, tabpages, etc.)
             if (c.HasChildren)

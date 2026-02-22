@@ -229,24 +229,23 @@ public static partial class Theme
     }
 
     /// <summary>
-    /// Style a TrackBar (slider) for the current theme.
+    /// Apply DarkMode_Explorer theme to a scrollable control to get dark scrollbars.
     /// Uses SetWindowTheme to apply the same dark Explorer theme that Windows File Explorer uses.
     /// Deferred via HandleCreated event since SetWindowTheme needs a valid HWND.
     /// </summary>
-    public static void StyleTrackBar(TrackBar trackBar)
+    public static void StyleScrollableControl(Control control)
     {
         if (!IsDarkMode) return;
-        trackBar.BackColor = FormBackground;
 
         // SetWindowTheme requires a valid window handle. If the handle doesn't exist yet
         // (control not shown), defer until it's created. If it already exists, apply now.
-        if (trackBar.IsHandleCreated)
+        if (control.IsHandleCreated)
         {
-            ApplyDarkThemeToControl(trackBar);
+            ApplyDarkThemeToControl(control);
         }
         else
         {
-            trackBar.HandleCreated += (sender, _) =>
+            control.HandleCreated += (sender, _) =>
             {
                 if (sender is Control c)
                     ApplyDarkThemeToControl(c);

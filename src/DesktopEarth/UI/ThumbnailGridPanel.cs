@@ -50,6 +50,9 @@ public class ThumbnailGridPanel : Panel
         BackColor = Theme.ControlBackground;
         BorderStyle = BorderStyle.FixedSingle;
 
+        // Dark scrollbars for this panel
+        Theme.StyleScrollableControl(this);
+
         _innerPanel = new Panel
         {
             Location = new Point(0, 0),
