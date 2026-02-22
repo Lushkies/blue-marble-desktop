@@ -160,7 +160,11 @@ public class SettingsForm : Form
     private Button _resetButton = null!;
 
     // Presets controls
+    private Panel _presetsPanel = null!;
     private ComboBox _presetCombo = null!;
+
+    // Y position where hint/auto-rotate controls start (just after accent panel)
+    private int _controlsBaseY;
 
     // User images controls
     private Panel _userImagesSubPanel = null!;
@@ -447,7 +451,7 @@ public class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(560, 850);
+        ClientSize = new Size(560, 820);
         ShowInTaskbar = true;
         BackColor = Theme.FormBackground;
         ForeColor = Theme.PrimaryText;
@@ -650,6 +654,9 @@ public class SettingsForm : Form
         tab.Controls.Add(_viewAccentPanel);
         y += 77; // accent panel (72) + gap (5)
 
+        // Save the Y where conditional controls start (hint label / auto-rotate)
+        _controlsBaseY = y;
+
         // Hint label below accent panel — visible when NOT on Still Image, clickable to switch
         _sourceHintLabel = new Label
         {
@@ -665,9 +672,8 @@ public class SettingsForm : Form
             _displayModeCombo.SelectedIndex = 3; // Switch to Still Image
         };
         tab.Controls.Add(_sourceHintLabel);
-        y += 30; // Extra breathing room below hint label
 
-        // -- AUTO-ROTATION (visible for still image mode only) --
+        // -- AUTO-ROTATION (visible for still image mode only, same Y as hint) --
         _randomRotationCheck = new CheckBox
         {
             Text = "Auto-rotate wallpaper",
@@ -694,10 +700,10 @@ public class SettingsForm : Form
         _rotationSourceCombo.SelectedIndex = 6; // Favorites default
         _rotationSourceCombo.SelectedIndexChanged += (_, _) => { if (!_isLoading) SchedulePreview(); };
         tab.Controls.Add(_rotationSourceCombo);
-        y += 45; // Extra breathing room before mode panels
 
-        // -- MODE PANELS (all start at same Y, only one visible at a time) --
-        int panelY = y;
+        // -- MODE PANELS (positioned dynamically by UpdateModeVisibility) --
+        // Initial Y will be adjusted when UpdateModeVisibility runs
+        int panelY = y + 28;
 
         _globeControlsPanel = CreateGlobePanel(panelY);
         tab.Controls.Add(_globeControlsPanel);
@@ -716,55 +722,62 @@ public class SettingsForm : Form
         _resetButton.Click += (_, _) => ResetToDefaults();
         tab.Controls.Add(_resetButton);
 
-        // -- PRESETS (always visible, below reset button) --
-        var presetLabel = MakeLabel("Presets:", LeftMargin, panelY + 465);
-        tab.Controls.Add(presetLabel);
+        // -- PRESETS (always visible, grouped into a panel for easy repositioning) --
+        _presetsPanel = new Panel
+        {
+            Location = new Point(0, panelY + 460),
+            Size = new Size(530, 60)
+        };
+
+        _presetsPanel.Controls.Add(MakeLabel("Presets:", LeftMargin, 3));
 
         _presetCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(LeftMargin + 60, panelY + 462),
+            Location = new Point(LeftMargin + 60, 0),
             Width = 180
         };
-        tab.Controls.Add(_presetCombo);
+        _presetsPanel.Controls.Add(_presetCombo);
 
         var presetSaveBtn = new Button
         {
             Text = "Save",
-            Location = new Point(LeftMargin + 250, panelY + 461),
+            Location = new Point(LeftMargin + 250, 0),
             Width = 60, Height = 26
         };
         presetSaveBtn.Click += (_, _) => SavePreset();
-        tab.Controls.Add(presetSaveBtn);
+        _presetsPanel.Controls.Add(presetSaveBtn);
 
         var presetLoadBtn = new Button
         {
             Text = "Load",
-            Location = new Point(LeftMargin + 315, panelY + 461),
+            Location = new Point(LeftMargin + 315, 0),
             Width = 60, Height = 26
         };
         presetLoadBtn.Click += (_, _) => LoadPreset();
-        tab.Controls.Add(presetLoadBtn);
+        _presetsPanel.Controls.Add(presetLoadBtn);
 
         var presetDeleteBtn = new Button
         {
             Text = "Delete",
-            Location = new Point(LeftMargin + 380, panelY + 461),
+            Location = new Point(LeftMargin + 380, 0),
             Width = 60, Height = 26
         };
         presetDeleteBtn.Click += (_, _) => DeletePreset();
-        tab.Controls.Add(presetDeleteBtn);
+        _presetsPanel.Controls.Add(presetDeleteBtn);
 
-        RefreshPresetCombo();
-
-        tab.Controls.Add(new Label
+        _presetsPanel.Controls.Add(new Label
         {
             Text = "Any view can be saved as a preset.",
             Font = new Font("Segoe UI", 7.5f),
             ForeColor = Theme.SecondaryText,
             AutoSize = true,
-            Location = new Point(LeftMargin + 60, panelY + 490)
+            Location = new Point(LeftMargin + 60, 28)
         });
+
+        tab.Controls.Add(_presetsPanel);
+
+        RefreshPresetCombo();
 
         return tab;
     }
@@ -1173,11 +1186,22 @@ public class SettingsForm : Form
         panel.Controls.Add(_npsSearchButton);
         py += 28;
 
+        // Chip hint label
+        panel.Controls.Add(new Label
+        {
+            Text = "Use a suggested park or search your own.",
+            Location = new Point(LeftMargin, py),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Theme.SecondaryText
+        });
+        py += 16;
+
         // Suggestion chips (wrapping, scrollable, uses exact park codes)
         _npsChipsPanel = new FlowLayoutPanel
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 56),
+            Size = new Size(490, 66),
             WrapContents = true,
             AutoScroll = true
         };
@@ -1207,12 +1231,12 @@ public class SettingsForm : Form
             _npsChipsPanel.Controls.Add(btn);
         }
         panel.Controls.Add(_npsChipsPanel);
-        py += 60;
+        py += 70;
 
         _npsGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 245)
+            Size = new Size(490, 230)
         };
         _npsGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _npsGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
@@ -1254,11 +1278,22 @@ public class SettingsForm : Form
         panel.Controls.Add(_smithsonianSearchButton);
         py += 28;
 
+        // Chip hint label
+        panel.Controls.Add(new Label
+        {
+            Text = "Use a suggested term or search your own.",
+            Location = new Point(LeftMargin, py),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Theme.SecondaryText
+        });
+        py += 16;
+
         // Suggestion chips (curated for art_design category)
         _smithsonianChipsPanel = new FlowLayoutPanel
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 56),
+            Size = new Size(490, 66),
             WrapContents = true,
             AutoScroll = true
         };
@@ -1291,12 +1326,12 @@ public class SettingsForm : Form
             _smithsonianChipsPanel.Controls.Add(btn);
         }
         panel.Controls.Add(_smithsonianChipsPanel);
-        py += 60;
+        py += 70;
 
         _smithsonianGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 245)
+            Size = new Size(490, 230)
         };
         _smithsonianGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _smithsonianGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
@@ -1861,6 +1896,14 @@ public class SettingsForm : Form
 
         // Hint label below accent panel — visible only when NOT on Still Image
         _sourceHintLabel.Visible = !isStillImage;
+
+        // Dynamic panel positioning: hint and auto-rotate share the same Y slot.
+        // Only one is visible at a time, so panels start right after the visible control.
+        int panelY = _controlsBaseY + 28; // 28px for either hint (18px + gap) or checkbox (22px + gap)
+        _globeControlsPanel.Top = panelY;
+        _stillImagePanel.Top = panelY;
+        _resetButton.Top = panelY + 430;
+        _presetsPanel.Top = panelY + 460;
 
         // Globe-specific logic
         if (mode <= 2)
@@ -2739,11 +2782,22 @@ public class SettingsForm : Form
         panel.Controls.Add(_nasaGallerySearchButton);
         py += 28;
 
+        // Chip hint label
+        panel.Controls.Add(new Label
+        {
+            Text = "Use a suggested term or search your own.",
+            Location = new Point(LeftMargin, py),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 7.5f),
+            ForeColor = Theme.SecondaryText
+        });
+        py += 16;
+
         // Suggestion chips (space/astronomy themed)
         _nasaGalleryChipsPanel = new FlowLayoutPanel
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 56),
+            Size = new Size(490, 66),
             WrapContents = true,
             AutoScroll = true
         };
@@ -2773,12 +2827,12 @@ public class SettingsForm : Form
             _nasaGalleryChipsPanel.Controls.Add(btn);
         }
         panel.Controls.Add(_nasaGalleryChipsPanel);
-        py += 60;
+        py += 70;
 
         _nasaGalleryGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, py),
-            Size = new Size(490, 245)
+            Size = new Size(490, 230)
         };
         _nasaGalleryGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
         _nasaGalleryGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);

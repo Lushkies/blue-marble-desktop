@@ -78,7 +78,8 @@ public class SettingsManager
     /// <summary>
     /// Detect whether Windows is using a dark app theme.
     /// Reads HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme.
-    /// Returns true if dark (value 0), false if light (value 1 or missing).
+    /// Returns true if dark, false only if explicitly set to light mode.
+    /// Defaults to dark if the registry key is missing or unreadable.
     /// </summary>
     private static bool IsWindowsDarkTheme()
     {
@@ -90,7 +91,7 @@ public class SettingsManager
                 return value == 0; // 0 = dark, 1 = light
         }
         catch { }
-        return false; // Default to light theme if detection fails
+        return true; // Default to dark mode if detection fails
     }
 
     /// <summary>
