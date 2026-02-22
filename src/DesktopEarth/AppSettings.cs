@@ -99,6 +99,9 @@ public class AppSettings
     public string UserImageSelectedId { get; set; } = "";
     public string UserImageSelectedPath { get; set; } = "";
 
+    // UI theme
+    public bool DarkModeEnabled { get; set; } = false;
+
     // First-run detection (used to skip wallpaper re-render on subsequent launches)
     public bool HasLaunchedBefore { get; set; } = false;
 

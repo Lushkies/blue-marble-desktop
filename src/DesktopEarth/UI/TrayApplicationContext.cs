@@ -14,6 +14,10 @@ public class TrayApplicationContext : ApplicationContext
         _settingsManager = settingsManager;
         _renderScheduler = renderScheduler;
 
+        // Initialize UI theme from saved settings
+        Theme.IsDarkMode = _settingsManager.Settings.DarkModeEnabled;
+        Theme.EnableDarkScrollbars();
+
         _trayIcon = new NotifyIcon
         {
             Icon = LoadAppIcon(),
@@ -71,7 +75,43 @@ public class TrayApplicationContext : ApplicationContext
         }
 
         _settingsForm = new SettingsForm(_settingsManager, _renderScheduler);
+        _settingsForm.RequestReopen += RecreateSettingsForm;
         _settingsForm.Show();
+    }
+
+    /// <summary>
+    /// Close and recreate the settings form (used for theme changes that require full repaint).
+    /// Preserves window position so the form doesn't jump to center-screen.
+    /// </summary>
+    internal void RecreateSettingsForm()
+    {
+        Point? savedLocation = null;
+        int savedTabIndex = 0;
+        if (_settingsForm != null && !_settingsForm.IsDisposed)
+        {
+            savedLocation = _settingsForm.Location;
+            savedTabIndex = _settingsForm.SelectedTabIndex;
+            _settingsForm.RequestReopen -= RecreateSettingsForm;
+            _settingsForm.Close();
+            _settingsForm.Dispose();
+        }
+        _settingsForm = null;
+
+        // Re-enable dark scrollbars (needed when toggling dark mode on)
+        Theme.EnableDarkScrollbars();
+
+        ShowSettings();
+
+        // Restore previous window position and selected tab
+        if (_settingsForm != null && !_settingsForm.IsDisposed)
+        {
+            if (savedLocation.HasValue)
+            {
+                _settingsForm.StartPosition = FormStartPosition.Manual;
+                _settingsForm.Location = savedLocation.Value;
+            }
+            _settingsForm.SelectedTabIndex = savedTabIndex;
+        }
     }
 
     private void FavoriteCurrentWallpaper()

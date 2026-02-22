@@ -16,6 +16,11 @@ public class AboutForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(400, 280);
         ShowInTaskbar = false;
+        BackColor = Theme.FormBackground;
+        ForeColor = Theme.PrimaryText;
+
+        // Dark title bar and window borders (Windows 10 1809+ / Windows 11)
+        Theme.ApplyDarkMode(this);
 
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
 
@@ -55,7 +60,7 @@ public class AboutForm : Form
         {
             Text = "Built with .NET 8 and OpenGL.\nEarth textures courtesy of NASA (public domain).",
             Font = new Font("Segoe UI", 8),
-            ForeColor = Color.Gray,
+            ForeColor = Theme.SecondaryText,
             AutoSize = true,
             Location = new Point(22, 150)
         };
@@ -67,6 +72,7 @@ public class AboutForm : Form
             Size = new Size(80, 30),
             Location = new Point(290, 205)
         };
+        Theme.StyleButton(okButton);
         AcceptButton = okButton;
 
         Controls.AddRange([titleLabel, versionLabel, descLabel, authorLabel, creditLabel, okButton]);

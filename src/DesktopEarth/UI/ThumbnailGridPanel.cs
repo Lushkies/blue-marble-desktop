@@ -47,13 +47,16 @@ public class ThumbnailGridPanel : Panel
     {
         _cache = cache;
         AutoScroll = true;
-        BackColor = SystemColors.Window;
+        BackColor = Theme.ControlBackground;
         BorderStyle = BorderStyle.FixedSingle;
+
+        // Dark scrollbars for this panel
+        Theme.StyleScrollableControl(this);
 
         _innerPanel = new Panel
         {
             Location = new Point(0, 0),
-            BackColor = SystemColors.Window
+            BackColor = Theme.ControlBackground
         };
         _innerPanel.Paint += InnerPanel_Paint;
         _innerPanel.MouseClick += InnerPanel_MouseClick;
@@ -146,11 +149,11 @@ public class ThumbnailGridPanel : Panel
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
         using var titleFont = new Font("Segoe UI", 7.5f);
-        using var titleBrush = new SolidBrush(Color.FromArgb(60, 60, 60));
-        using var placeholderBrush = new SolidBrush(Color.FromArgb(230, 230, 230));
+        using var titleBrush = new SolidBrush(Theme.ThumbnailTitle);
+        using var placeholderBrush = new SolidBrush(Theme.Placeholder);
         using var selectedPen = new Pen(Color.FromArgb(0, 120, 215), 2);
         using var starBrush = new SolidBrush(Color.FromArgb(255, 200, 50));
-        using var starOutlinePen = new Pen(Color.FromArgb(180, 180, 180), 1);
+        using var starOutlinePen = new Pen(Theme.StarOutline, 1);
         using var badgeFont = new Font("Segoe UI", 7f, FontStyle.Bold);
 
         for (int i = 0; i < _images.Count; i++)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Win32;
 
 namespace DesktopEarth;
 
@@ -54,6 +55,7 @@ public class SettingsManager
         {
             Settings = new AppSettings();
             Settings.HasLaunchedBefore = true;
+            Settings.DarkModeEnabled = IsWindowsDarkTheme();
             Save();
             SkipFirstRender = false; // First run: render the default globe wallpaper
             return;
@@ -71,6 +73,25 @@ public class SettingsManager
             Save();
             SkipFirstRender = false;
         }
+    }
+
+    /// <summary>
+    /// Detect whether Windows is using a dark app theme.
+    /// Reads HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme.
+    /// Returns true if dark, false only if explicitly set to light mode.
+    /// Defaults to dark if the registry key is missing or unreadable.
+    /// </summary>
+    private static bool IsWindowsDarkTheme()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (key?.GetValue("AppsUseLightTheme") is int value)
+                return value == 0; // 0 = dark, 1 = light
+        }
+        catch { }
+        return true; // Default to dark mode if detection fails
     }
 
     /// <summary>
