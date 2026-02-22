@@ -447,7 +447,7 @@ public class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(560, 820);
+        ClientSize = new Size(560, 850);
         ShowInTaskbar = true;
         BackColor = Theme.FormBackground;
         ForeColor = Theme.PrimaryText;
@@ -653,7 +653,7 @@ public class SettingsForm : Form
         // Hint label below accent panel — visible when NOT on Still Image, clickable to switch
         _sourceHintLabel = new Label
         {
-            Text = "Select a still image source to explore NASA, National Parks, and more.",
+            Text = "Select Still Image view to explore NASA, National Parks, and more.",
             Size = new Size(490, 18),
             Location = new Point(LeftMargin, y),
             Font = new Font("Segoe UI", 7.5f),
@@ -665,7 +665,7 @@ public class SettingsForm : Form
             _displayModeCombo.SelectedIndex = 3; // Switch to Still Image
         };
         tab.Controls.Add(_sourceHintLabel);
-        y += 20;
+        y += 30; // Extra breathing room below hint label
 
         // -- AUTO-ROTATION (visible for still image mode only) --
         _randomRotationCheck = new CheckBox
@@ -694,7 +694,7 @@ public class SettingsForm : Form
         _rotationSourceCombo.SelectedIndex = 6; // Favorites default
         _rotationSourceCombo.SelectedIndexChanged += (_, _) => { if (!_isLoading) SchedulePreview(); };
         tab.Controls.Add(_rotationSourceCombo);
-        y += 25;
+        y += 45; // Extra breathing room before mode panels
 
         // -- MODE PANELS (all start at same Y, only one visible at a time) --
         int panelY = y;
@@ -1319,7 +1319,7 @@ public class SettingsForm : Form
     private TabPage CreateSystemTab()
     {
         var tab = new TabPage("System") { BackColor = Theme.TabBackground };
-        int y = 15;
+        int y = 10;
 
         tab.Controls.Add(MakeLabel("Update every:", LeftMargin, y + 3));
         _updateIntervalCombo = new ComboBox
@@ -1608,7 +1608,7 @@ public class SettingsForm : Form
             Text = $"Cached images:  {Path.Combine(appDataDir, "image_cache")}\n" +
                    $"User images:    {Path.Combine(appDataDir, "user_images")}\n" +
                    $"Settings:       {Path.Combine(appDataDir, "settings.json")}",
-            Location = new Point(10, 20),
+            Location = new Point(15, 20),
             AutoSize = true,
             Font = new Font("Segoe UI", 7.5f),
             ForeColor = Theme.SecondaryText
@@ -1618,7 +1618,7 @@ public class SettingsForm : Form
         var openFolderButton = new Button
         {
             Text = "Open Folder",
-            Location = new Point(10, 73),
+            Location = new Point(15, 73),
             Width = 100, Height = 24
         };
         openFolderButton.Click += (_, _) =>
@@ -1631,7 +1631,7 @@ public class SettingsForm : Form
         var storageDisclaimer = new Label
         {
             Text = "Files are stored locally. You can copy or back up\nimages from these folders at any time.",
-            Location = new Point(120, 73),
+            Location = new Point(125, 73),
             AutoSize = true,
             Font = new Font("Segoe UI", 7.5f),
             ForeColor = Theme.SecondaryText
@@ -2987,7 +2987,7 @@ public class SettingsForm : Form
         _favoritesGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, y),
-            Size = new Size(490, 200),
+            Size = new Size(490, 280),
             ShowSourceBadge = true
         };
         _favoritesGrid.ImageSelected += (_, img) => SetFavoriteAsWallpaper(img);
@@ -2997,7 +2997,7 @@ public class SettingsForm : Form
             RefreshMyCollectionTab();
         };
         tab.Controls.Add(_favoritesGrid);
-        y += 205;
+        y += 285;
 
         // Export / Clear buttons
         var exportFavButton = new Button
@@ -3033,12 +3033,12 @@ public class SettingsForm : Form
         _userImagesCollectionGrid = new ThumbnailGridPanel(_imageCache)
         {
             Location = new Point(LeftMargin, y),
-            Size = new Size(490, 200)
+            Size = new Size(490, 280)
         };
         _userImagesCollectionGrid.ImageSelected += (_, img) => SetUserImageAsWallpaper(img);
         _userImagesCollectionGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
         tab.Controls.Add(_userImagesCollectionGrid);
-        y += 205;
+        y += 285;
 
         // Add / Clear buttons for user images
         var addImagesButton = new Button
