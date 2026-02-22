@@ -86,9 +86,11 @@ public class TrayApplicationContext : ApplicationContext
     internal void RecreateSettingsForm()
     {
         Point? savedLocation = null;
+        int savedTabIndex = 0;
         if (_settingsForm != null && !_settingsForm.IsDisposed)
         {
             savedLocation = _settingsForm.Location;
+            savedTabIndex = _settingsForm.SelectedTabIndex;
             _settingsForm.RequestReopen -= RecreateSettingsForm;
             _settingsForm.Close();
             _settingsForm.Dispose();
@@ -100,11 +102,15 @@ public class TrayApplicationContext : ApplicationContext
 
         ShowSettings();
 
-        // Restore previous window position
-        if (savedLocation.HasValue && _settingsForm != null && !_settingsForm.IsDisposed)
+        // Restore previous window position and selected tab
+        if (_settingsForm != null && !_settingsForm.IsDisposed)
         {
-            _settingsForm.StartPosition = FormStartPosition.Manual;
-            _settingsForm.Location = savedLocation.Value;
+            if (savedLocation.HasValue)
+            {
+                _settingsForm.StartPosition = FormStartPosition.Manual;
+                _settingsForm.Location = savedLocation.Value;
+            }
+            _settingsForm.SelectedTabIndex = savedTabIndex;
         }
     }
 

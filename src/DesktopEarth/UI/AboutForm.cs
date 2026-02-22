@@ -20,7 +20,7 @@ public class AboutForm : Form
         ForeColor = Theme.PrimaryText;
 
         // Dark title bar and window borders (Windows 10 1809+ / Windows 11)
-        Theme.ApplyDarkTitleBar(this);
+        Theme.ApplyDarkMode(this);
 
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
 

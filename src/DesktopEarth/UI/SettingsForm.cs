@@ -174,6 +174,18 @@ public class SettingsForm : Form
     private ThumbnailGridPanel? _userImagesCollectionGrid;
     private Label? _userImagesCountLabel;
 
+    // Tab control (DarkTabControl for dark mode border/header fix)
+    private DarkTabControl _tabControl = null!;
+
+    /// <summary>
+    /// Get or set the selected tab index. Used to preserve tab across dark mode toggle.
+    /// </summary>
+    public int SelectedTabIndex
+    {
+        get => _tabControl.SelectedIndex;
+        set { if (value >= 0 && value < _tabControl.TabCount) _tabControl.SelectedIndex = value; }
+    }
+
     public SettingsForm(SettingsManager settingsManager, RenderScheduler renderScheduler)
     {
         _settingsManager = settingsManager;
@@ -441,16 +453,17 @@ public class SettingsForm : Form
         ForeColor = Theme.PrimaryText;
 
         // Dark title bar and window borders (Windows 10 1809+ / Windows 11)
-        Theme.ApplyDarkTitleBar(this);
+        Theme.ApplyDarkMode(this);
 
-        var tabControl = new TabControl
+        _tabControl = new DarkTabControl
         {
             Location = new Point(0, 0),
             Size = new Size(ClientSize.Width, ClientSize.Height - 20),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
             Padding = new Point(8, 4)
         };
-        Theme.StyleTabControl(tabControl);
+        _tabControl.ApplyTheme();
+        var tabControl = _tabControl;
 
         tabControl.TabPages.Add(CreateAppearanceTab());
         tabControl.TabPages.Add(CreateMyCollectionTab());
@@ -640,7 +653,7 @@ public class SettingsForm : Form
         // Hint label below accent panel — visible when NOT on Still Image, clickable to switch
         _sourceHintLabel = new Label
         {
-            Text = "Select Still Image to explore NASA, National Parks, and more.",
+            Text = "Select a still image source to explore NASA, National Parks, and more.",
             Size = new Size(490, 18),
             Location = new Point(LeftMargin, y),
             Font = new Font("Segoe UI", 7.5f),
@@ -1359,7 +1372,7 @@ public class SettingsForm : Form
         var hdDescLabel = new Label
         {
             Text = "HD textures enhance Globe and Flat Map views with ultra-high resolution\n" +
-                   "(21600x10800). They do not affect Still Image, Moon, or EPIC views.",
+                   "(21600x10800). They do not affect Still Image or Moon views.",
             Location = new Point(15, 20),
             Size = new Size(460, 30),
             Font = new Font("Segoe UI", 8f),
@@ -2503,6 +2516,9 @@ public class SettingsForm : Form
                         lnk.VisitedLinkColor = Color.FromArgb(140, 130, 220);
                     }
                     break;
+                case DateTimePicker dtp:
+                    Theme.StyleDateTimePicker(dtp);
+                    break;
             }
 
             // Recurse into child controls (panels, groupboxes, tabpages, etc.)
@@ -2689,7 +2705,7 @@ public class SettingsForm : Form
         dialog.Controls.AddRange([label, textBox, okButton, cancelButton]);
         dialog.AcceptButton = okButton;
         dialog.CancelButton = cancelButton;
-        Theme.ApplyDarkTitleBar(dialog);
+        Theme.ApplyDarkMode(dialog);
 
         return dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(textBox.Text)
             ? textBox.Text.Trim() : null;
