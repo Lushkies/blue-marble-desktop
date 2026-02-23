@@ -68,7 +68,6 @@ public class SettingsForm : Form
 
     // View accent panel and promoted controls
     private Panel _viewAccentPanel = null!;
-    private ComboBox _fitModeCombo = null!;
     private Label _sourceLabel = null!;
     private Label _sourceHintLabel = null!;
 
@@ -289,7 +288,6 @@ public class SettingsForm : Form
         s.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
         s.AmbientLight = _ambientSlider.Value / 100f;
         s.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
-        s.FitMode = (WallpaperFitMode)_fitModeCombo.SelectedIndex;
 
         // EPIC
         s.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
@@ -380,7 +378,6 @@ public class SettingsForm : Form
         config.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
         config.AmbientLight = _ambientSlider.Value / 100f;
         config.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
-        config.FitMode = (WallpaperFitMode)_fitModeCombo.SelectedIndex;
 
         // EPIC
         config.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
@@ -623,32 +620,11 @@ public class SettingsForm : Form
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Location = new Point(70, 8),
-            Width = 130
+            Width = 170
         };
         _displayModeCombo.Items.AddRange(["Globe", "Flat Map", "Moon", "Still Image"]);
         _displayModeCombo.SelectedIndexChanged += (_, _) => { UpdateModeVisibility(); SchedulePreview(); };
         _viewAccentPanel.Controls.Add(_displayModeCombo);
-
-        var fitLabel = new Label
-        {
-            Text = "Fit:",
-            AutoSize = true,
-            Location = new Point(215, 11),
-            Font = new Font("Segoe UI", 11, FontStyle.Bold),
-            BackColor = Color.Transparent
-        };
-        _viewAccentPanel.Controls.Add(fitLabel);
-
-        _fitModeCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(255, 8),
-            Width = 110
-        };
-        _fitModeCombo.Items.AddRange(["Fill", "Fit", "Stretch", "Tile", "Center"]);
-        _fitModeCombo.SelectedIndex = 0;
-        _fitModeCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
-        _viewAccentPanel.Controls.Add(_fitModeCombo);
 
         // Source row (inside accent panel, always visible — disabled when not Still Image)
         _sourceLabel = new Label
@@ -2493,7 +2469,6 @@ public class SettingsForm : Form
         _ambientValue.Text = config.AmbientLight.ToString("F2");
         if (config.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
         else _topoRadio.Checked = true;
-        _fitModeCombo.SelectedIndex = Math.Min((int)config.FitMode, _fitModeCombo.Items.Count - 1);
 
         // EPIC
         _epicTypeCombo.SelectedIndex = (int)config.EpicImageType;
@@ -2616,7 +2591,6 @@ public class SettingsForm : Form
         _ambientValue.Text = _settings.AmbientLight.ToString("F2");
         if (_settings.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
         else _topoRadio.Checked = true;
-        _fitModeCombo.SelectedIndex = Math.Min((int)_settings.FitMode, _fitModeCombo.Items.Count - 1);
 
         // EPIC
         _epicTypeCombo.SelectedIndex = (int)_settings.EpicImageType;
@@ -2843,8 +2817,7 @@ public class SettingsForm : Form
             NightLightsBrightness = _nightBrightnessSlider.Value / 10f,
             AmbientLight = _ambientSlider.Value / 100f,
             ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo,
-            EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex,
-            FitMode = (WallpaperFitMode)_fitModeCombo.SelectedIndex
+            EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex
         };
 
         var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
@@ -2887,7 +2860,6 @@ public class SettingsForm : Form
         if (preset.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
         else _topoRadio.Checked = true;
         _epicTypeCombo.SelectedIndex = (int)preset.EpicImageType;
-        _fitModeCombo.SelectedIndex = Math.Min((int)preset.FitMode, _fitModeCombo.Items.Count - 1);
 
         _isLoading = false;
         UpdateModeVisibility();

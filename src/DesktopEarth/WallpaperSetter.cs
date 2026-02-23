@@ -14,11 +14,10 @@ public static partial class WallpaperSetter
     private static partial bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
 
     public static void SetWallpaper(string imagePath,
-        MultiMonitorMode mode = MultiMonitorMode.SameForAll,
-        WallpaperFitMode fitMode = WallpaperFitMode.Fill)
+        MultiMonitorMode mode = MultiMonitorMode.SameForAll)
     {
         // Set wallpaper style in registry before applying
-        SetWallpaperStyle(mode, fitMode);
+        SetWallpaperStyle(mode);
 
         bool result = SystemParametersInfo(
             SPI_SETDESKWALLPAPER,
@@ -33,44 +32,23 @@ public static partial class WallpaperSetter
         }
     }
 
-    private static void SetWallpaperStyle(MultiMonitorMode mode, WallpaperFitMode fitMode)
+    private static void SetWallpaperStyle(MultiMonitorMode mode)
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true);
             if (key == null) return;
 
-            // Span across monitors always uses style 22 regardless of fit mode
             if (mode == MultiMonitorMode.SpanAcross)
             {
                 key.SetValue("WallpaperStyle", "22");
                 key.SetValue("TileWallpaper", "0");
-                return;
             }
-
-            // Map fit mode to Windows registry values
-            switch (fitMode)
+            else
             {
-                case WallpaperFitMode.Fit:
-                    key.SetValue("WallpaperStyle", "6");
-                    key.SetValue("TileWallpaper", "0");
-                    break;
-                case WallpaperFitMode.Stretch:
-                    key.SetValue("WallpaperStyle", "2");
-                    key.SetValue("TileWallpaper", "0");
-                    break;
-                case WallpaperFitMode.Tile:
-                    key.SetValue("WallpaperStyle", "0");
-                    key.SetValue("TileWallpaper", "1");
-                    break;
-                case WallpaperFitMode.Center:
-                    key.SetValue("WallpaperStyle", "0");
-                    key.SetValue("TileWallpaper", "0");
-                    break;
-                default: // Fill
-                    key.SetValue("WallpaperStyle", "10");
-                    key.SetValue("TileWallpaper", "0");
-                    break;
+                // Fill mode — renderer always outputs at screen resolution
+                key.SetValue("WallpaperStyle", "10");
+                key.SetValue("TileWallpaper", "0");
             }
         }
         catch { /* Non-critical if style setting fails */ }
