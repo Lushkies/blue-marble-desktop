@@ -13,10 +13,12 @@ public static partial class WallpaperSetter
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
 
-    public static void SetWallpaper(string imagePath, MultiMonitorMode mode = MultiMonitorMode.SameForAll)
+    public static void SetWallpaper(string imagePath,
+        MultiMonitorMode mode = MultiMonitorMode.SameForAll,
+        WallpaperFitMode fitMode = WallpaperFitMode.Fill)
     {
         // Set wallpaper style in registry before applying
-        SetWallpaperStyle(mode);
+        SetWallpaperStyle(mode, fitMode);
 
         bool result = SystemParametersInfo(
             SPI_SETDESKWALLPAPER,
@@ -31,22 +33,41 @@ public static partial class WallpaperSetter
         }
     }
 
-    private static void SetWallpaperStyle(MultiMonitorMode mode)
+    private static void SetWallpaperStyle(MultiMonitorMode mode, WallpaperFitMode fitMode)
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true);
             if (key == null) return;
 
-            switch (mode)
+            // Span across monitors always uses style 22 regardless of fit mode
+            if (mode == MultiMonitorMode.SpanAcross)
             {
-                case MultiMonitorMode.SpanAcross:
-                    // WallpaperStyle=22 = Span across monitors (Windows 8+)
-                    key.SetValue("WallpaperStyle", "22");
+                key.SetValue("WallpaperStyle", "22");
+                key.SetValue("TileWallpaper", "0");
+                return;
+            }
+
+            // Map fit mode to Windows registry values
+            switch (fitMode)
+            {
+                case WallpaperFitMode.Fit:
+                    key.SetValue("WallpaperStyle", "6");
                     key.SetValue("TileWallpaper", "0");
                     break;
-                default:
-                    // WallpaperStyle=10 = Fill (default, looks best for single/same-for-all)
+                case WallpaperFitMode.Stretch:
+                    key.SetValue("WallpaperStyle", "2");
+                    key.SetValue("TileWallpaper", "0");
+                    break;
+                case WallpaperFitMode.Tile:
+                    key.SetValue("WallpaperStyle", "0");
+                    key.SetValue("TileWallpaper", "1");
+                    break;
+                case WallpaperFitMode.Center:
+                    key.SetValue("WallpaperStyle", "0");
+                    key.SetValue("TileWallpaper", "0");
+                    break;
+                default: // Fill
                     key.SetValue("WallpaperStyle", "10");
                     key.SetValue("TileWallpaper", "0");
                     break;

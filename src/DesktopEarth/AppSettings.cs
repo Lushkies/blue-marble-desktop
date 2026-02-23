@@ -39,6 +39,9 @@ public class AppSettings
     // Multi-monitor
     public MultiMonitorMode MultiMonitorMode { get; set; } = MultiMonitorMode.SameForAll;
 
+    // Wallpaper fit mode (how the wallpaper is positioned on screen)
+    public WallpaperFitMode FitMode { get; set; } = WallpaperFitMode.Fill;
+
     // Startup
     public bool RunOnStartup { get; set; } = false;
 
@@ -144,6 +147,7 @@ public class DisplayConfig
     public float ImageOffsetX { get; set; } = 0.0f;
     public float ImageOffsetY { get; set; } = 0.0f;
     public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
+    public WallpaperFitMode FitMode { get; set; } = WallpaperFitMode.Fill;
 
     // NASA EPIC settings
     public EpicImageType EpicImageType { get; set; } = EpicImageType.Natural;
@@ -216,6 +220,7 @@ public class SettingsPreset
     public float AmbientLight { get; set; } = 0.40f;
     public ImageStyle ImageStyle { get; set; } = ImageStyle.TopoBathy;
     public EpicImageType EpicImageType { get; set; } = EpicImageType.Natural;
+    public WallpaperFitMode FitMode { get; set; } = WallpaperFitMode.Fill;
 }
 
 public enum DisplayMode { Spherical, FlatMap, Moon, StillImage }
@@ -225,3 +230,4 @@ public enum MultiMonitorMode { SameForAll, SpanAcross, PerDisplay }
 public enum EpicImageType { Natural, Enhanced }
 public enum ImageQualityTier { Unknown, SD, HD, UD }
 public enum RotationSource { NasaEpic, NasaApod, NasaGallery, NationalParks, Smithsonian, UserImages, Favorites, All }
+public enum WallpaperFitMode { Fill, Fit, Stretch, Tile, Center }

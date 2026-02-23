@@ -39,6 +39,14 @@ public class ThumbnailGridPanel : Panel
     /// <summary>When true, show a source label badge on each thumbnail (e.g. "APOD", "NPS").</summary>
     public bool ShowSourceBadge { get; set; } = false;
 
+    private bool _dimmed;
+    /// <summary>When true, draws a semi-transparent overlay to visually mute the grid (clicks still work).</summary>
+    public bool Dimmed
+    {
+        get => _dimmed;
+        set { if (_dimmed == value) return; _dimmed = value; _innerPanel.Invalidate(); }
+    }
+
     public ImageSourceInfo? SelectedImage =>
         _selectedIndex >= 0 && _selectedIndex < _images.Count
             ? _images[_selectedIndex] : null;
@@ -225,6 +233,14 @@ public class ThumbnailGridPanel : Panel
                 using var faintBrush = new SolidBrush(Color.FromArgb(60, 200, 200, 200));
                 DrawStar(g, starRect, faintBrush, starOutlinePen);
             }
+        }
+
+        // Draw dim overlay when auto-rotate is active
+        if (_dimmed)
+        {
+            using var dimBrush = new SolidBrush(Color.FromArgb(100,
+                Theme.IsDarkMode ? Color.FromArgb(20, 20, 20) : Color.FromArgb(255, 255, 255)));
+            g.FillRectangle(dimBrush, 0, 0, _innerPanel.Width, _innerPanel.Height);
         }
     }
 

@@ -103,7 +103,7 @@ public class RenderScheduler : IDisposable
             var wallpaperMode = _settingsManager.Settings.MultiMonitorMode == MultiMonitorMode.PerDisplay
                 ? MultiMonitorMode.SpanAcross
                 : _settingsManager.Settings.MultiMonitorMode;
-            WallpaperSetter.SetWallpaper(_wallpaperPath, wallpaperMode);
+            WallpaperSetter.SetWallpaper(_wallpaperPath, wallpaperMode, _settingsManager.Settings.FitMode);
         }
 
         _stopRequested = false;
@@ -313,7 +313,7 @@ public class RenderScheduler : IDisposable
 
                     Directory.CreateDirectory(Path.GetDirectoryName(_wallpaperPath)!);
                     SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
-                    WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
+                    WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode, settings.FitMode);
                 }
 
                 lastUpdate = DateTime.UtcNow;

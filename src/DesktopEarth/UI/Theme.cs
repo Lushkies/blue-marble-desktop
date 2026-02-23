@@ -120,6 +120,17 @@ public static partial class Theme
     public static Color AccentPanelStripe =>
         Color.FromArgb(74, 144, 217); // Same in both modes
 
+    // --- Auto-rotate info banner ---
+
+    public static Color InfoBannerBackground =>
+        IsDarkMode ? Color.FromArgb(30, 45, 65) : Color.FromArgb(232, 242, 252);
+
+    public static Color InfoBannerBorder =>
+        IsDarkMode ? Color.FromArgb(50, 70, 100) : Color.FromArgb(180, 210, 240);
+
+    public static Color InfoBannerText =>
+        IsDarkMode ? Color.FromArgb(160, 190, 230) : Color.FromArgb(40, 80, 140);
+
     // --- Search chips: Blue (NPS park chips) ---
 
     public static Color BlueChipBackground =>

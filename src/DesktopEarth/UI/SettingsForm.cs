@@ -68,6 +68,7 @@ public class SettingsForm : Form
 
     // View accent panel and promoted controls
     private Panel _viewAccentPanel = null!;
+    private ComboBox _fitModeCombo = null!;
     private Label _sourceLabel = null!;
     private Label _sourceHintLabel = null!;
 
@@ -140,6 +141,7 @@ public class SettingsForm : Form
     private GroupBox _autoRotateGroup = null!;
     private CheckBox _randomRotationCheck = null!;
     private ComboBox _rotationSourceCombo = null!;
+    private Label _autoRotateBanner = null!;
     private readonly CheckBox[] _rotationSourceChecks = new CheckBox[7];
 
     // System tab controls
@@ -235,7 +237,9 @@ public class SettingsForm : Form
             s.UpdateIntervalSeconds = _updateIntervalCombo.SelectedIndex switch
             {
                 0 => 60, 1 => 120, 2 => 300, 3 => 600,
-                4 => 900, 5 => 1800, 6 => 3600, _ => 600
+                4 => 900, 5 => 1800, 6 => 3600, 7 => 21600,
+                8 => 43200, 9 => 86400, 10 => 604800, 11 => 1209600,
+                12 => 2592000, 13 => int.MaxValue, _ => 600
             };
 
             if (_sameForAllRadio.Checked)
@@ -285,6 +289,7 @@ public class SettingsForm : Form
         s.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
         s.AmbientLight = _ambientSlider.Value / 100f;
         s.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
+        s.FitMode = (WallpaperFitMode)_fitModeCombo.SelectedIndex;
 
         // EPIC
         s.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
@@ -375,6 +380,7 @@ public class SettingsForm : Form
         config.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
         config.AmbientLight = _ambientSlider.Value / 100f;
         config.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
+        config.FitMode = (WallpaperFitMode)_fitModeCombo.SelectedIndex;
 
         // EPIC
         config.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
@@ -617,11 +623,32 @@ public class SettingsForm : Form
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Location = new Point(70, 8),
-            Width = 170
+            Width = 130
         };
         _displayModeCombo.Items.AddRange(["Globe", "Flat Map", "Moon", "Still Image"]);
         _displayModeCombo.SelectedIndexChanged += (_, _) => { UpdateModeVisibility(); SchedulePreview(); };
         _viewAccentPanel.Controls.Add(_displayModeCombo);
+
+        var fitLabel = new Label
+        {
+            Text = "Fit:",
+            AutoSize = true,
+            Location = new Point(215, 11),
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            BackColor = Color.Transparent
+        };
+        _viewAccentPanel.Controls.Add(fitLabel);
+
+        _fitModeCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(255, 8),
+            Width = 110
+        };
+        _fitModeCombo.Items.AddRange(["Fill", "Fit", "Stretch", "Tile", "Center"]);
+        _fitModeCombo.SelectedIndex = 0;
+        _fitModeCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
+        _viewAccentPanel.Controls.Add(_fitModeCombo);
 
         // Source row (inside accent panel, always visible — disabled when not Still Image)
         _sourceLabel = new Label
@@ -744,6 +771,29 @@ public class SettingsForm : Form
         }
 
         tab.Controls.Add(_autoRotateGroup);
+
+        // Auto-rotate info banner (positioned dynamically by UpdateModeVisibility)
+        _autoRotateBanner = new Label
+        {
+            Text = "Auto-rotate is on \u2014 your wallpaper will change on the next update. Browse to discover and favorite images.",
+            Location = new Point(LeftMargin, y),
+            Size = new Size(490, 36),
+            Font = new Font("Segoe UI", 8f),
+            ForeColor = Theme.InfoBannerText,
+            BackColor = Theme.InfoBannerBackground,
+            Padding = new Padding(8, 4, 8, 4),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Visible = false
+        };
+        _autoRotateBanner.Paint += (sender, e) =>
+        {
+            if (sender is Label lbl)
+            {
+                using var pen = new Pen(Theme.InfoBannerBorder);
+                e.Graphics.DrawRectangle(pen, 0, 0, lbl.Width - 1, lbl.Height - 1);
+            }
+        };
+        tab.Controls.Add(_autoRotateBanner);
 
         // -- MODE PANELS (positioned dynamically by UpdateModeVisibility) --
         // Initial Y will be adjusted when UpdateModeVisibility runs
@@ -1413,7 +1463,9 @@ public class SettingsForm : Form
         };
         _updateIntervalCombo.Items.AddRange([
             "1 minute", "2 minutes", "5 minutes", "10 minutes",
-            "15 minutes", "30 minutes", "1 hour"
+            "15 minutes", "30 minutes", "1 hour", "6 hours",
+            "12 hours", "Daily", "Weekly", "Bi-weekly", "Monthly",
+            "Every 100 years"
         ]);
         _updateIntervalCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
         tab.Controls.Add(_updateIntervalCombo);
@@ -1950,6 +2002,17 @@ public class SettingsForm : Form
         // Hint label below accent panel — visible only when NOT on Still Image
         _sourceHintLabel.Visible = !isStillImage;
 
+        // Auto-rotate banner + grid dimming
+        bool showBanner = isStillImage && _randomRotationCheck.Checked;
+        _autoRotateBanner.Visible = showBanner;
+        bool dimGrids = showBanner;
+        _epicGrid.Dimmed = dimGrids;
+        _apodGrid.Dimmed = dimGrids;
+        _npsGrid.Dimmed = dimGrids;
+        _smithsonianGrid.Dimmed = dimGrids;
+        _nasaGalleryGrid.Dimmed = dimGrids;
+        _userImagesGrid.Dimmed = dimGrids;
+
         // Dynamic panel positioning based on which controls are visible.
         // Globe/FlatMap/Moon: hint label (18px) + gap → panels start close
         // Still Image: auto-rotate GroupBox (variable height) + gap → panels start lower
@@ -1957,9 +2020,16 @@ public class SettingsForm : Form
         if (isStillImage)
         {
             int groupHeight = _autoRotateGroup.Height; // 48 or 82 depending on exclusion
-            panelY = _controlsBaseY + groupHeight + 5;
+            int bannerOffset = 0;
+            if (showBanner)
+            {
+                _autoRotateBanner.Top = _controlsBaseY + groupHeight + 5;
+                bannerOffset = _autoRotateBanner.Height + 5; // 36 + 5 = 41
+            }
+            panelY = _controlsBaseY + groupHeight + 5 + bannerOffset;
             _stillImagePanel.Top = panelY;
-            _presetsPanel.Top = panelY + 435; // tight below still image panel
+            _stillImagePanel.Height = showBanner ? 395 : 435;
+            _presetsPanel.Top = panelY + _stillImagePanel.Height;
         }
         else
         {
@@ -2424,6 +2494,7 @@ public class SettingsForm : Form
         _ambientValue.Text = config.AmbientLight.ToString("F2");
         if (config.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
         else _topoRadio.Checked = true;
+        _fitModeCombo.SelectedIndex = Math.Min((int)config.FitMode, _fitModeCombo.Items.Count - 1);
 
         // EPIC
         _epicTypeCombo.SelectedIndex = (int)config.EpicImageType;
@@ -2546,6 +2617,7 @@ public class SettingsForm : Form
         _ambientValue.Text = _settings.AmbientLight.ToString("F2");
         if (_settings.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
         else _topoRadio.Checked = true;
+        _fitModeCombo.SelectedIndex = Math.Min((int)_settings.FitMode, _fitModeCombo.Items.Count - 1);
 
         // EPIC
         _epicTypeCombo.SelectedIndex = (int)_settings.EpicImageType;
@@ -2595,7 +2667,10 @@ public class SettingsForm : Form
         _updateIntervalCombo.SelectedIndex = _settings.UpdateIntervalSeconds switch
         {
             60 => 0, 120 => 1, 300 => 2, 600 => 3,
-            900 => 4, 1800 => 5, 3600 => 6, _ => 3
+            900 => 4, 1800 => 5, 3600 => 6, 21600 => 7,
+            43200 => 8, 86400 => 9, 604800 => 10, 1209600 => 11,
+            2592000 => 12, int.MaxValue => 13,
+            _ => FindNearestIntervalIndex(_settings.UpdateIntervalSeconds)
         };
 
         _runOnStartupCheck.Checked = StartupManager.IsRunOnStartup();
@@ -2624,6 +2699,19 @@ public class SettingsForm : Form
         }
 
         _isLoading = false;
+    }
+
+    private static int FindNearestIntervalIndex(int seconds)
+    {
+        int[] values = [60, 120, 300, 600, 900, 1800, 3600, 21600, 43200, 86400, 604800, 1209600, 2592000, int.MaxValue];
+        int closest = 3; // Default to 10 minutes
+        long minDiff = long.MaxValue;
+        for (int i = 0; i < values.Length; i++)
+        {
+            long diff = Math.Abs((long)values[i] - seconds);
+            if (diff < minDiff) { minDiff = diff; closest = i; }
+        }
+        return closest;
     }
 
     /// <summary>
@@ -2756,7 +2844,8 @@ public class SettingsForm : Form
             NightLightsBrightness = _nightBrightnessSlider.Value / 10f,
             AmbientLight = _ambientSlider.Value / 100f,
             ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo,
-            EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex
+            EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex,
+            FitMode = (WallpaperFitMode)_fitModeCombo.SelectedIndex
         };
 
         var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
@@ -2799,6 +2888,7 @@ public class SettingsForm : Form
         if (preset.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
         else _topoRadio.Checked = true;
         _epicTypeCombo.SelectedIndex = (int)preset.EpicImageType;
+        _fitModeCombo.SelectedIndex = Math.Min((int)preset.FitMode, _fitModeCombo.Items.Count - 1);
 
         _isLoading = false;
         UpdateModeVisibility();
