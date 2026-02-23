@@ -79,7 +79,12 @@ dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-arm64 --se
 
 Created by Alex and Claude (Anthropic).
 
-Earth textures courtesy of NASA (public domain). Moon texture from NASA/GSFC Scientific Visualization Studio.
+Image sources and data:
+- **NASA** -- Earth textures, EPIC satellite imagery (DSCOVR), Astronomy Picture of the Day, and the NASA Image and Video Library. All public domain.
+- **National Park Service** -- Park photography via the NPS API.
+- **Smithsonian Institution** -- Art and design from the Smithsonian Open Access collection (CC0 public domain).
+- **NASA/GSFC Scientific Visualization Studio** -- Moon texture.
+- **api.data.gov** -- API access provided by the U.S. General Services Administration.
 
 ## License
 

@@ -58,7 +58,7 @@ public class AboutForm : Form
 
         var creditLabel = new Label
         {
-            Text = "Built with .NET 8 and OpenGL.\nEarth textures courtesy of NASA (public domain).",
+            Text = "Built with .NET 8 and OpenGL.\nImagery from NASA, National Park Service, and\nSmithsonian Institution. All public domain.",
             Font = new Font("Segoe UI", 8),
             ForeColor = Theme.SecondaryText,
             AutoSize = true,
