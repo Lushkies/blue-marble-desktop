@@ -30,6 +30,15 @@ installer/output/
 ## Claude Code (conversation history, settings — never commit)
 .claude/
 
+## Dev notes and temp files (never commit)
+SECURITY-REVIEW.md
+claude_rewrite.md
+security-review-prompt.md
+release_response.json
+tmp_*.txt
+tmp_*.json
+assets/original_binaries/
+
 ## Misc
 nul
 
