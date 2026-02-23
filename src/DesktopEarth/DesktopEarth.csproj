@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>BlueMarbleDesktop</AssemblyName>
+    <RootNamespace>DesktopEarth</RootNamespace>
+    <ApplicationIcon>Resources\bluemarbledesktop.ico</ApplicationIcon>
+    <Version>2.1.5</Version>
+    <FileVersion>2.1.5.0</FileVersion>
+    <AssemblyVersion>2.1.5.0</AssemblyVersion>
+    <Product>Blue Marble Desktop</Product>
+    <Company>Blue Marble Desktop</Company>
+    <Authors>Alex and Claude (Anthropic)</Authors>
+    <Description>Dynamic wallpaper showing a 3D Earth with real-time day/night illumination</Description>
+    <PublishSingleFile>false</PublishSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Resources\bluemarbledesktop.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+  </ItemGroup>
+
+</Project>
