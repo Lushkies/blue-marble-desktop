@@ -459,7 +459,7 @@ public class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(560, 820);
+        ClientSize = new Size(560, 865);
         ShowInTaskbar = true;
         BackColor = Theme.FormBackground;
         ForeColor = Theme.PrimaryText;
@@ -2028,8 +2028,7 @@ public class SettingsForm : Form
             }
             panelY = _controlsBaseY + groupHeight + 5 + bannerOffset;
             _stillImagePanel.Top = panelY;
-            _stillImagePanel.Height = showBanner ? 395 : 435;
-            _presetsPanel.Top = panelY + _stillImagePanel.Height;
+            _presetsPanel.Top = panelY + 435;
         }
         else
         {
