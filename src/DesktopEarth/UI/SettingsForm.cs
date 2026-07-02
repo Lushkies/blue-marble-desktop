@@ -1339,7 +1339,7 @@ public class SettingsForm : Form
 
         _npsStatusLabel = new Label
         {
-            Text = "Enter a park name or click a suggestion. Requires API key (see API Keys tab).",
+            Text = "Enter a park name or click a suggestion. Requires an API key (System tab).",
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 35),
             Font = new Font("Segoe UI", 8.5f),
@@ -1436,7 +1436,7 @@ public class SettingsForm : Form
 
         _smithsonianStatusLabel = new Label
         {
-            Text = "Search the Smithsonian collection. Requires API key (see API Keys tab).",
+            Text = "Search the Smithsonian collection. Requires an API key (System tab).",
             Location = new Point(LeftMargin, py),
             Size = new Size(490, 35),
             Font = new Font("Segoe UI", 8.5f),
@@ -2354,7 +2354,7 @@ public class SettingsForm : Form
             }
             else
             {
-                _npsStatusLabel.Text = "API key required. Add it in the API Keys tab.";
+                _npsStatusLabel.Text = "API key required. Add it on the System tab.";
                 _npsStatusLabel.ForeColor = Theme.ErrorText;
                 return;
             }
@@ -2411,7 +2411,7 @@ public class SettingsForm : Form
         var apiKey = _settings.ApiDataGovKey;
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            _smithsonianStatusLabel.Text = "API key required. Add it in the API Keys tab.";
+            _smithsonianStatusLabel.Text = "API key required. Add it on the System tab.";
             _smithsonianStatusLabel.ForeColor = Theme.ErrorText;
             return;
         }

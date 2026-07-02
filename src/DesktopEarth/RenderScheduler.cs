@@ -1068,14 +1068,16 @@ public class RenderScheduler : IDisposable
 
         int currentPoolSize = BuildRotationPool(settings, source).Count;
 
-        // Determine fetch frequency based on pool size, API key, and source
+        // Determine fetch frequency based on pool size, API key, and source.
+        // The DEMO_KEY check comes FIRST: its 50 requests/day quota would be
+        // burned within the first hour if the small-pool aggressive mode applied.
         bool isDemoKey = settings.ApiDataGovKey == "DEMO_KEY";
         bool isNoKeySource = source == RotationSource.NasaGallery; // No API key, no rate limit
         bool shouldFetch;
-        if (currentPoolSize < 20)
-            shouldFetch = true; // Aggressive when pool is small
-        else if (isDemoKey && !isNoKeySource)
+        if (isDemoKey && !isNoKeySource)
             shouldFetch = (_poolBuildCycleCount % 5) == 0; // Conservative for DEMO_KEY sources
+        else if (currentPoolSize < 20)
+            shouldFetch = true; // Aggressive when pool is small
         else if (isNoKeySource || source == RotationSource.All)
             shouldFetch = (_poolBuildCycleCount % 3) == 0; // Gallery + All: more frequent
         else
