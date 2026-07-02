@@ -14,13 +14,16 @@ public class AboutForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
+
+        // Scale the fixed pixel layout with the monitor DPI (the process is
+        // PerMonitorV2-aware, so fonts grow with scaling either way)
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         Size = new Size(400, 280);
         ShowInTaskbar = false;
         BackColor = Theme.FormBackground;
         ForeColor = Theme.PrimaryText;
-
-        // Dark title bar and window borders (Windows 10 1809+ / Windows 11)
-        Theme.ApplyDarkMode(this);
 
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
 
@@ -76,5 +79,10 @@ public class AboutForm : Form
         AcceptButton = okButton;
 
         Controls.AddRange([titleLabel, versionLabel, descLabel, authorLabel, creditLabel, okButton]);
+
+        // Dark title bar and window borders (Windows 10 1809+ / Windows 11).
+        // Applied last: it touches Handle, and creating the handle before the
+        // controls exist would interfere with DPI auto-scaling.
+        Theme.ApplyDarkMode(this);
     }
 }

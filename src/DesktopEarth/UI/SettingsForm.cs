@@ -172,9 +172,6 @@ public class SettingsForm : Form
     private Panel _presetsPanel = null!;
     private ComboBox _presetCombo = null!;
 
-    // Y position where hint/auto-rotate controls start (just after accent panel)
-    private int _controlsBaseY;
-
     // User images controls
     private Panel _userImagesSubPanel = null!;
     private ThumbnailGridPanel _userImagesGrid = null!;
@@ -472,13 +469,18 @@ public class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
+
+        // Scale the fixed pixel layout with the monitor DPI. The process is
+        // PerMonitorV2-aware (Program.cs), so at 125-150% scaling fonts grow
+        // regardless — without this the layout stays at 96-DPI pixel positions
+        // and text clips/overlaps everywhere.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         ClientSize = new Size(560, 865);
         ShowInTaskbar = true;
         BackColor = Theme.FormBackground;
         ForeColor = Theme.PrimaryText;
-
-        // Dark title bar and window borders (Windows 10 1809+ / Windows 11)
-        Theme.ApplyDarkMode(this);
 
         _tabControl = new DarkTabControl
         {
@@ -518,8 +520,35 @@ public class SettingsForm : Form
             Anchor = AnchorStyles.Bottom | AnchorStyles.Left
         });
 
+        // Dark title bar and window borders (Windows 10 1809+ / Windows 11).
+        // Applied last: it touches Handle, and creating the handle before the
+        // controls exist would interfere with DPI auto-scaling.
+        Theme.ApplyDarkMode(this);
+
         // Listen for download/render status updates
         _renderScheduler.StatusChanged += OnRenderStatusChanged;
+    }
+
+    /// <summary>
+    /// Scale a design-time (96 DPI) pixel value to the form's current DPI.
+    /// Static layout is handled by AutoScaleMode.Dpi; this is for layout math
+    /// done at runtime, which would otherwise mix unscaled constants with
+    /// already-scaled control measurements.
+    /// </summary>
+    private int Dpi(int designPixels) => (int)Math.Round(designPixels * (DeviceDpi / 96f));
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+
+        // On small high-DPI screens (e.g. 1080p at 125-150%) the scaled window
+        // is taller than the desktop. Clamp it and let the tab pages scroll.
+        var workArea = Screen.FromControl(this).WorkingArea;
+        if (Height > workArea.Height)
+            Height = workArea.Height;
+        if (Top < workArea.Top) Top = workArea.Top;
+        if (Top + Height > workArea.Bottom)
+            Top = Math.Max(workArea.Top, workArea.Bottom - Height);
     }
 
     private int AddSliderRow(Control parent, string labelText, string defaultValue,
@@ -545,7 +574,9 @@ public class SettingsForm : Form
 
     private TabPage CreateAppearanceTab()
     {
-        var tab = new TabPage("Appearance") { BackColor = Theme.TabBackground };
+        // AutoScroll: on height-clamped windows (small high-DPI screens) the
+        // bottom of the tab must stay reachable
+        var tab = new TabPage("Appearance") { BackColor = Theme.TabBackground, AutoScroll = true };
         int y = 10;
 
         // -- MULTI-DISPLAY MODE (with monitor selector merged inside) --
@@ -674,9 +705,6 @@ public class SettingsForm : Form
 
         tab.Controls.Add(_viewAccentPanel);
         y += 77; // accent panel (72) + gap (5)
-
-        // Save the Y where conditional controls start (hint label / auto-rotate)
-        _controlsBaseY = y;
 
         // Hint label below accent panel — visible when NOT on Still Image, clickable to switch
         _sourceHintLabel = new Label
@@ -1507,7 +1535,7 @@ public class SettingsForm : Form
             Text = "HD textures enhance Globe and Flat Map views with ultra-high resolution\n" +
                    "(21600x10800). They do not affect Still Image or Moon views.",
             Location = new Point(15, 20),
-            Size = new Size(460, 30),
+            AutoSize = true,
             Font = new Font("Segoe UI", 8f),
             ForeColor = Theme.DescriptionText
         };
@@ -1816,7 +1844,7 @@ public class SettingsForm : Form
             Text = "All image sources (NASA APOD, National Parks, Smithsonian) use a single free\n" +
                    "api.data.gov API key. The default DEMO_KEY has a 50 requests/day limit.",
             Location = new Point(15, ay),
-            Size = new Size(460, 32),
+            AutoSize = true,
             Font = new Font("Segoe UI", 8f),
             ForeColor = Theme.DescriptionText
         };
@@ -2041,28 +2069,23 @@ public class SettingsForm : Form
         _userImagesGrid.Dimmed = dimGrids;
 
         // Dynamic panel positioning based on which controls are visible.
-        // Globe/FlatMap/Moon: hint label (18px) + gap → panels start close
-        // Still Image: auto-rotate GroupBox (variable height) + gap → panels start lower
-        int panelY;
+        // Positions derive from the ACTUAL bounds of the controls above (which
+        // are DPI-scaled by the framework) plus Dpi()-scaled gaps — raw pixel
+        // constants here would break at non-100% display scaling.
         if (isStillImage)
         {
-            int groupHeight = _autoRotateGroup.Height; // 48 or 82 depending on exclusion
-            int bannerOffset = 0;
             if (showBanner)
-            {
-                _autoRotateBanner.Top = _controlsBaseY + groupHeight + 5;
-                bannerOffset = _autoRotateBanner.Height + 5; // 36 + 5 = 41
-            }
-            panelY = _controlsBaseY + groupHeight + 5 + bannerOffset;
-            _stillImagePanel.Top = panelY;
-            _presetsPanel.Top = panelY + 435;
+                _autoRotateBanner.Top = _autoRotateGroup.Bottom + Dpi(5);
+            int bannerOffset = showBanner ? _autoRotateBanner.Height + Dpi(5) : 0;
+
+            _stillImagePanel.Top = _autoRotateGroup.Bottom + Dpi(5) + bannerOffset;
+            _presetsPanel.Top = _stillImagePanel.Top + _stillImagePanel.Height + Dpi(5);
         }
         else
         {
-            panelY = _controlsBaseY + 26; // hint (18px) + 8px gap
-            _globeControlsPanel.Top = panelY;
-            _resetButton.Top = panelY + 430;
-            _presetsPanel.Top = panelY + 468; // 430 + 28 (reset btn) + 10 gap
+            _globeControlsPanel.Top = _sourceHintLabel.Bottom + Dpi(8);
+            _resetButton.Top = _globeControlsPanel.Top + _globeControlsPanel.Height + Dpi(2);
+            _presetsPanel.Top = _resetButton.Bottom + Dpi(10);
         }
 
         // Globe-specific logic
@@ -2098,8 +2121,9 @@ public class SettingsForm : Form
         foreach (var check in _rotationSourceChecks)
             check.Visible = showExclusion;
 
-        // Resize GroupBox: 48px compact, 88px with exclusion checkboxes (2 rows + spacing)
-        _autoRotateGroup.Height = showExclusion ? 88 : 48;
+        // Resize GroupBox: 48px compact, 88px with exclusion checkboxes (2 rows
+        // + spacing) — Dpi-scaled because this runs after framework auto-scaling
+        _autoRotateGroup.Height = showExclusion ? Dpi(88) : Dpi(48);
     }
 
     private void OnRotationExclusionChanged(object? sender, EventArgs e)
@@ -3012,6 +3036,8 @@ public class SettingsForm : Form
         using var dialog = new Form
         {
             Text = title,
+            AutoScaleDimensions = new SizeF(96F, 96F),
+            AutoScaleMode = AutoScaleMode.Dpi,
             Width = 350,
             Height = 150,
             FormBorderStyle = FormBorderStyle.FixedDialog,

@@ -9,15 +9,25 @@ namespace DesktopEarth.UI;
 /// </summary>
 public class ThumbnailGridPanel : Panel
 {
+    // Design-time (96 DPI) metrics; the scaled copies below are recomputed from
+    // the control's current DPI so cells stay proportional at 125-150% scaling
     private const int MinColumns = 3;
     private const int ThumbSize = 130;
     private const int CellPadding = 6;
     private const int TitleHeight = 20;
-    private const int CellWidth = ThumbSize + CellPadding * 2;
-    private const int CellHeight = ThumbSize + TitleHeight + CellPadding * 2;
     private const int StarSize = 20;
     private const int BadgeWidth = 24;
     private const int BadgeHeight = 14;
+
+    // DPI-scaled cell metrics (see UpdateScaledMetrics)
+    private int _thumbSize = ThumbSize;
+    private int _cellPadding = CellPadding;
+    private int _titleHeight = TitleHeight;
+    private int _starSize = StarSize;
+    private int _badgeWidth = BadgeWidth;
+    private int _badgeHeight = BadgeHeight;
+    private int _cellWidth = ThumbSize + CellPadding * 2;
+    private int _cellHeight = ThumbSize + TitleHeight + CellPadding * 2;
 
     private int _columns = MinColumns;
     private List<ImageSourceInfo> _images = new();
@@ -141,13 +151,28 @@ public class ThumbnailGridPanel : Panel
 
     private void RecalculateLayout()
     {
+        UpdateScaledMetrics();
+
         // Calculate columns based on available width (account for scrollbar)
         int availableWidth = ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 2;
-        _columns = Math.Max(MinColumns, availableWidth / CellWidth);
+        _columns = Math.Max(MinColumns, availableWidth / _cellWidth);
 
         int rows = (_images.Count + _columns - 1) / Math.Max(_columns, 1);
-        _innerPanel.Size = new Size(_columns * CellWidth + 2, Math.Max(rows * CellHeight, 10));
+        _innerPanel.Size = new Size(_columns * _cellWidth + 2, Math.Max(rows * _cellHeight, 10));
         _innerPanel.Invalidate();
+    }
+
+    private void UpdateScaledMetrics()
+    {
+        float f = DeviceDpi / 96f;
+        _thumbSize = (int)Math.Round(ThumbSize * f);
+        _cellPadding = (int)Math.Round(CellPadding * f);
+        _titleHeight = (int)Math.Round(TitleHeight * f);
+        _starSize = (int)Math.Round(StarSize * f);
+        _badgeWidth = (int)Math.Round(BadgeWidth * f);
+        _badgeHeight = (int)Math.Round(BadgeHeight * f);
+        _cellWidth = _thumbSize + _cellPadding * 2;
+        _cellHeight = _thumbSize + _titleHeight + _cellPadding * 2;
     }
 
     private void InnerPanel_Paint(object? sender, PaintEventArgs e)
@@ -174,9 +199,9 @@ public class ThumbnailGridPanel : Panel
 
             var img = _images[i];
             var thumbRect = new Rectangle(
-                cellRect.X + CellPadding,
-                cellRect.Y + CellPadding,
-                ThumbSize, ThumbSize);
+                cellRect.X + _cellPadding,
+                cellRect.Y + _cellPadding,
+                _thumbSize, _thumbSize);
 
             // Draw thumbnail or placeholder
             if (_loadedThumbs.TryGetValue(img.Id, out var thumb) && thumb != null)
@@ -215,10 +240,10 @@ public class ThumbnailGridPanel : Panel
 
             // Title text (truncated)
             var titleRect = new Rectangle(
-                cellRect.X + CellPadding,
-                cellRect.Y + CellPadding + ThumbSize + 2,
-                ThumbSize, TitleHeight);
-            var title = TruncateText(img.Title, titleFont, ThumbSize, g);
+                cellRect.X + _cellPadding,
+                cellRect.Y + _cellPadding + _thumbSize + 2,
+                _thumbSize, _titleHeight);
+            var title = TruncateText(img.Title, titleFont, _thumbSize, g);
             g.DrawString(title, titleFont, titleBrush, titleRect);
 
             // Favorite star
@@ -244,7 +269,7 @@ public class ThumbnailGridPanel : Panel
         }
     }
 
-    private static void DrawQualityBadge(Graphics g, ImageQualityTier tier,
+    private void DrawQualityBadge(Graphics g, ImageQualityTier tier,
         Rectangle thumbRect, Font font)
     {
         string text;
@@ -271,9 +296,9 @@ public class ThumbnailGridPanel : Panel
         }
 
         var badgeRect = new Rectangle(
-            thumbRect.Right - BadgeWidth - 2,
-            thumbRect.Bottom - BadgeHeight - 2,
-            BadgeWidth, BadgeHeight);
+            thumbRect.Right - _badgeWidth - 2,
+            thumbRect.Bottom - _badgeHeight - 2,
+            _badgeWidth, _badgeHeight);
 
         using var bgBrush = new SolidBrush(bgColor);
         using var textBrush = new SolidBrush(Color.White);
@@ -288,7 +313,7 @@ public class ThumbnailGridPanel : Panel
         g.DrawString(text, font, textBrush, tx, ty);
     }
 
-    private static void DrawSourceBadge(Graphics g, ImageSource source,
+    private void DrawSourceBadge(Graphics g, ImageSource source,
         Rectangle thumbRect, Font font)
     {
         string text = source switch
@@ -307,8 +332,8 @@ public class ThumbnailGridPanel : Panel
         int badgeW = (int)textSize.Width + 6;
         var badgeRect = new Rectangle(
             thumbRect.Left + 2,
-            thumbRect.Bottom - BadgeHeight - 2,
-            badgeW, BadgeHeight);
+            thumbRect.Bottom - _badgeHeight - 2,
+            badgeW, _badgeHeight);
 
         using var bgBrush = new SolidBrush(Color.FromArgb(180, 30, 30, 30));
         using var textBrush = new SolidBrush(Color.White);
@@ -459,8 +484,8 @@ public class ThumbnailGridPanel : Panel
 
     private int GetIndexAtPoint(Point p)
     {
-        int col = p.X / CellWidth;
-        int row = p.Y / CellHeight;
+        int col = p.X / _cellWidth;
+        int row = p.Y / _cellHeight;
         if (col < 0 || col >= _columns) return -1;
         int index = row * _columns + col;
         return index >= 0 && index < _images.Count ? index : -1;
@@ -470,16 +495,16 @@ public class ThumbnailGridPanel : Panel
     {
         int col = index % _columns;
         int row = index / _columns;
-        return new Rectangle(col * CellWidth, row * CellHeight, CellWidth, CellHeight);
+        return new Rectangle(col * _cellWidth, row * _cellHeight, _cellWidth, _cellHeight);
     }
 
     private Rectangle GetStarBounds(int index)
     {
         var cell = GetCellBounds(index);
         return new Rectangle(
-            cell.X + CellPadding + ThumbSize - StarSize - 2,
-            cell.Y + CellPadding + 2,
-            StarSize, StarSize);
+            cell.X + _cellPadding + _thumbSize - _starSize - 2,
+            cell.Y + _cellPadding + 2,
+            _starSize, _starSize);
     }
 
     private static string TruncateText(string text, Font font, int maxWidth, Graphics g)
