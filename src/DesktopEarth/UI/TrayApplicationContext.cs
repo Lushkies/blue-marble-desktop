@@ -110,18 +110,18 @@ public class TrayApplicationContext : ApplicationContext
         // Re-enable dark scrollbars (needed when toggling dark mode on)
         Theme.EnableDarkScrollbars();
 
-        ShowSettings();
-
-        // Restore previous window position and selected tab
-        if (_settingsForm != null && !_settingsForm.IsDisposed)
+        // Recreate directly (not via ShowSettings) so the saved position is
+        // applied BEFORE Show — otherwise the window flashes at center-screen
+        // and then jumps to its old spot
+        _settingsForm = new SettingsForm(_settingsManager, _renderScheduler, _hdTextureManager);
+        _settingsForm.RequestReopen += RecreateSettingsForm;
+        if (savedLocation.HasValue)
         {
-            if (savedLocation.HasValue)
-            {
-                _settingsForm.StartPosition = FormStartPosition.Manual;
-                _settingsForm.Location = savedLocation.Value;
-            }
-            _settingsForm.SelectedTabIndex = savedTabIndex;
+            _settingsForm.StartPosition = FormStartPosition.Manual;
+            _settingsForm.Location = savedLocation.Value;
         }
+        _settingsForm.Show();
+        _settingsForm.SelectedTabIndex = savedTabIndex;
     }
 
     private void FavoriteCurrentWallpaper()

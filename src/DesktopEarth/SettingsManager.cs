@@ -126,66 +126,22 @@ public class SettingsManager
         {
             string json = File.ReadAllText(path);
 
-            // Migrate old v4.0.0 DisplayMode enum values to the new combined StillImage mode.
-            // Old format had DisplayMode = NasaEpic/NasaApod/NationalParks/Smithsonian/Unsplash.
-            // New format uses DisplayMode = StillImage with a separate StillImageSource property.
-            //
-            // IMPORTANT: Only replace DisplayMode values, NOT ImageSource values!
-            // A global string replace would corrupt Favorites[].Source, StillImageSource, etc.
-            ImageSource? migratedSource = null;
-
-            // Detect old format: DisplayMode has an image source name instead of StillImage
-            var displayModeMatch = System.Text.RegularExpressions.Regex.Match(
-                json, @"""DisplayMode""\s*:\s*""(\w+)""");
-            if (displayModeMatch.Success)
-            {
-                var oldMode = displayModeMatch.Groups[1].Value;
-                switch (oldMode)
-                {
-                    case "NasaEpic":
-                        migratedSource = ImageSource.NasaEpic;
-                        json = json.Replace(displayModeMatch.Value,
-                            "\"DisplayMode\": \"StillImage\"");
-                        break;
-                    case "NasaApod":
-                        migratedSource = ImageSource.NasaApod;
-                        json = json.Replace(displayModeMatch.Value,
-                            "\"DisplayMode\": \"StillImage\"");
-                        break;
-                    case "NationalParks":
-                        migratedSource = ImageSource.NationalParks;
-                        json = json.Replace(displayModeMatch.Value,
-                            "\"DisplayMode\": \"StillImage\"");
-                        break;
-                    case "Smithsonian":
-                        migratedSource = ImageSource.Smithsonian;
-                        json = json.Replace(displayModeMatch.Value,
-                            "\"DisplayMode\": \"StillImage\"");
-                        break;
-                    case "Unsplash":
-                        // Unsplash was removed — fall back to Spherical (globe)
-                        json = json.Replace(displayModeMatch.Value,
-                            "\"DisplayMode\": \"Spherical\"");
-                        break;
-                }
-            }
+            // Migrate old v4.0.0 DisplayMode enum values to the new combined
+            // StillImage mode. Done on the parsed JSON tree so ONLY DisplayMode
+            // properties are touched — a text replace also hits identical text
+            // in other fields (Favorites[].Source, nested configs, etc.).
+            json = MigrateLegacyDisplayModes(json);
 
             Settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
 
-            // Set StillImageSource from the migrated DisplayMode
-            if (migratedSource != null && Settings.DisplayMode == DisplayMode.StillImage)
-            {
-                Settings.StillImageSource = migratedSource.Value;
-            }
-
-            // Migrate old separate API keys to unified ApiDataGovKey
-            MigrateApiKeys();
-
-            // Migrate old RandomFromFavoritesOnly to new RotationSource
-            MigrateRotationSettings();
+            // Both migrations read ExtensionData, so nothing may save (and clear
+            // it) until both have run
+            bool migrated = MigrateApiKeys();
+            migrated |= MigrateRotationSettings();
 
             // Clear extension data so old properties don't get re-serialized
             Settings.ExtensionData = null;
+            if (migrated) Save();
             return true;
         }
         catch (Exception ex)
@@ -196,46 +152,103 @@ public class SettingsManager
     }
 
     /// <summary>
+    /// Rewrite pre-v4.1 DisplayMode values (source names like "NasaApod") to the
+    /// combined StillImage mode with the matching StillImageSource. Applies to
+    /// the top level and to nested DisplayConfigs and Presets entries.
+    /// Returns the (possibly rewritten) JSON text; parse errors propagate to the
+    /// caller's catch, which triggers backup recovery/quarantine.
+    /// </summary>
+    private static string MigrateLegacyDisplayModes(string json)
+    {
+        if (System.Text.Json.Nodes.JsonNode.Parse(json) is not System.Text.Json.Nodes.JsonObject root)
+            return json;
+
+        bool changed = MigrateDisplayModeObject(root);
+
+        foreach (var listName in new[] { "DisplayConfigs", "Presets" })
+        {
+            if (root[listName] is System.Text.Json.Nodes.JsonArray array)
+            {
+                foreach (var item in array)
+                {
+                    if (item is System.Text.Json.Nodes.JsonObject obj)
+                        changed |= MigrateDisplayModeObject(obj);
+                }
+            }
+        }
+
+        return changed ? root.ToJsonString() : json;
+    }
+
+    private static bool MigrateDisplayModeObject(System.Text.Json.Nodes.JsonObject obj)
+    {
+        if (obj["DisplayMode"] is not System.Text.Json.Nodes.JsonValue value ||
+            !value.TryGetValue<string>(out var mode))
+            return false;
+
+        switch (mode)
+        {
+            case "NasaEpic":
+            case "NasaApod":
+            case "NationalParks":
+            case "Smithsonian":
+                obj["DisplayMode"] = "StillImage";
+                obj["StillImageSource"] = mode;
+                return true;
+            case "Unsplash":
+                // Unsplash was removed — fall back to Spherical (globe)
+                obj["DisplayMode"] = "Spherical";
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
     /// Migrate old separate API keys (NasaApiKey, NpsApiKey, SmithsonianApiKey) to unified ApiDataGovKey.
     /// Old keys end up in ExtensionData since they're no longer properties on AppSettings.
+    /// Returns true if a key was migrated; the caller saves once after all migrations.
     /// </summary>
-    private void MigrateApiKeys()
+    private bool MigrateApiKeys()
     {
         if (Settings.ApiDataGovKey != "DEMO_KEY" || Settings.ExtensionData == null)
-            return;
+            return false;
 
         // Try each old key name, use the first non-empty, non-default one
         string[] oldKeyNames = ["NasaApiKey", "NpsApiKey", "SmithsonianApiKey"];
         foreach (var keyName in oldKeyNames)
         {
-            if (Settings.ExtensionData.TryGetValue(keyName, out var element))
+            if (Settings.ExtensionData.TryGetValue(keyName, out var element) &&
+                element.ValueKind == System.Text.Json.JsonValueKind.String)
             {
                 var val = element.GetString();
                 if (!string.IsNullOrEmpty(val) && val != "DEMO_KEY")
                 {
                     Settings.ApiDataGovKey = val;
-                    Save(); // Persist migrated key
-                    return;
+                    return true;
                 }
             }
         }
+        return false;
     }
 
     /// <summary>
     /// Migrate old RandomFromFavoritesOnly boolean to new RotationSource enum.
     /// Old property ends up in ExtensionData since it's no longer on AppSettings.
+    /// Returns true if anything was migrated.
     /// </summary>
-    private void MigrateRotationSettings()
+    private bool MigrateRotationSettings()
     {
-        if (Settings.ExtensionData == null) return;
+        if (Settings.ExtensionData == null) return false;
 
         if (Settings.ExtensionData.TryGetValue("RandomFromFavoritesOnly", out var favOnlyEl))
         {
             if (favOnlyEl.ValueKind == System.Text.Json.JsonValueKind.True)
             {
                 Settings.RandomRotationSource = RotationSource.Favorites;
+                return true;
             }
-            else if (favOnlyEl.ValueKind == System.Text.Json.JsonValueKind.False && Settings.RandomRotationEnabled)
+            if (favOnlyEl.ValueKind == System.Text.Json.JsonValueKind.False && Settings.RandomRotationEnabled)
             {
                 // Old "rotate but not favorites only" = rotate current source
                 Settings.RandomRotationSource = Settings.StillImageSource switch
@@ -247,8 +260,10 @@ public class SettingsManager
                     ImageSource.UserImages => RotationSource.UserImages,
                     _ => RotationSource.Favorites
                 };
+                return true;
             }
         }
+        return false;
     }
 
     public void Save()

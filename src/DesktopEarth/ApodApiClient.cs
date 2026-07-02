@@ -29,9 +29,22 @@ public class ApodApiClient
     {
         try
         {
-            var endDate = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-            var startDate = DateTime.UtcNow.AddDays(-(days - 1)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-            var url = $"{ApiBase}?api_key={apiKey}&start_date={startDate}&end_date={endDate}&thumbs=true";
+            // APOD's "today" follows US Eastern time; using the UTC date makes
+            // end_date land in the future every US evening and the API rejects it
+            DateTime nasaToday;
+            try
+            {
+                var eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+                nasaToday = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, eastern).Date;
+            }
+            catch
+            {
+                nasaToday = DateTime.UtcNow.AddHours(-5).Date;
+            }
+
+            var endDate = nasaToday.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            var startDate = nasaToday.AddDays(-(days - 1)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            var url = $"{ApiBase}?api_key={Uri.EscapeDataString(apiKey)}&start_date={startDate}&end_date={endDate}&thumbs=true";
 
             var response = await Http.GetAsync(url);
             response.EnsureSuccessStatusCode();
@@ -71,7 +84,7 @@ public class ApodApiClient
     {
         try
         {
-            var url = $"{ApiBase}?api_key={apiKey}&date={date}&thumbs=true";
+            var url = $"{ApiBase}?api_key={Uri.EscapeDataString(apiKey)}&date={date}&thumbs=true";
             var response = await Http.GetAsync(url);
             response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync();

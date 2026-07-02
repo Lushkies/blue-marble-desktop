@@ -127,6 +127,10 @@ public class MoonRenderer : IDisposable
         _gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
             RenderbufferTarget.Renderbuffer, _depthRenderbuffer);
 
+        var fbStatus = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        if (fbStatus != GLEnum.FramebufferComplete)
+            throw new Exception($"Framebuffer not complete: {fbStatus}");
+
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 

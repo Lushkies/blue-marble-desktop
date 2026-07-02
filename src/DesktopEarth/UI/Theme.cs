@@ -31,16 +31,18 @@ public static partial class Theme
     [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
     private static extern int SetWindowTheme(IntPtr hwnd, string? pszSubAppName, string? pszSubIdList);
 
+    private const int DefaultAppMode = 0;
     private const int AllowDark = 1;
 
     /// <summary>
     /// Tell Windows to use dark theme for common controls (scrollbars, dropdown menus, etc.).
     /// Must be called before any forms are created. Works on Windows 10 1903+.
+    /// Also reverts to the default mode when dark mode is toggled off — otherwise
+    /// menus and scrollbars stay dark until the app restarts.
     /// </summary>
     public static void EnableDarkScrollbars()
     {
-        if (!IsDarkMode) return;
-        try { SetPreferredAppMode(AllowDark); }
+        try { SetPreferredAppMode(IsDarkMode ? AllowDark : DefaultAppMode); }
         catch { } // Graceful fallback on older Windows versions
     }
 

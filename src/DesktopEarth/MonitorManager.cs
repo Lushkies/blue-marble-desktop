@@ -34,17 +34,19 @@ public static class MonitorManager
         if (screens.Length == 0)
             return (1920, 1080);
 
-        int maxWidth = 0;
-        int maxHeight = 0;
+        // Pick the single largest screen — taking max width and max height
+        // independently can produce an aspect ratio matching no display
+        // (e.g. ultrawide + portrait -> 3440x2560)
+        var best = screens[0];
         foreach (var screen in screens)
         {
-            if (screen.Bounds.Width > maxWidth)
-                maxWidth = screen.Bounds.Width;
-            if (screen.Bounds.Height > maxHeight)
-                maxHeight = screen.Bounds.Height;
+            if ((long)screen.Bounds.Width * screen.Bounds.Height >
+                (long)best.Bounds.Width * best.Bounds.Height)
+                best = screen;
         }
 
-        return (maxWidth > 0 ? maxWidth : 1920, maxHeight > 0 ? maxHeight : 1080);
+        return (best.Bounds.Width > 0 ? best.Bounds.Width : 1920,
+                best.Bounds.Height > 0 ? best.Bounds.Height : 1080);
     }
 
     /// <summary>

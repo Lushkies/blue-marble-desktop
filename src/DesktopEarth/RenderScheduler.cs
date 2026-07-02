@@ -113,7 +113,11 @@ public class RenderScheduler : IDisposable
         {
             foreach (var screen in MonitorManager.GetAllScreens())
             {
-                var config = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
+                DisplayConfig? config;
+                lock (settings.DisplayConfigsLock)
+                {
+                    config = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
+                }
                 var mode = config?.DisplayMode ?? settings.DisplayMode;
                 var rotate = config?.RandomRotationEnabled ?? settings.RandomRotationEnabled;
                 if (mode != DisplayMode.StillImage || rotate)
@@ -231,6 +235,7 @@ public class RenderScheduler : IDisposable
 
         DateTime lastUpdate = DateTime.MinValue;
         DateTime lastCacheClean = DateTime.UtcNow;
+        int textureMonth = DateTime.UtcNow.Month;
         bool firstRender = true;
         GL? gl = null;
 
@@ -309,6 +314,17 @@ public class RenderScheduler : IDisposable
             {
                 // Re-read settings
                 settings = _settingsManager.Settings;
+
+                // The earth day texture is month-based; force renderer re-init
+                // when the month rolls over during long uptimes so the texture
+                // actually changes
+                if (DateTime.UtcNow.Month != textureMonth)
+                {
+                    textureMonth = DateTime.UtcNow.Month;
+                    currentMode = (DisplayMode)(-1);
+                    foreach (var state in _perDisplayRenderers.Values)
+                        state.Mode = (DisplayMode)(-1);
+                }
 
                 bool applied;
                 if (settings.MultiMonitorMode == MultiMonitorMode.PerDisplay)
@@ -489,8 +505,13 @@ public class RenderScheduler : IDisposable
             int sw = screen.Bounds.Width;
             int sh = screen.Bounds.Height;
 
-            // Find per-display config or use global defaults
-            var displayConfig = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
+            // Find per-display config or use global defaults (locked: the UI
+            // thread adds configs while this thread enumerates)
+            DisplayConfig? displayConfig;
+            lock (settings.DisplayConfigsLock)
+            {
+                displayConfig = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
+            }
 
             var deviceName = screen.DeviceName;
             bool isNew = !_perDisplayRenderers.TryGetValue(deviceName, out var displayState);

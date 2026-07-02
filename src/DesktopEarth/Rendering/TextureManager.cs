@@ -27,6 +27,12 @@ public class TextureManager : IDisposable
         // Floor of 4096 ensures decent quality even if monitor detection fails.
         var (monW, monH) = MonitorManager.GetHighestMonitorResolution();
         _maxTextureDimension = Math.Max(4096, Math.Max(monW, monH) * 2);
+
+        // Never exceed what the driver supports (llvmpipe/older GPUs may cap
+        // at 4096-8192) — an oversized TexImage2D fails to a black texture
+        int glMax = _gl.GetInteger(GLEnum.MaxTextureSize);
+        if (glMax > 0)
+            _maxTextureDimension = Math.Min(_maxTextureDimension, glMax);
     }
 
     public uint LoadTexture(string path, string name)
@@ -62,6 +68,11 @@ public class TextureManager : IDisposable
                     PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
             }
         }
+
+        // Surface upload failures instead of rendering a silent black texture
+        var uploadError = _gl.GetError();
+        if (uploadError != GLEnum.NoError)
+            throw new Exception($"OpenGL error {uploadError} uploading texture '{name}' ({image.Width}x{image.Height})");
 
         // Release the large pixel array immediately after GPU upload.
         // Without this, the LOH allocation lingers until GC runs — on systems

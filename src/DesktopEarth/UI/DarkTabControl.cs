@@ -86,7 +86,7 @@ public class DarkTabControl : TabControl
         using var unselectedBrush = new SolidBrush(unselectedBg);
         using var selectedTextBrush = new SolidBrush(Color.FromArgb(230, 230, 230));
         using var unselectedTextBrush = new SolidBrush(Color.FromArgb(150, 150, 150));
-        var textFormat = new StringFormat
+        using var textFormat = new StringFormat
         {
             Alignment = StringAlignment.Center,
             LineAlignment = StringAlignment.Center

@@ -121,6 +121,13 @@ public class AppSettings
     // Per-display configurations (used when MultiMonitorMode == PerDisplay)
     public List<DisplayConfig> DisplayConfigs { get; set; } = new();
 
+    /// <summary>
+    /// Lock for cross-thread access to DisplayConfigs: the UI thread adds
+    /// configs while the render thread enumerates them.
+    /// </summary>
+    [JsonIgnore]
+    public readonly object DisplayConfigsLock = new();
+
     // Captures unknown JSON properties during deserialization (used for backward compat migration)
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
@@ -194,6 +201,7 @@ public class FavoriteImage
     public string ThumbnailUrl { get; set; } = "";
     public string FullImageUrl { get; set; } = "";
     public string LocalCachePath { get; set; } = "";
+    public ImageQualityTier QualityTier { get; set; } = ImageQualityTier.Unknown;
 }
 
 /// <summary>

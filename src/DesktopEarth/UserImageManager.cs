@@ -226,8 +226,10 @@ public class UserImageManager
             {
                 string path = Path.Combine(UserImagesDir, imageId + ext);
                 // Verify the resolved path is within the user images directory
+                // (trailing separator: a sibling like user_images_evil must not
+                // pass the prefix check)
                 string fullPath = Path.GetFullPath(path);
-                if (fullPath.StartsWith(UserImagesDir, StringComparison.OrdinalIgnoreCase) &&
+                if (fullPath.StartsWith(UserImagesDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
                     File.Exists(path))
                     return path;
             }
@@ -248,7 +250,7 @@ public class UserImageManager
         {
             return Directory.GetFiles(UserImagesDir)
                 .Where(f => SupportedExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
-                .Where(f => new FileInfo(f).Length > 50 * 1024) // Skip tiny files
+                .Where(f => new FileInfo(f).Length > 1024) // Skip zero-byte/partial files
                 .ToList();
         }
         catch

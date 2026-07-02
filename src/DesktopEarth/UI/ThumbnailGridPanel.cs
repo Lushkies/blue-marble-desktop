@@ -393,6 +393,8 @@ public class ThumbnailGridPanel : Panel
 
     private void InnerPanel_MouseClick(object? sender, MouseEventArgs e)
     {
+        if (e.Button != MouseButtons.Left) return;
+
         int index = GetIndexAtPoint(e.Location);
         if (index < 0 || index >= _images.Count) return;
 
@@ -430,7 +432,14 @@ public class ThumbnailGridPanel : Panel
                     image.Source, image.Id, image.ThumbnailUrl, ct);
             }
 
-            if (ct.IsCancellationRequested || localPath == null) return;
+            if (ct.IsCancellationRequested) return;
+            if (localPath == null)
+            {
+                // Download failed — allow a retry on a later paint instead of
+                // leaving a permanent gray placeholder
+                _loadingThumbs.Remove(image.Id);
+                return;
+            }
 
             // Load bitmap on background thread
             System.Drawing.Image? bitmap = null;
@@ -438,7 +447,11 @@ public class ThumbnailGridPanel : Panel
             {
                 try
                 {
-                    bitmap = System.Drawing.Image.FromFile(localPath);
+                    // Copy via Bitmap so the file handle is released immediately —
+                    // Image.FromFile keeps the file locked for the image's
+                    // lifetime, which silently blocks cache pruning and deletion
+                    using var fromFile = System.Drawing.Image.FromFile(localPath);
+                    bitmap = new Bitmap(fromFile);
                 }
                 catch
                 {
@@ -479,6 +492,9 @@ public class ThumbnailGridPanel : Panel
         catch (Exception ex)
         {
             Console.WriteLine($"Thumbnail load error ({image.Id}): {ex.Message}");
+            // Continuations run on the UI thread (WinForms context), so this
+            // mutation is safe; allows a retry on a later paint
+            _loadingThumbs.Remove(image.Id);
         }
     }
 

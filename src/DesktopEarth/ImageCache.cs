@@ -47,13 +47,15 @@ public class ImageCache
     }
 
     /// <summary>
-    /// Check if a full-size image is cached (exists and > 50KB).
+    /// Check if a full-size image is cached. The 1KB floor only guards against
+    /// zero-byte/partial files — content validity is enforced at download time,
+    /// and a larger floor made legitimately small images re-download forever.
     /// </summary>
     public bool IsCached(ImageSource source, string imageId, string extension = ".jpg")
     {
         var path = GetCachePath(source, imageId, extension);
         if (!File.Exists(path)) return false;
-        return new FileInfo(path).Length > 50 * 1024;
+        return new FileInfo(path).Length > 1024;
     }
 
     /// <summary>
@@ -89,7 +91,7 @@ public class ImageCache
             var cachePath = GetCachePath(source, imageId, extension);
 
             // Already cached?
-            if (File.Exists(cachePath) && new FileInfo(cachePath).Length > 50 * 1024)
+            if (File.Exists(cachePath) && new FileInfo(cachePath).Length > 1024)
                 return cachePath;
 
             var dir = Path.GetDirectoryName(cachePath)!;
@@ -209,7 +211,7 @@ public class ImageCache
 
             return Directory.GetFiles(sourceDir, "*.*")
                 .Where(f => !f.EndsWith(".tmp"))
-                .Where(f => new FileInfo(f).Length > 50 * 1024)
+                .Where(f => new FileInfo(f).Length > 1024)
                 .OrderByDescending(f => File.GetLastWriteTime(f))
                 .FirstOrDefault();
         }
@@ -231,7 +233,7 @@ public class ImageCache
 
             return Directory.GetFiles(sourceDir, "*.*")
                 .Where(f => !f.EndsWith(".tmp"))
-                .Where(f => new FileInfo(f).Length > 50 * 1024)
+                .Where(f => new FileInfo(f).Length > 1024)
                 .ToList();
         }
         catch
@@ -345,7 +347,7 @@ public class ImageCache
 
         // Check standard image_cache
         var path = GetCachePath(fav.Source, fav.ImageId);
-        if (File.Exists(path) && new FileInfo(path).Length > 50 * 1024)
+        if (File.Exists(path) && new FileInfo(path).Length > 1024)
             return path;
 
         return null;

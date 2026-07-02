@@ -43,9 +43,11 @@ public class EpicImageCache
         if (!File.Exists(path))
             return false;
 
-        // Verify it's a real file (not a failed partial download)
+        // Verify it's a real file (not a zero-byte/partial download).
+        // Content validity is enforced at download time; a larger floor made
+        // legitimately small frames re-download on every render cycle.
         var info = new FileInfo(path);
-        return info.Length > 100 * 1024; // > 100KB
+        return info.Length > 1024;
     }
 
     /// <summary>
@@ -118,7 +120,7 @@ public class EpicImageCache
                 foreach (var dateDir in Directory.GetDirectories(collectionDir))
                 {
                     var candidate = Path.Combine(dateDir, fileName);
-                    if (File.Exists(candidate) && new FileInfo(candidate).Length > 100 * 1024)
+                    if (File.Exists(candidate) && new FileInfo(candidate).Length > 1024)
                         return candidate;
                 }
             }
@@ -182,7 +184,7 @@ public class EpicImageCache
 
             return Directory.GetDirectories(collectionDir)
                 .SelectMany(dateDir => Directory.GetFiles(dateDir, "*.jpg"))
-                .Where(f => new FileInfo(f).Length > 100 * 1024)
+                .Where(f => new FileInfo(f).Length > 1024)
                 .OrderByDescending(f => File.GetLastWriteTime(f))
                 .ToList();
         }
@@ -217,7 +219,7 @@ public class EpicImageCache
             {
                 // Get the first JPG in this date directory
                 var images = Directory.GetFiles(dateDir.Path, "*.jpg")
-                    .Where(f => new FileInfo(f).Length > 100 * 1024) // Valid files only
+                    .Where(f => new FileInfo(f).Length > 1024) // Valid files only
                     .OrderBy(f => f) // Consistent ordering
                     .ToList();
 

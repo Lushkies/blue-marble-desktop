@@ -46,7 +46,7 @@ public class SmithsonianApiClient
             var url = $"{ApiBase}/category/art_design/search" +
                       $"?q={Uri.EscapeDataString(solrQuery)}" +
                       $"&start={start}&rows={rows}&sort=random" +
-                      $"&api_key={apiKey}";
+                      $"&api_key={Uri.EscapeDataString(apiKey)}";
 
             var response = await Http.GetAsync(url);
             response.EnsureSuccessStatusCode();

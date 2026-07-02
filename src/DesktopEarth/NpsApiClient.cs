@@ -72,7 +72,7 @@ public class NpsApiClient
                 return null;
             }
 
-            var url = $"{ApiBase}/parks?q={Uri.EscapeDataString(query)}&limit={limit}&api_key={apiKey}";
+            var url = $"{ApiBase}/parks?q={Uri.EscapeDataString(query)}&limit={limit}&api_key={Uri.EscapeDataString(apiKey)}";
             var response = await Http.GetAsync(url);
             response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync();
@@ -93,7 +93,7 @@ public class NpsApiClient
                     images.Add(new ImageSourceInfo
                     {
                         Source = ImageSource.NationalParks,
-                        Id = $"{park.ParkCode}_{images.Count}",
+                        Id = $"{park.ParkCode}_{StableUrlHash(img.Url)}",
                         Title = $"{park.FullName}: {img.Caption ?? img.AltText ?? "Photo"}",
                         Description = img.Caption ?? "",
                         ThumbnailUrl = img.Url,   // NPS doesn't provide separate thumbnails
@@ -127,7 +127,7 @@ public class NpsApiClient
                 return null;
             }
 
-            var url = $"{ApiBase}/parks?parkCode={Uri.EscapeDataString(parkCode)}&api_key={apiKey}";
+            var url = $"{ApiBase}/parks?parkCode={Uri.EscapeDataString(parkCode)}&api_key={Uri.EscapeDataString(apiKey)}";
             var response = await Http.GetAsync(url);
             response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync();
@@ -140,7 +140,6 @@ public class NpsApiClient
 
             if (park.Images != null)
             {
-                int idx = 0;
                 foreach (var img in park.Images)
                 {
                     if (string.IsNullOrEmpty(img.Url)) continue;
@@ -148,7 +147,7 @@ public class NpsApiClient
                     images.Add(new ImageSourceInfo
                     {
                         Source = ImageSource.NationalParks,
-                        Id = $"{parkCode}_{idx++}",
+                        Id = $"{parkCode}_{StableUrlHash(img.Url)}",
                         Title = img.Caption ?? img.AltText ?? $"{park.FullName} Photo",
                         Description = img.Caption ?? "",
                         ThumbnailUrl = img.Url,
@@ -166,6 +165,18 @@ public class NpsApiClient
             Console.WriteLine($"NPS API error (park {parkCode}): {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Short stable hash of the image URL. NPS provides no image IDs, and a
+    /// positional index changes whenever NPS reorders photos — which made
+    /// cache keys silently point at the wrong image.
+    /// </summary>
+    private static string StableUrlHash(string url)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(url));
+        return Convert.ToHexString(bytes)[..8].ToLowerInvariant();
     }
 }
 

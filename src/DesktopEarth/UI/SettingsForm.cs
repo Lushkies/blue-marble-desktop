@@ -452,15 +452,29 @@ public class SettingsForm : Form
 
     private DisplayConfig GetOrCreateDisplayConfig(string deviceName)
     {
-        var existing = _settings.DisplayConfigs.Find(c => c.DeviceName == deviceName);
-        if (existing != null) return existing;
-        var config = new DisplayConfig { DeviceName = deviceName };
-        _settings.DisplayConfigs.Add(config);
-        return config;
+        // Locked: the render thread enumerates DisplayConfigs concurrently
+        lock (_settings.DisplayConfigsLock)
+        {
+            var existing = _settings.DisplayConfigs.Find(c => c.DeviceName == deviceName);
+            if (existing != null) return existing;
+            var config = new DisplayConfig { DeviceName = deviceName };
+            _settings.DisplayConfigs.Add(config);
+            return config;
+        }
     }
 
     // Event fired when the form needs to be recreated (e.g., theme change)
     public event Action? RequestReopen;
+
+    /// <summary>
+    /// The DisplayConfig being edited when Per-Display mode is active, else null.
+    /// Grid selection restores must use this — restoring from global settings
+    /// would overwrite the monitor's saved image on the next debounced save.
+    /// </summary>
+    private DisplayConfig? ActiveDisplayConfig =>
+        _perDisplayRadio.Checked && !string.IsNullOrEmpty(_selectedMonitorDevice)
+            ? _settings.DisplayConfigs.Find(c => c.DeviceName == _selectedMonitorDevice)
+            : null;
 
     private void InitializeForm()
     {
@@ -481,6 +495,14 @@ public class SettingsForm : Form
         ShowInTaskbar = true;
         BackColor = Theme.FormBackground;
         ForeColor = Theme.PrimaryText;
+
+        // Esc closes the window (but not while a dropdown is open)
+        KeyPreview = true;
+        KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Escape && ActiveControl is not ComboBox { DroppedDown: true })
+                Close();
+        };
 
         _tabControl = new DarkTabControl
         {
@@ -882,7 +904,7 @@ public class SettingsForm : Form
 
         _presetsPanel.Controls.Add(new Label
         {
-            Text = "Any view can be saved as a preset.",
+            Text = "Presets save view and lighting settings (not the selected image).",
             Font = new Font("Segoe UI", 7.5f),
             ForeColor = Theme.SecondaryText,
             AutoSize = true,
@@ -1276,7 +1298,12 @@ public class SettingsForm : Form
         };
         _apodRefreshButton.Click += (_, _) =>
         {
-            if ((DateTime.Now - _lastApodRefresh).TotalSeconds < 5) return;
+            if ((DateTime.Now - _lastApodRefresh).TotalSeconds < 5)
+            {
+                _apodStatusLabel.Text = "Please wait a few seconds before refreshing.";
+                _apodStatusLabel.ForeColor = Theme.SecondaryText;
+                return;
+            }
             RefreshApodImages();
         };
         panel.Controls.Add(_apodRefreshButton);
@@ -1701,7 +1728,9 @@ public class SettingsForm : Form
             _settingsManager.ApplyAndSave(s =>
             {
                 s.CacheDurationDays = days;
-                s.EpicCacheDurationDays = Math.Min(days == 0 ? 0 : days, days == 0 ? 0 : Math.Max(days, 14));
+                // EPIC images arrive daily and age out fast — cap at 14 days
+                // (0 = keep forever)
+                s.EpicCacheDurationDays = days == 0 ? 0 : Math.Min(days, 14);
             });
         };
         cacheGroup.Controls.Add(cacheDurationCombo);
@@ -2211,7 +2240,13 @@ public class SettingsForm : Form
                     {
                         _epicLatestDateLabel.Text = $"Latest available: {latestDate:MMM d, yyyy}";
                         _epicLatestDateLabel.ForeColor = Theme.SuccessText;
-                        _epicDatePicker.MaxDate = latestDate;
+
+                        // Tightening MaxDate can clamp Value and fire ValueChanged;
+                        // mute it so no unrequested save/re-render happens
+                        bool wasLoading = _isLoading;
+                        _isLoading = true;
+                        try { _epicDatePicker.MaxDate = latestDate; }
+                        finally { _isLoading = wasLoading; }
                     });
                 }
                 catch { }
@@ -2299,7 +2334,7 @@ public class SettingsForm : Form
 
                     _epicGrid.SetImages(sourceInfos);
                     // Restore previously saved selection
-                    _epicGrid.SelectById(_settings.EpicSelectedImage);
+                    _epicGrid.SelectById(ActiveDisplayConfig?.EpicSelectedImage ?? _settings.EpicSelectedImage);
                     _epicStatusLabel.Text = $"{sourceInfos.Count} image{(sourceInfos.Count != 1 ? "s" : "")} available.";
                     _epicStatusLabel.ForeColor = Theme.SuccessText;
                 });
@@ -2355,7 +2390,7 @@ public class SettingsForm : Form
 
                     _apodGrid.SetImages(images);
                     // Restore previously saved selection
-                    _apodGrid.SelectById(_settings.ApodSelectedImageId);
+                    _apodGrid.SelectById(ActiveDisplayConfig?.ApodSelectedImageId ?? _settings.ApodSelectedImageId);
                     _apodStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} loaded.";
                     _apodStatusLabel.ForeColor = Theme.SuccessText;
                 });
@@ -2418,7 +2453,7 @@ public class SettingsForm : Form
 
                     _npsGrid.SetImages(images);
                     // Restore previously saved selection
-                    _npsGrid.SelectById(_settings.NpsSelectedImageId);
+                    _npsGrid.SelectById(ActiveDisplayConfig?.NpsSelectedImageId ?? _settings.NpsSelectedImageId);
                     _npsStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
                     _npsStatusLabel.ForeColor = Theme.SuccessText;
                 });
@@ -2469,7 +2504,7 @@ public class SettingsForm : Form
 
                     _smithsonianGrid.SetImages(images);
                     // Restore previously saved selection
-                    _smithsonianGrid.SelectById(_settings.SmithsonianSelectedId);
+                    _smithsonianGrid.SelectById(ActiveDisplayConfig?.SmithsonianSelectedId ?? _settings.SmithsonianSelectedId);
                     _smithsonianStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
                     _smithsonianStatusLabel.ForeColor = Theme.SuccessText;
                 });
@@ -2504,11 +2539,12 @@ public class SettingsForm : Form
                 // Record the cached file location so rotation/export can find the
                 // image even for sources with non-standard cache layouts (EPIC)
                 fav.LocalCachePath = _imageCache.GetCachedPathForFavorite(fav) ?? "";
+                fav.QualityTier = img.QualityTier;
                 _settings.Favorites.Add(fav);
                 img.IsFavorited = true;
             }
         }
-        SchedulePreview(); // Persist
+        _settingsManager.Save(); // Persist without re-rendering the wallpaper
     }
 
     // -- HELPERS --
@@ -2729,6 +2765,15 @@ public class SettingsForm : Form
             DateTime.TryParse(_settings.EpicSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var epicDate))
             SetPickerValueClamped(_epicDatePicker, epicDate);
+
+        // APOD — without this a saved "Choose date" selection is silently
+        // reverted by the next debounced save
+        _apodLatestRadio.Checked = _settings.ApodUseLatest;
+        _apodDateRadio.Checked = !_settings.ApodUseLatest;
+        if (!string.IsNullOrEmpty(_settings.ApodSelectedDate) &&
+            DateTime.TryParse(_settings.ApodSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var apodDate))
+            SetPickerValueClamped(_apodDatePicker, apodDate);
 
         // API key
         _apiKeyBox.Text = _settings.ApiDataGovKey;
@@ -3214,7 +3259,7 @@ public class SettingsForm : Form
                             f => f.Source == ImageSource.NasaGallery && f.ImageId == img.Id);
 
                     _nasaGalleryGrid.SetImages(images);
-                    _nasaGalleryGrid.SelectById(_settings.NasaGallerySelectedId);
+                    _nasaGalleryGrid.SelectById(ActiveDisplayConfig?.NasaGallerySelectedId ?? _settings.NasaGallerySelectedId);
                     _nasaGalleryStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found. No API key needed.";
                     _nasaGalleryStatusLabel.ForeColor = Theme.SuccessText;
                 });
@@ -3332,7 +3377,7 @@ public class SettingsForm : Form
         _userImagesGrid.SetImages(images);
 
         // Restore previously saved selection
-        _userImagesGrid.SelectById(_settings.UserImageSelectedId);
+        _userImagesGrid.SelectById(ActiveDisplayConfig?.UserImageSelectedId ?? _settings.UserImageSelectedId);
 
         int count = images.Count;
         _userImagesStatusLabel.Text = $"{count} user image{(count != 1 ? "s" : "")}";
@@ -3471,6 +3516,7 @@ public class SettingsForm : Form
                             Title = !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId,
                             ThumbnailUrl = fav.ThumbnailUrl,
                             FullImageUrl = fav.FullImageUrl,
+                            QualityTier = fav.QualityTier,
                             IsFavorited = true
                         }).ToList();
 
@@ -3522,6 +3568,7 @@ public class SettingsForm : Form
             Title = !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId,
             ThumbnailUrl = fav.ThumbnailUrl,
             FullImageUrl = fav.FullImageUrl,
+            QualityTier = fav.QualityTier,
             IsFavorited = true
         }).ToList();
 
@@ -3626,9 +3673,15 @@ public class SettingsForm : Form
             _settingsManager.Save();
     }
 
-    private void ExportFavorites()
+    private async void ExportFavorites()
     {
-        if (_settings.Favorites.Count == 0)
+        List<FavoriteImage> favorites;
+        lock (_settings.FavoritesLock)
+        {
+            favorites = _settings.Favorites.ToList();
+        }
+
+        if (favorites.Count == 0)
         {
             MessageBox.Show("No favorites to export.", "Export Favorites",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -3641,44 +3694,48 @@ public class SettingsForm : Form
             UseDescriptionForTitle = true
         };
         if (dialog.ShowDialog() != DialogResult.OK) return;
+        string destDir = dialog.SelectedPath;
 
-        int exported = 0;
-        foreach (var fav in _settings.Favorites)
+        // Copy off the UI thread — dozens of file copies would freeze the window
+        int exported = 0, skipped = 0;
+        await Task.Run(() =>
         {
-            string? cachedPath = null;
+            foreach (var fav in favorites)
+            {
+                // For user images, find in user_images directory
+                string? cachedPath = fav.Source == ImageSource.UserImages
+                    ? _userImageManager.GetImagePath(fav.ImageId)
+                    : _imageCache.GetCachedPathForFavorite(fav);
 
-            // For user images, find in user_images directory
-            if (fav.Source == ImageSource.UserImages)
-            {
-                cachedPath = _userImageManager.GetImagePath(fav.ImageId);
-            }
-            else
-            {
-                cachedPath = _imageCache.GetCachedPathForFavorite(fav);
-            }
+                if (cachedPath == null || !File.Exists(cachedPath))
+                {
+                    skipped++;
+                    continue;
+                }
 
-            if (cachedPath != null && File.Exists(cachedPath))
-            {
                 var safeName = ImageCache.SanitizeFileName(
                     !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId);
-                var destPath = Path.Combine(dialog.SelectedPath,
-                    safeName + Path.GetExtension(cachedPath));
+                var destPath = Path.Combine(destDir, safeName + Path.GetExtension(cachedPath));
 
                 // Avoid overwriting
                 int counter = 1;
                 while (File.Exists(destPath))
                 {
-                    destPath = Path.Combine(dialog.SelectedPath,
+                    destPath = Path.Combine(destDir,
                         $"{safeName}_{counter}{Path.GetExtension(cachedPath)}");
                     counter++;
                 }
 
                 try { File.Copy(cachedPath, destPath); exported++; }
-                catch { }
+                catch { skipped++; }
             }
-        }
+        });
+        if (IsDisposed) return;
 
-        MessageBox.Show($"Exported {exported} of {_settings.Favorites.Count} favorites.",
+        MessageBox.Show(skipped == 0
+                ? $"Exported {exported} favorite{(exported != 1 ? "s" : "")}."
+                : $"Exported {exported} of {favorites.Count} favorites.\n" +
+                  $"{skipped} could not be exported (image not in the local cache).",
             "Export Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
@@ -3717,6 +3774,10 @@ public class SettingsForm : Form
 
         await Task.Run(() => _userImageManager.DeleteAllImages());
         if (IsDisposed) return;
+
+        // Clear the dangling selection so rendering doesn't chase deleted files
+        _settings.UserImageSelectedId = "";
+        _settings.UserImageSelectedPath = "";
 
         _settingsManager.Save();
         RefreshMyCollectionTab();

@@ -158,6 +158,10 @@ public class StillImageRenderer : IDisposable
         _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
             TextureTarget.Texture2D, _renderTexture, 0);
 
+        var fbStatus = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        if (fbStatus != GLEnum.FramebufferComplete)
+            throw new Exception($"Framebuffer not complete: {fbStatus}");
+
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
