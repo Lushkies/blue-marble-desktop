@@ -26,7 +26,7 @@ public class EpicImageCache
         // Parse date from image's Date field
         string dateFolder;
         if (DateTime.TryParse(image.Date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
-            dateFolder = dt.ToString("yyyy-MM-dd");
+            dateFolder = dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         else
             dateFolder = "unknown";
 

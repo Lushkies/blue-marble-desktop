@@ -29,8 +29,8 @@ public class ApodApiClient
     {
         try
         {
-            var endDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
-            var startDate = DateTime.UtcNow.AddDays(-(days - 1)).ToString("yyyy-MM-dd");
+            var endDate = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            var startDate = DateTime.UtcNow.AddDays(-(days - 1)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
             var url = $"{ApiBase}?api_key={apiKey}&start_date={startDate}&end_date={endDate}&thumbs=true";
 
             var response = await Http.GetAsync(url);

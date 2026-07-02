@@ -26,6 +26,17 @@ public class SettingsManager
     /// </summary>
     public bool SkipFirstRender { get; private set; }
 
+    /// <summary>
+    /// Runtime-only flag: true when existing settings files could not be read and
+    /// settings were reset to defaults. Program.cs warns the user when this is set.
+    /// </summary>
+    public bool SettingsWereReset { get; private set; }
+
+    // True once the primary settings file is known to parse cleanly this session.
+    // Guards the backup step in Save() so a corrupt primary is never copied over
+    // the last good backup.
+    private bool _primaryKnownGood;
+
     private static readonly object SaveLock = new();
 
     public event Action? SettingsChanged;
@@ -38,6 +49,7 @@ public class SettingsManager
         if (File.Exists(SettingsPath))
         {
             loaded = TryLoadFromFile(SettingsPath);
+            _primaryKnownGood = loaded;
         }
 
         // If primary failed, try backup
@@ -55,6 +67,14 @@ public class SettingsManager
         // True first run (no settings files exist)
         if (!loaded)
         {
+            // If files existed but could not be read, keep a copy for recovery
+            // and let Program.cs warn the user instead of resetting silently.
+            if (File.Exists(SettingsPath) || File.Exists(SettingsBackupPath))
+            {
+                QuarantineCorruptSettings();
+                SettingsWereReset = true;
+            }
+
             Settings = new AppSettings();
             Settings.HasLaunchedBefore = true;
             Settings.DarkModeEnabled = IsWindowsDarkTheme();
@@ -245,20 +265,39 @@ public class SettingsManager
                 // Atomic save: write to temp file, backup existing, then rename
                 File.WriteAllText(SettingsTempPath, json);
 
-                // Backup current settings before replacing
-                if (File.Exists(SettingsPath))
+                // Backup current settings before replacing — but only when the
+                // primary is known to have parsed cleanly this session, so a
+                // corrupt file is never copied over the last good backup.
+                if (_primaryKnownGood && File.Exists(SettingsPath))
                 {
                     File.Copy(SettingsPath, SettingsBackupPath, overwrite: true);
                 }
 
                 // Atomic rename (on NTFS this replaces the target atomically)
                 File.Move(SettingsTempPath, SettingsPath, overwrite: true);
+                _primaryKnownGood = true;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Warning: Could not save settings. ({ex.Message})");
             }
         }
+    }
+
+    /// <summary>
+    /// Preserve unreadable settings files as settings.json.corrupt so the user
+    /// (or a future version) can recover favorites and presets from them.
+    /// </summary>
+    private static void QuarantineCorruptSettings()
+    {
+        try
+        {
+            if (File.Exists(SettingsPath))
+                File.Copy(SettingsPath, SettingsPath + ".corrupt", overwrite: true);
+            else if (File.Exists(SettingsBackupPath))
+                File.Copy(SettingsBackupPath, SettingsPath + ".corrupt", overwrite: true);
+        }
+        catch { /* Best effort — never block startup on quarantine */ }
     }
 
     public void ApplyAndSave(Action<AppSettings> modify)

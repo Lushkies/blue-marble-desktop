@@ -28,6 +28,17 @@ if (!isNewInstance)
 var settingsManager = new SettingsManager();
 settingsManager.Load();
 
+if (settingsManager.SettingsWereReset)
+{
+    MessageBox.Show(
+        "Your settings file could not be read, so settings were reset to defaults.\n\n" +
+        "A copy of the unreadable file was saved as settings.json.corrupt in the\n" +
+        "BlueMarbleDesktop folder, in case you want to recover favorites from it.",
+        "Blue Marble Desktop - Settings Reset",
+        MessageBoxButtons.OK,
+        MessageBoxIcon.Warning);
+}
+
 // ─── Locate assets ───
 AssetLocator assets;
 try

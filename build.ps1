@@ -73,7 +73,7 @@ function Build-Target($rid, $outputDir) {
     $exePath = Join-Path $publishDir "BlueMarbleDesktop.exe"
     if (Test-Path $exePath) {
         $size = (Get-Item $exePath).Length / 1MB
-        Write-Host "Build complete: $exePath ({0:N1} MB)" -f $size -ForegroundColor Green
+        Write-Host ("Build complete: {0} ({1:N1} MB)" -f $exePath, $size) -ForegroundColor Green
     }
 
     # List output

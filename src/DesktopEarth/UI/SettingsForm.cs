@@ -206,10 +206,18 @@ public class SettingsForm : Form
             ApplyLivePreview();
         };
 
+        // try/finally so an exception mid-load can never leave _isLoading stuck
+        // true (which would silently disable all saving until the form reopens)
         _isLoading = true;
-        InitializeForm();
-        LoadCurrentSettings();
-        _isLoading = false;
+        try
+        {
+            InitializeForm();
+            LoadCurrentSettings();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
     }
 
     private void SchedulePreview()
@@ -292,13 +300,13 @@ public class SettingsForm : Form
         // EPIC
         s.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
         s.EpicUseLatest = _epicLatestRadio.Checked;
-        s.EpicSelectedDate = _epicDatePicker.Value.ToString("yyyy-MM-dd");
+        s.EpicSelectedDate = _epicDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         if (_epicGrid.SelectedImage != null)
             s.EpicSelectedImage = _epicGrid.SelectedImage.Id;
 
         // APOD
         s.ApodUseLatest = _apodLatestRadio.Checked;
-        s.ApodSelectedDate = _apodDatePicker.Value.ToString("yyyy-MM-dd");
+        s.ApodSelectedDate = _apodDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         if (_apodGrid.SelectedImage != null)
         {
             s.ApodSelectedImageId = _apodGrid.SelectedImage.Id;
@@ -382,13 +390,13 @@ public class SettingsForm : Form
         // EPIC
         config.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
         config.EpicUseLatest = _epicLatestRadio.Checked;
-        config.EpicSelectedDate = _epicDatePicker.Value.ToString("yyyy-MM-dd");
+        config.EpicSelectedDate = _epicDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         if (_epicGrid.SelectedImage != null)
             config.EpicSelectedImage = _epicGrid.SelectedImage.Id;
 
         // APOD
         config.ApodUseLatest = _apodLatestRadio.Checked;
-        config.ApodSelectedDate = _apodDatePicker.Value.ToString("yyyy-MM-dd");
+        config.ApodSelectedDate = _apodDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         if (_apodGrid.SelectedImage != null)
         {
             config.ApodSelectedImageId = _apodGrid.SelectedImage.Id;
@@ -872,11 +880,17 @@ public class SettingsForm : Form
             if (_isLoading || _locationCombo.SelectedIndex <= 0) return;
             var preset = LocationPresets[_locationCombo.SelectedIndex];
             _isLoading = true;
-            _longitudeSlider.Value = Math.Clamp((int)preset.Lon, -180, 180);
-            _longitudeValue.Text = preset.Lon.ToString("F0") + "\u00b0";
-            _latitudeSlider.Value = Math.Clamp((int)preset.Lat, -60, 60);
-            _latitudeValue.Text = preset.Lat.ToString("F0") + "\u00b0";
-            _isLoading = false;
+            try
+            {
+                _longitudeSlider.Value = Math.Clamp((int)preset.Lon, -180, 180);
+                _longitudeValue.Text = preset.Lon.ToString("F0") + "\u00b0";
+                _latitudeSlider.Value = Math.Clamp((int)preset.Lat, -60, 60);
+                _latitudeValue.Text = preset.Lat.ToString("F0") + "\u00b0";
+            }
+            finally
+            {
+                _isLoading = false;
+            }
             SchedulePreview();
         };
         panel.Controls.Add(_locationCombo);
@@ -1856,7 +1870,7 @@ public class SettingsForm : Form
             {
                 try
                 {
-                    var result = await _apodApi.GetByDateAsync(key, DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd"));
+                    var result = await _apodApi.GetByDateAsync(key, DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
                     if (IsDisposed) return;
                     try
                     {
@@ -2167,7 +2181,7 @@ public class SettingsForm : Form
 
         var imageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
         bool useLatest = _epicLatestRadio.Checked;
-        string date = _epicDatePicker.Value.ToString("yyyy-MM-dd");
+        string date = _epicDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
         Task.Run(async () =>
         {
@@ -2242,7 +2256,7 @@ public class SettingsForm : Form
 
         var apiKey = _settings.ApiDataGovKey;
         bool useLatest = _apodLatestRadio.Checked;
-        string date = _apodDatePicker.Value.ToString("yyyy-MM-dd");
+        string date = _apodDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         int recentDays = GetApodRecentDays();
 
         Task.Run(async () =>
@@ -2430,6 +2444,18 @@ public class SettingsForm : Form
 
     // -- HELPERS --
 
+    /// <summary>
+    /// Assign a DateTimePicker value clamped to its Min/MaxDate range.
+    /// MaxDate can be tightened asynchronously (e.g. EPIC's latest available
+    /// date arrives after load), and an out-of-range assignment throws.
+    /// </summary>
+    private static void SetPickerValueClamped(DateTimePicker picker, DateTime value)
+    {
+        if (value < picker.MinDate) value = picker.MinDate;
+        else if (value > picker.MaxDate) value = picker.MaxDate;
+        picker.Value = value;
+    }
+
     private static int CameraToZoomSlider(float distance)
     {
         if (distance <= 1.15f) return 100;
@@ -2447,8 +2473,21 @@ public class SettingsForm : Form
             return;
         }
 
+        // try/finally so an exception mid-load can never leave _isLoading stuck
+        // true (which would silently disable all saving until the form reopens)
         _isLoading = true;
+        try
+        {
+            LoadAppearanceFromDisplayConfigCore(config);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
 
+    private void LoadAppearanceFromDisplayConfigCore(DisplayConfig config)
+    {
         _displayModeCombo.SelectedIndex = Math.Min((int)config.DisplayMode, _displayModeCombo.Items.Count - 1);
         _stillImageSourceCombo.SelectedIndex = Math.Min((int)config.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
         _longitudeSlider.Value = Math.Clamp((int)config.LongitudeOffset, -180, 180);
@@ -2477,7 +2516,7 @@ public class SettingsForm : Form
         if (!string.IsNullOrEmpty(config.EpicSelectedDate) &&
             DateTime.TryParse(config.EpicSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var epicDate))
-            _epicDatePicker.Value = epicDate;
+            SetPickerValueClamped(_epicDatePicker, epicDate);
 
         // APOD
         _apodLatestRadio.Checked = config.ApodUseLatest;
@@ -2485,7 +2524,7 @@ public class SettingsForm : Form
         if (!string.IsNullOrEmpty(config.ApodSelectedDate) &&
             DateTime.TryParse(config.ApodSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var apodDate))
-            _apodDatePicker.Value = apodDate;
+            SetPickerValueClamped(_apodDatePicker, apodDate);
 
         // NPS
         if (!string.IsNullOrEmpty(config.NpsSearchQuery))
@@ -2508,14 +2547,25 @@ public class SettingsForm : Form
 
         _locationCombo.SelectedIndex = 0;
         UpdateModeVisibility();
-        _isLoading = false;
     }
 
     private void ResetToDefaults()
     {
         int mode = _displayModeCombo.SelectedIndex;
         _isLoading = true;
+        try
+        {
+            ResetToDefaultsCore(mode);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        SchedulePreview();
+    }
 
+    private void ResetToDefaultsCore(int mode)
+    {
         switch (mode)
         {
             case 0: // Globe
@@ -2562,15 +2612,25 @@ public class SettingsForm : Form
                 _offsetYValue.Text = "0";
                 break;
         }
-
-        _isLoading = false;
-        SchedulePreview();
     }
 
     private void LoadAppearanceFromGlobalSettings()
     {
+        // try/finally so an exception mid-load can never leave _isLoading stuck
+        // true (which would silently disable all saving until the form reopens)
         _isLoading = true;
+        try
+        {
+            LoadAppearanceFromGlobalSettingsCore();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
 
+    private void LoadAppearanceFromGlobalSettingsCore()
+    {
         _displayModeCombo.SelectedIndex = Math.Min((int)_settings.DisplayMode, _displayModeCombo.Items.Count - 1);
         _stillImageSourceCombo.SelectedIndex = Math.Min((int)_settings.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
         _longitudeSlider.Value = Math.Clamp((int)_settings.LongitudeOffset, -180, 180);
@@ -2599,7 +2659,7 @@ public class SettingsForm : Form
         if (!string.IsNullOrEmpty(_settings.EpicSelectedDate) &&
             DateTime.TryParse(_settings.EpicSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var epicDate))
-            _epicDatePicker.Value = epicDate;
+            SetPickerValueClamped(_epicDatePicker, epicDate);
 
         // API key
         _apiKeyBox.Text = _settings.ApiDataGovKey;
@@ -2628,15 +2688,27 @@ public class SettingsForm : Form
 
         _locationCombo.SelectedIndex = 0;
         UpdateModeVisibility();
-        _isLoading = false;
     }
 
     private void LoadCurrentSettings()
     {
         LoadAppearanceFromGlobalSettings();
 
+        // try/finally so an exception mid-load can never leave _isLoading stuck
+        // true (which would silently disable all saving until the form reopens)
         _isLoading = true;
+        try
+        {
+            LoadCurrentSettingsCore();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
 
+    private void LoadCurrentSettingsCore()
+    {
         _updateIntervalCombo.SelectedIndex = _settings.UpdateIntervalSeconds switch
         {
             60 => 0, 120 => 1, 300 => 2, 600 => 3,
@@ -2670,8 +2742,6 @@ public class SettingsForm : Form
         {
             LoadAppearanceFromDisplayConfig(_selectedMonitorDevice);
         }
-
-        _isLoading = false;
     }
 
     private static int FindNearestIntervalIndex(int seconds)
@@ -2836,8 +2906,24 @@ public class SettingsForm : Form
         if (idx < 0 || idx >= _settings.Presets.Count) return;
 
         var preset = _settings.Presets[idx];
-        _isLoading = true;
 
+        // try/finally so an exception mid-load can never leave _isLoading stuck
+        // true (which would silently disable all saving until the form reopens)
+        _isLoading = true;
+        try
+        {
+            LoadPresetCore(preset);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        UpdateModeVisibility();
+        SchedulePreview();
+    }
+
+    private void LoadPresetCore(SettingsPreset preset)
+    {
         _displayModeCombo.SelectedIndex = Math.Min((int)preset.DisplayMode, _displayModeCombo.Items.Count - 1);
         _stillImageSourceCombo.SelectedIndex = Math.Min((int)preset.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
         _longitudeSlider.Value = Math.Clamp((int)preset.LongitudeOffset, -180, 180);
@@ -2860,10 +2946,6 @@ public class SettingsForm : Form
         if (preset.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
         else _topoRadio.Checked = true;
         _epicTypeCombo.SelectedIndex = (int)preset.EpicImageType;
-
-        _isLoading = false;
-        UpdateModeVisibility();
-        SchedulePreview();
     }
 
     private void DeletePreset()

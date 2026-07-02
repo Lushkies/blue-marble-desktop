@@ -96,7 +96,7 @@ public class NasaGalleryApiClient
                     string displayDate = "";
                     if (DateTime.TryParse(dateCreated, System.Globalization.CultureInfo.InvariantCulture,
                             System.Globalization.DateTimeStyles.None, out var dt))
-                        displayDate = dt.ToString("yyyy-MM-dd");
+                        displayDate = dt.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
                     images.Add(new ImageSourceInfo
                     {

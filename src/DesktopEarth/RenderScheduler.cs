@@ -3,6 +3,7 @@ using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using DesktopEarth.Rendering;
 
 namespace DesktopEarth;
@@ -57,18 +58,27 @@ public class RenderScheduler : IDisposable
     {
         public DisplayMode Mode;
         public ImageStyle Style;
+
+        // Persistent settings snapshot for this display. Renderers capture it at
+        // construction and read it at render time, so it must be refreshed in
+        // place each cycle — a fresh object per cycle would leave the cached
+        // renderers reading stale values forever.
+        public readonly AppSettings Settings = new();
+
         public EarthRenderer? Earth;
         public FlatMapRenderer? Flat;
         public MoonRenderer? Moon;
         public StillImageRenderer? Still;
 
-        public void Dispose()
+        public void DisposeRenderers()
         {
             Earth?.Dispose(); Earth = null;
             Flat?.Dispose(); Flat = null;
             Moon?.Dispose(); Moon = null;
             Still?.Dispose(); Still = null;
         }
+
+        public void Dispose() => DisposeRenderers();
     }
     private readonly Dictionary<string, PerDisplayState> _perDisplayRenderers = new();
 
@@ -82,12 +92,37 @@ public class RenderScheduler : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "BlueMarbleDesktop", "wallpaper.bmp");
 
-        // On subsequent launches, don't render until user explicitly changes something
-        if (_settingsManager.SkipFirstRender)
+        // On subsequent launches, preserve the existing wallpaper by holding off
+        // scheduled renders — but only when showing a static still image. Live
+        // modes (globe/flat map/moon) and auto-rotate must keep updating on
+        // schedule, otherwise a reboot silently freezes them.
+        if (_settingsManager.SkipFirstRender && IsStaticStillImage(_settingsManager.Settings))
             _userHasTriggered = false;
 
         // Re-render whenever settings change
         _settingsManager.SettingsChanged += TriggerUserUpdate;
+    }
+
+    /// <summary>
+    /// True when every active display shows a still image without auto-rotation —
+    /// the only configuration where skipping scheduled renders preserves anything.
+    /// </summary>
+    private static bool IsStaticStillImage(AppSettings settings)
+    {
+        if (settings.MultiMonitorMode == MultiMonitorMode.PerDisplay)
+        {
+            foreach (var screen in MonitorManager.GetAllScreens())
+            {
+                var config = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
+                var mode = config?.DisplayMode ?? settings.DisplayMode;
+                var rotate = config?.RandomRotationEnabled ?? settings.RandomRotationEnabled;
+                if (mode != DisplayMode.StillImage || rotate)
+                    return false;
+            }
+            return true;
+        }
+
+        return settings.DisplayMode == DisplayMode.StillImage && !settings.RandomRotationEnabled;
     }
 
     public void Start()
@@ -228,9 +263,9 @@ public class RenderScheduler : IDisposable
                 return;
             }
 
-            // On subsequent launches, don't render until user explicitly triggers an update.
-            // This preserves the existing wallpaper indefinitely until the user changes settings
-            // or clicks "Update Wallpaper Now" in the tray menu.
+            // On subsequent launches with a static still image, don't render until
+            // the user explicitly triggers an update — this preserves the existing
+            // wallpaper. Live modes and auto-rotate never set this gate.
             if (!_userHasTriggered)
             {
                 _renderNowSignal.Reset(); // Drain any stale signals
@@ -257,24 +292,35 @@ public class RenderScheduler : IDisposable
                 // Re-read settings
                 settings = _settingsManager.Settings;
 
+                bool applied;
                 if (settings.MultiMonitorMode == MultiMonitorMode.PerDisplay)
                 {
                     // Per-display rendering: render each monitor independently
-                    RenderPerDisplay(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer,
-                        ref stillImageRenderer, ref currentMode, ref currentImageStyle);
+                    applied = RenderPerDisplay(gl, settings);
                 }
                 else
                 {
+                    // Leaving PerDisplay mode: release the per-display renderer cache
+                    if (_perDisplayRenderers.Count > 0)
+                    {
+                        foreach (var state in _perDisplayRenderers.Values)
+                            state.Dispose();
+                        _perDisplayRenderers.Clear();
+                    }
+
                     // Standard rendering: single image for all monitors
                     (renderWidth, renderHeight) = MonitorManager.GetRenderResolution(settings);
 
-                    // Re-initialize renderers if display mode or image style changed
+                    // Re-initialize renderers if display mode or image style changed.
+                    // currentMode/currentImageStyle are committed only after init
+                    // succeeds, so a transient failure retries next cycle instead of
+                    // leaving null renderers behind permanently.
                     if (settings.DisplayMode != currentMode || settings.ImageStyle != currentImageStyle)
                     {
-                        currentMode = settings.DisplayMode;
-                        currentImageStyle = settings.ImageStyle;
                         DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
                         InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
+                        currentMode = settings.DisplayMode;
+                        currentImageStyle = settings.ImageStyle;
                     }
 
                     // Handle image rotation for still image sources (only on timer ticks, not user-triggered renders)
@@ -287,7 +333,7 @@ public class RenderScheduler : IDisposable
                     string modeName = GetModeName(settings);
                     ReportStatus($"Rendering {modeName}...");
 
-                    byte[] pixels;
+                    byte[]? pixels;
                     if (settings.DisplayMode == DisplayMode.StillImage)
                     {
                         if (settings.StillImageSource == ImageSource.NasaEpic)
@@ -311,13 +357,23 @@ public class RenderScheduler : IDisposable
                         ClearCurrentImage(); // Globe/Flat Map/Moon are not favoritable
                     }
 
-                    Directory.CreateDirectory(Path.GetDirectoryName(_wallpaperPath)!);
-                    SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
-                    WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
+                    // Null means nothing could be rendered (offline, empty cache,
+                    // missing selection) — keep the existing wallpaper instead of
+                    // applying a black frame over it.
+                    applied = pixels != null;
+                    if (pixels != null)
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(_wallpaperPath)!);
+                        SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
+                        WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
+                    }
                 }
 
+                // Advance the schedule even when nothing was applied, so failures
+                // retry on the next interval rather than in a tight loop.
                 lastUpdate = DateTime.UtcNow;
-                ReportStatus($"Wallpaper updated at {DateTime.Now:HH:mm:ss}");
+                if (applied)
+                    ReportStatus($"Wallpaper updated at {DateTime.Now:HH:mm:ss}");
             }
             catch (Exception ex)
             {
@@ -360,13 +416,10 @@ public class RenderScheduler : IDisposable
         _ => "earth"
     };
 
-    private void RenderPerDisplay(GL gl, AppSettings settings,
-        ref EarthRenderer? earthRenderer, ref FlatMapRenderer? flatMapRenderer, ref MoonRenderer? moonRenderer,
-        ref StillImageRenderer? stillImageRenderer,
-        ref DisplayMode currentMode, ref ImageStyle currentImageStyle)
+    private bool RenderPerDisplay(GL gl, AppSettings settings)
     {
         var screens = MonitorManager.GetAllScreens();
-        if (screens.Length == 0) return;
+        if (screens.Length == 0) return false;
 
         // Get virtual desktop bounds for composite
         var (vdWidth, vdHeight) = MonitorManager.GetVirtualDesktopSize();
@@ -379,8 +432,22 @@ public class RenderScheduler : IDisposable
 
         ReportStatus($"Rendering per-display ({screens.Length} monitors)...");
 
-        // Create composite image (filled black)
+        // Create composite image, seeded from the previous wallpaper when the
+        // layout matches — a display that fails to render this cycle keeps its
+        // last image instead of going black.
         using var composite = new SixLabors.ImageSharp.Image<Rgba32>(vdWidth, vdHeight, new Rgba32(0, 0, 0, 255));
+        try
+        {
+            if (File.Exists(_wallpaperPath))
+            {
+                using var previous = SixLabors.ImageSharp.Image.Load<Rgba32>(_wallpaperPath);
+                if (previous.Width == vdWidth && previous.Height == vdHeight)
+                    composite.Mutate(x => x.DrawImage(previous, new SixLabors.ImageSharp.Point(0, 0), 1f));
+            }
+        }
+        catch { /* Unreadable previous wallpaper — start from black */ }
+
+        bool anyRendered = false;
 
         foreach (var screen in screens)
         {
@@ -390,71 +457,26 @@ public class RenderScheduler : IDisposable
             // Find per-display config or use global defaults
             var displayConfig = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
 
-            // Create temporary settings for this display
-            var displaySettings = new AppSettings
+            var deviceName = screen.DeviceName;
+            bool isNew = !_perDisplayRenderers.TryGetValue(deviceName, out var displayState);
+            if (isNew)
             {
-                DisplayMode = displayConfig?.DisplayMode ?? settings.DisplayMode,
-                StillImageSource = displayConfig?.StillImageSource ?? settings.StillImageSource,
-                ZoomLevel = displayConfig?.ZoomLevel ?? settings.ZoomLevel,
-                FieldOfView = displayConfig?.FieldOfView ?? settings.FieldOfView,
-                CameraTilt = displayConfig?.CameraTilt ?? settings.CameraTilt,
-                LongitudeOffset = displayConfig?.LongitudeOffset ?? settings.LongitudeOffset,
-                ImageOffsetX = displayConfig?.ImageOffsetX ?? settings.ImageOffsetX,
-                ImageOffsetY = displayConfig?.ImageOffsetY ?? settings.ImageOffsetY,
-                NightLightsEnabled = displayConfig?.NightLightsEnabled ?? settings.NightLightsEnabled,
-                NightLightsBrightness = displayConfig?.NightLightsBrightness ?? settings.NightLightsBrightness,
-                AmbientLight = displayConfig?.AmbientLight ?? settings.AmbientLight,
-                ImageStyle = displayConfig?.ImageStyle ?? settings.ImageStyle,
-                EpicImageType = displayConfig?.EpicImageType ?? settings.EpicImageType,
-                EpicUseLatest = displayConfig?.EpicUseLatest ?? settings.EpicUseLatest,
-                EpicSelectedDate = displayConfig?.EpicSelectedDate ?? settings.EpicSelectedDate,
-                EpicSelectedImage = displayConfig?.EpicSelectedImage ?? settings.EpicSelectedImage,
-                // NASA APOD per-display
-                ApodRecentDays = displayConfig?.ApodRecentDays ?? settings.ApodRecentDays,
-                ApodUseLatest = displayConfig?.ApodUseLatest ?? settings.ApodUseLatest,
-                ApodSelectedDate = displayConfig?.ApodSelectedDate ?? settings.ApodSelectedDate,
-                ApodSelectedImageId = displayConfig?.ApodSelectedImageId ?? settings.ApodSelectedImageId,
-                ApodSelectedImageUrl = displayConfig?.ApodSelectedImageUrl ?? settings.ApodSelectedImageUrl,
-                // NPS per-display
-                NpsSearchQuery = displayConfig?.NpsSearchQuery ?? settings.NpsSearchQuery,
-                NpsSelectedParkCode = displayConfig?.NpsSelectedParkCode ?? settings.NpsSelectedParkCode,
-                NpsSelectedImageId = displayConfig?.NpsSelectedImageId ?? settings.NpsSelectedImageId,
-                NpsSelectedImageUrl = displayConfig?.NpsSelectedImageUrl ?? settings.NpsSelectedImageUrl,
-                // Smithsonian per-display
-                SmithsonianSearchQuery = displayConfig?.SmithsonianSearchQuery ?? settings.SmithsonianSearchQuery,
-                SmithsonianSelectedId = displayConfig?.SmithsonianSelectedId ?? settings.SmithsonianSelectedId,
-                SmithsonianSelectedImageUrl = displayConfig?.SmithsonianSelectedImageUrl ?? settings.SmithsonianSelectedImageUrl,
-                // NASA Gallery per-display
-                NasaGallerySearchQuery = displayConfig?.NasaGallerySearchQuery ?? settings.NasaGallerySearchQuery,
-                NasaGallerySelectedId = displayConfig?.NasaGallerySelectedId ?? settings.NasaGallerySelectedId,
-                NasaGallerySelectedImageUrl = displayConfig?.NasaGallerySelectedImageUrl ?? settings.NasaGallerySelectedImageUrl,
-                // API key (always from global settings)
-                ApiDataGovKey = settings.ApiDataGovKey,
-                // Auto-rotation per-display
-                RandomRotationEnabled = displayConfig?.RandomRotationEnabled ?? settings.RandomRotationEnabled,
-                RandomRotationSource = displayConfig?.RandomRotationSource ?? settings.RandomRotationSource,
-                Favorites = settings.Favorites, // Favorites are always global
-                // User images per-display
-                UserImageSelectedId = displayConfig?.UserImageSelectedId ?? settings.UserImageSelectedId,
-                UserImageSelectedPath = displayConfig?.UserImageSelectedPath ?? settings.UserImageSelectedPath,
-            };
+                displayState = new PerDisplayState();
+                _perDisplayRenderers[deviceName] = displayState;
+            }
+
+            // Refresh this display's persistent settings snapshot in place so the
+            // cached renderers (which captured it at construction) see current values
+            var displaySettings = displayState!.Settings;
+            CopyDisplaySettings(displaySettings, settings, displayConfig);
 
             // Reuse cached renderers for this display if mode/style haven't changed
-            var deviceName = screen.DeviceName;
-            if (!_perDisplayRenderers.TryGetValue(deviceName, out var displayState) ||
+            if (isNew ||
                 displayState.Mode != displaySettings.DisplayMode ||
                 displayState.Style != displaySettings.ImageStyle)
             {
                 // Mode or style changed (or first time) — dispose old and create new
-                displayState?.Dispose();
-                displayState = new PerDisplayState
-                {
-                    Mode = displaySettings.DisplayMode,
-                    Style = displaySettings.ImageStyle
-                };
-                _perDisplayRenderers[deviceName] = displayState;
-
-                // Initialize renderer for this display's mode
+                displayState.DisposeRenderers();
                 EarthRenderer? er = null; FlatMapRenderer? fr = null;
                 MoonRenderer? mr = null; StillImageRenderer? sr = null;
                 InitializeRenderers(gl, displaySettings, ref er, ref fr, ref mr, ref sr);
@@ -462,13 +484,9 @@ public class RenderScheduler : IDisposable
                 displayState.Flat = fr;
                 displayState.Moon = mr;
                 displayState.Still = sr;
+                displayState.Mode = displaySettings.DisplayMode;
+                displayState.Style = displaySettings.ImageStyle;
             }
-
-            // Use cached renderers
-            earthRenderer = displayState.Earth;
-            flatMapRenderer = displayState.Flat;
-            moonRenderer = displayState.Moon;
-            stillImageRenderer = displayState.Still;
 
             // Handle image rotation for this display (only on timer ticks, not user-triggered renders)
             if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled && _isTimerTick)
@@ -477,29 +495,38 @@ public class RenderScheduler : IDisposable
                 MaybeProactiveFetch(displaySettings);
             }
 
-            // Render this display
-            byte[] pixels;
+            // Render this display with its own cached renderers. These are never
+            // assigned into the single-mode renderer locals — aliasing them caused
+            // use-after-dispose and GPU leaks when switching multi-monitor modes.
+            byte[]? pixels;
             if (displaySettings.DisplayMode == DisplayMode.StillImage)
             {
+                var still = displayState.Still;
                 if (displaySettings.StillImageSource == ImageSource.NasaEpic)
                 {
-                    pixels = RenderEpicImage(gl, displaySettings, ref stillImageRenderer, sw, sh);
+                    pixels = RenderEpicImage(gl, displaySettings, ref still, sw, sh);
                 }
                 else
                 {
                     pixels = RenderImageSource(gl, displaySettings, displaySettings.StillImageSource,
-                        ref stillImageRenderer, sw, sh);
+                        ref still, sw, sh);
                 }
+                displayState.Still = still; // May have been lazily created
             }
             else
             {
                 pixels = displaySettings.DisplayMode switch
                 {
-                    DisplayMode.FlatMap => flatMapRenderer!.Render(sw, sh),
-                    DisplayMode.Moon when moonRenderer != null => moonRenderer.Render(sw, sh),
-                    _ => earthRenderer!.Render(sw, sh),
+                    DisplayMode.FlatMap => displayState.Flat!.Render(sw, sh),
+                    DisplayMode.Moon when displayState.Moon != null => displayState.Moon.Render(sw, sh),
+                    _ => displayState.Earth!.Render(sw, sh),
                 };
             }
+
+            // Nothing to show for this display — keep its previous content
+            if (pixels == null) continue;
+            byte[] px = pixels;
+            anyRendered = true;
 
             // Place rendered pixels into composite at the correct position
             int offsetX = screen.Bounds.Left - vdLeft;
@@ -521,7 +548,7 @@ public class RenderScheduler : IDisposable
                     for (int x = xStart; x < xEnd; x++)
                     {
                         int idx = srcRow + x * 4;
-                        destRow[offsetX + x] = new Rgba32(pixels[idx], pixels[idx + 1], pixels[idx + 2], 255);
+                        destRow[offsetX + x] = new Rgba32(px[idx], px[idx + 1], px[idx + 2], 255);
                     }
                 }
             });
@@ -536,10 +563,70 @@ public class RenderScheduler : IDisposable
             _perDisplayRenderers.Remove(key);
         }
 
+        // No display produced an image — keep the existing wallpaper untouched
+        if (!anyRendered) return false;
+
         // Save composite and set as spanned wallpaper
         Directory.CreateDirectory(Path.GetDirectoryName(_wallpaperPath)!);
         composite.SaveAsBmp(_wallpaperPath);
         WallpaperSetter.SetWallpaper(_wallpaperPath, MultiMonitorMode.SpanAcross);
+        return true;
+    }
+
+    /// <summary>
+    /// Copy the effective settings for one display (per-display config values with
+    /// global fallbacks) onto that display's persistent settings snapshot.
+    /// </summary>
+    private static void CopyDisplaySettings(AppSettings target, AppSettings settings, DisplayConfig? displayConfig)
+    {
+        target.DisplayMode = displayConfig?.DisplayMode ?? settings.DisplayMode;
+        target.StillImageSource = displayConfig?.StillImageSource ?? settings.StillImageSource;
+        target.ZoomLevel = displayConfig?.ZoomLevel ?? settings.ZoomLevel;
+        target.FieldOfView = displayConfig?.FieldOfView ?? settings.FieldOfView;
+        target.CameraTilt = displayConfig?.CameraTilt ?? settings.CameraTilt;
+        target.LongitudeOffset = displayConfig?.LongitudeOffset ?? settings.LongitudeOffset;
+        target.ImageOffsetX = displayConfig?.ImageOffsetX ?? settings.ImageOffsetX;
+        target.ImageOffsetY = displayConfig?.ImageOffsetY ?? settings.ImageOffsetY;
+        target.NightLightsEnabled = displayConfig?.NightLightsEnabled ?? settings.NightLightsEnabled;
+        target.NightLightsBrightness = displayConfig?.NightLightsBrightness ?? settings.NightLightsBrightness;
+        target.AmbientLight = displayConfig?.AmbientLight ?? settings.AmbientLight;
+        target.ImageStyle = displayConfig?.ImageStyle ?? settings.ImageStyle;
+        target.EpicImageType = displayConfig?.EpicImageType ?? settings.EpicImageType;
+        target.EpicUseLatest = displayConfig?.EpicUseLatest ?? settings.EpicUseLatest;
+        target.EpicSelectedDate = displayConfig?.EpicSelectedDate ?? settings.EpicSelectedDate;
+        target.EpicSelectedImage = displayConfig?.EpicSelectedImage ?? settings.EpicSelectedImage;
+        // NASA APOD per-display
+        target.ApodRecentDays = displayConfig?.ApodRecentDays ?? settings.ApodRecentDays;
+        target.ApodUseLatest = displayConfig?.ApodUseLatest ?? settings.ApodUseLatest;
+        target.ApodSelectedDate = displayConfig?.ApodSelectedDate ?? settings.ApodSelectedDate;
+        target.ApodSelectedImageId = displayConfig?.ApodSelectedImageId ?? settings.ApodSelectedImageId;
+        target.ApodSelectedImageUrl = displayConfig?.ApodSelectedImageUrl ?? settings.ApodSelectedImageUrl;
+        // NPS per-display
+        target.NpsSearchQuery = displayConfig?.NpsSearchQuery ?? settings.NpsSearchQuery;
+        target.NpsSelectedParkCode = displayConfig?.NpsSelectedParkCode ?? settings.NpsSelectedParkCode;
+        target.NpsSelectedImageId = displayConfig?.NpsSelectedImageId ?? settings.NpsSelectedImageId;
+        target.NpsSelectedImageUrl = displayConfig?.NpsSelectedImageUrl ?? settings.NpsSelectedImageUrl;
+        // Smithsonian per-display
+        target.SmithsonianSearchQuery = displayConfig?.SmithsonianSearchQuery ?? settings.SmithsonianSearchQuery;
+        target.SmithsonianSelectedId = displayConfig?.SmithsonianSelectedId ?? settings.SmithsonianSelectedId;
+        target.SmithsonianSelectedImageUrl = displayConfig?.SmithsonianSelectedImageUrl ?? settings.SmithsonianSelectedImageUrl;
+        // NASA Gallery per-display
+        target.NasaGallerySearchQuery = displayConfig?.NasaGallerySearchQuery ?? settings.NasaGallerySearchQuery;
+        target.NasaGallerySelectedId = displayConfig?.NasaGallerySelectedId ?? settings.NasaGallerySelectedId;
+        target.NasaGallerySelectedImageUrl = displayConfig?.NasaGallerySelectedImageUrl ?? settings.NasaGallerySelectedImageUrl;
+        // API key (always from global settings)
+        target.ApiDataGovKey = settings.ApiDataGovKey;
+        // Auto-rotation per-display
+        target.RandomRotationEnabled = displayConfig?.RandomRotationEnabled ?? settings.RandomRotationEnabled;
+        target.RandomRotationSource = displayConfig?.RandomRotationSource ?? settings.RandomRotationSource;
+        target.Favorites = settings.Favorites; // Favorites are always global
+        // Rotation exclusions and the ID blacklist are global-only settings —
+        // share them so per-display rotation honors them too
+        target.ExcludedRotationSources = settings.ExcludedRotationSources;
+        target.BlacklistedIdPrefixes = settings.BlacklistedIdPrefixes;
+        // User images per-display
+        target.UserImageSelectedId = displayConfig?.UserImageSelectedId ?? settings.UserImageSelectedId;
+        target.UserImageSelectedPath = displayConfig?.UserImageSelectedPath ?? settings.UserImageSelectedPath;
     }
 
     private void InitializeRenderers(GL gl, AppSettings settings,
@@ -583,8 +670,9 @@ public class RenderScheduler : IDisposable
     /// <summary>
     /// Render an image from a non-EPIC image source (APOD, NPS, Smithsonian, NASA Gallery).
     /// Downloads to cache if needed, falls back to cached images on error.
+    /// Returns null when nothing can be rendered so callers keep the existing wallpaper.
     /// </summary>
-    private byte[] RenderImageSource(GL gl, AppSettings settings, ImageSource source,
+    private byte[]? RenderImageSource(GL gl, AppSettings settings, ImageSource source,
         ref StillImageRenderer? renderer, int width, int height)
     {
         // Ensure renderer exists
@@ -642,7 +730,7 @@ public class RenderScheduler : IDisposable
                 }
             }
             ReportStatus("User images: No images available");
-            return new byte[width * height * 4];
+            return null;
         }
 
         // Resolve the selected image URL for this source
@@ -661,7 +749,7 @@ public class RenderScheduler : IDisposable
                 return renderer.Render(width, height);
             }
             ReportStatus($"{source}: No image selected");
-            return new byte[width * height * 4];
+            return null;
         }
 
         // For NASA Gallery, resolve the best image URL from the asset manifest
@@ -730,7 +818,7 @@ public class RenderScheduler : IDisposable
         }
 
         ReportStatus($"{source}: No images available");
-        return new byte[width * height * 4];
+        return null;
     }
 
     /// <summary>
@@ -817,8 +905,10 @@ public class RenderScheduler : IDisposable
     /// </summary>
     private List<string> GetFavoriteImagePaths(AppSettings settings)
     {
+        // Favorites are global — always lock the global settings instance, since a
+        // per-display snapshot carries its own lock object that nobody else uses.
         List<FavoriteImage> favs;
-        lock (settings.FavoritesLock)
+        lock (_settingsManager.Settings.FavoritesLock)
         {
             favs = settings.Favorites.ToList();
         }
@@ -966,7 +1056,7 @@ public class RenderScheduler : IDisposable
             {
                 // Fetch a random APOD from the last 2 years
                 var randomDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(1, 730));
-                var apodImage = await new ApodApiClient().GetByDateAsync(apiKey, randomDate.ToString("yyyy-MM-dd"));
+                var apodImage = await new ApodApiClient().GetByDateAsync(apiKey, randomDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
                 if (apodImage != null && !ImageCache.IsBlacklisted(apodImage.Id, blacklist))
                 {
                     var url = ApodApiClient.GetBestUrl(apodImage);
@@ -1082,8 +1172,9 @@ public class RenderScheduler : IDisposable
 
     /// <summary>
     /// Fetch (or use cached) EPIC image and render it via the StillImageRenderer.
+    /// Returns null when nothing can be rendered so callers keep the existing wallpaper.
     /// </summary>
-    private byte[] RenderEpicImage(GL gl, AppSettings settings, ref StillImageRenderer? renderer,
+    private byte[]? RenderEpicImage(GL gl, AppSettings settings, ref StillImageRenderer? renderer,
         int width, int height)
     {
         if (renderer == null)
@@ -1124,7 +1215,7 @@ public class RenderScheduler : IDisposable
             return renderer.Render(width, height);
         }
 
-        return new byte[width * height * 4];
+        return null;
     }
 
     /// <summary>
