@@ -40,15 +40,15 @@ public class AssetLocator
             if (style == ImageStyle.TopoBathy)
             {
                 string hdBathy = Path.Combine(hdDir, $"world.topo.bathy.2004{monthStr}.3x21600x10800.jpg");
-                if (File.Exists(hdBathy)) return hdBathy;
+                if (TryValidHdTexture(hdBathy)) return hdBathy;
             }
 
             string hdTopo = Path.Combine(hdDir, $"world.topo.2004{monthStr}.3x21600x10800.jpg");
-            if (File.Exists(hdTopo)) return hdTopo;
+            if (TryValidHdTexture(hdTopo)) return hdTopo;
 
             // HD bathy fallback
             string hdBathyFallback = Path.Combine(hdDir, $"world.topo.bathy.2004{monthStr}.3x21600x10800.jpg");
-            if (File.Exists(hdBathyFallback)) return hdBathyFallback;
+            if (TryValidHdTexture(hdBathyFallback)) return hdBathyFallback;
         }
 
         // Standard resolution textures
@@ -82,7 +82,7 @@ public class AssetLocator
         if (hdDir != null)
         {
             string hdNight = Path.Combine(hdDir, "BlackMarble_2016_3km.jpg");
-            if (File.Exists(hdNight)) return hdNight;
+            if (TryValidHdTexture(hdNight)) return hdNight;
         }
 
         // Standard resolution: prefer land_lights (city lights only)
@@ -99,5 +99,27 @@ public class AssetLocator
     {
         string path = Path.Combine(TexturesDir, "moon_8192.jpg");
         return File.Exists(path) ? path : throw new FileNotFoundException("No moon texture found");
+    }
+
+    /// <summary>
+    /// True when the HD texture exists and its image header parses. A downloaded
+    /// file that isn't a valid image (captive portal page, truncated download)
+    /// is quarantined as .corrupt so the shipped standard texture is used instead
+    /// of crashing renderer initialization on every launch.
+    /// </summary>
+    private static bool TryValidHdTexture(string path)
+    {
+        if (!File.Exists(path)) return false;
+        try
+        {
+            SixLabors.ImageSharp.Image.Identify(path);
+            return true;
+        }
+        catch
+        {
+            try { File.Move(path, path + ".corrupt", overwrite: true); } catch { }
+            Console.WriteLine($"AssetLocator: quarantined unreadable HD texture {Path.GetFileName(path)}");
+            return false;
+        }
     }
 }

@@ -21,8 +21,9 @@ public static class StartupManager
         if (enabled)
         {
             string exePath = Environment.ProcessPath ?? "";
+            // --startup makes login launches silent (no settings window popup)
             if (!string.IsNullOrEmpty(exePath))
-                key.SetValue(AppName, $"\"{exePath}\"");
+                key.SetValue(AppName, $"\"{exePath}\" --startup");
         }
         else
         {

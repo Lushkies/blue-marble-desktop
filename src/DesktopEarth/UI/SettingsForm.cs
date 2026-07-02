@@ -1683,16 +1683,18 @@ public class SettingsForm : Form
             if (result != DialogResult.Yes) return;
             try
             {
-                var protectedIds = new HashSet<string>(
-                    _settings.Favorites.Select(f => ImageCache.SanitizeFileName(f.ImageId)));
+                HashSet<string> protectedIds;
+                lock (_settings.FavoritesLock)
+                {
+                    protectedIds = new HashSet<string>(
+                        _settings.Favorites.Select(f => ImageCache.SanitizeFileName(f.ImageId)));
+                }
                 // Use 1 day = effectively delete everything except today's files
                 _imageCache.CleanOldCache(protectedIds, maxDays: 1);
 
-                var epicDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "BlueMarbleDesktop", "epic_images");
-                if (Directory.Exists(epicDir))
-                    Directory.Delete(epicDir, true);
+                // EPIC cache: same sweep, protecting favorited images — the dialog
+                // promises favorites survive
+                new EpicImageCache().CleanOldCache(maxDays: 1, protectedIds: protectedIds);
 
                 cacheSizeLabel.Text = "Cache cleared";
             }
@@ -2421,23 +2423,31 @@ public class SettingsForm : Form
 
     private void ToggleFavorite(ImageSourceInfo img)
     {
-        var existing = _settings.Favorites.Find(f => f.Source == img.Source && f.ImageId == img.Id);
-        if (existing != null)
+        // Lock: the render thread iterates Favorites for rotation and pruning
+        lock (_settings.FavoritesLock)
         {
-            _settings.Favorites.Remove(existing);
-            img.IsFavorited = false;
-        }
-        else
-        {
-            _settings.Favorites.Add(new FavoriteImage
+            var existing = _settings.Favorites.Find(f => f.Source == img.Source && f.ImageId == img.Id);
+            if (existing != null)
             {
-                Source = img.Source,
-                ImageId = img.Id,
-                Title = img.Title,
-                ThumbnailUrl = img.ThumbnailUrl,
-                FullImageUrl = !string.IsNullOrEmpty(img.HdImageUrl) ? img.HdImageUrl : img.FullImageUrl,
-            });
-            img.IsFavorited = true;
+                _settings.Favorites.Remove(existing);
+                img.IsFavorited = false;
+            }
+            else
+            {
+                var fav = new FavoriteImage
+                {
+                    Source = img.Source,
+                    ImageId = img.Id,
+                    Title = img.Title,
+                    ThumbnailUrl = img.ThumbnailUrl,
+                    FullImageUrl = !string.IsNullOrEmpty(img.HdImageUrl) ? img.HdImageUrl : img.FullImageUrl,
+                };
+                // Record the cached file location so rotation/export can find the
+                // image even for sources with non-standard cache layouts (EPIC)
+                fav.LocalCachePath = _imageCache.GetCachedPathForFavorite(fav) ?? "";
+                _settings.Favorites.Add(fav);
+                img.IsFavorited = true;
+            }
         }
         SchedulePreview(); // Persist
     }
@@ -3477,9 +3487,22 @@ public class SettingsForm : Form
             s.StillImageSource = img.Source;
             switch (img.Source)
             {
+                case ImageSource.NasaEpic:
+                    // The image ID embeds type and capture date (epic_1b_yyyyMMddHHmmss)
+                    s.EpicUseLatest = false;
+                    s.EpicSelectedImage = img.Id;
+                    s.EpicImageType = img.Id.StartsWith("epic_RGB", StringComparison.OrdinalIgnoreCase)
+                        ? EpicImageType.Enhanced : EpicImageType.Natural;
+                    var epicDate = ParseEpicDateFromId(img.Id);
+                    if (epicDate != null) s.EpicSelectedDate = epicDate;
+                    break;
                 case ImageSource.NasaApod:
                     s.ApodSelectedImageId = img.Id;
                     s.ApodSelectedImageUrl = img.FullImageUrl;
+                    break;
+                case ImageSource.NasaGallery:
+                    s.NasaGallerySelectedId = img.Id;
+                    s.NasaGallerySelectedImageUrl = img.FullImageUrl;
                     break;
                 case ImageSource.NationalParks:
                     s.NpsSelectedImageId = img.Id;
@@ -3496,6 +3519,21 @@ public class SettingsForm : Form
             }
         });
         _renderScheduler.TriggerUpdate();
+    }
+
+    /// <summary>
+    /// Extract the capture date from an EPIC image ID (e.g. epic_1b_20260218001751
+    /// -> "2026-02-18"). Returns null if the ID doesn't match the expected shape.
+    /// </summary>
+    private static string? ParseEpicDateFromId(string imageId)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(imageId, @"(\d{8})\d{6}$");
+        if (!match.Success) return null;
+        return DateTime.TryParseExact(match.Groups[1].Value, "yyyyMMdd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var date)
+            ? date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+            : null;
     }
 
     private void SetUserImageAsWallpaper(ImageSourceInfo img)
@@ -3516,13 +3554,15 @@ public class SettingsForm : Form
     private void ToggleFavoriteFromCollection(ImageSourceInfo img)
     {
         // In the favorites grid, clicking star always unfavorites
-        var existing = _settings.Favorites.Find(f =>
-            f.Source == img.Source && f.ImageId == img.Id);
-        if (existing != null)
+        bool removed;
+        lock (_settings.FavoritesLock)
         {
-            _settings.Favorites.Remove(existing);
-            _settingsManager.Save();
+            var existing = _settings.Favorites.Find(f =>
+                f.Source == img.Source && f.ImageId == img.Id);
+            removed = existing != null && _settings.Favorites.Remove(existing);
         }
+        if (removed)
+            _settingsManager.Save();
     }
 
     private void ExportFavorites()
@@ -3590,7 +3630,10 @@ public class SettingsForm : Form
             "Clear Favorites", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             return;
 
-        _settings.Favorites.Clear();
+        lock (_settings.FavoritesLock)
+        {
+            _settings.Favorites.Clear();
+        }
         _settingsManager.Save();
         RefreshMyCollectionTab();
     }
@@ -3606,7 +3649,10 @@ public class SettingsForm : Form
             return;
 
         // Also remove any user image favorites
-        _settings.Favorites.RemoveAll(f => f.Source == ImageSource.UserImages);
+        lock (_settings.FavoritesLock)
+        {
+            _settings.Favorites.RemoveAll(f => f.Source == ImageSource.UserImages);
+        }
 
         await Task.Run(() => _userImageManager.DeleteAllImages());
         if (IsDisposed) return;
@@ -3617,13 +3663,19 @@ public class SettingsForm : Form
 
     private void OnRenderStatusChanged(string status)
     {
-        if (IsDisposed) return;
-        try { Invoke(() => UpdateDownloadStatus(status)); }
+        // Raised on the render thread. Invoke throws InvalidOperationException
+        // (not just ObjectDisposedException) when the handle isn't created yet or
+        // is being destroyed — both races are harmless, so swallow them.
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke(() => UpdateDownloadStatus(status)); }
         catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
     }
 
     private void UpdateDownloadStatus(string status)
     {
+        if (IsDisposed) return;
+
         // Route status messages to the active source's status label
         var label = GetActiveStatusLabel();
         if (label == null) return;

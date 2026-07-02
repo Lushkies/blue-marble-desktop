@@ -49,10 +49,11 @@ public class EpicImageCache
     }
 
     /// <summary>
-    /// Delete cached images older than the specified number of days.
+    /// Delete cached images older than the specified number of days, skipping
+    /// favorited images (protectedIds = sanitized favorite ImageIds).
     /// Safe to call periodically — skips errors silently.
     /// </summary>
-    public void CleanOldCache(int maxDays = 14)
+    public void CleanOldCache(int maxDays = 14, HashSet<string>? protectedIds = null)
     {
         try
         {
@@ -71,8 +72,20 @@ public class EpicImageCache
                     {
                         try
                         {
-                            Directory.Delete(dateDir, recursive: true);
-                            Console.WriteLine($"EPIC cache: Cleaned old directory {dirName}");
+                            // Delete file-by-file so favorited images survive;
+                            // remove the directory only once it is empty
+                            foreach (var file in Directory.GetFiles(dateDir))
+                            {
+                                var fileId = Path.GetFileNameWithoutExtension(file);
+                                if (protectedIds != null && protectedIds.Contains(fileId))
+                                    continue;
+                                try { File.Delete(file); } catch { }
+                            }
+                            if (Directory.GetFileSystemEntries(dateDir).Length == 0)
+                            {
+                                Directory.Delete(dateDir);
+                                Console.WriteLine($"EPIC cache: Cleaned old directory {dirName}");
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -85,6 +98,35 @@ public class EpicImageCache
         catch (Exception ex)
         {
             Console.WriteLine($"EPIC cache cleanup error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Find a cached EPIC image by its image ID, searching both collections and
+    /// all date directories. Used to resolve favorites, whose IDs don't carry
+    /// the type/date folder structure.
+    /// </summary>
+    public static string? FindCachedPathById(string imageId)
+    {
+        try
+        {
+            if (!Directory.Exists(CacheDir)) return null;
+
+            var fileName = ImageCache.SanitizeFileName(imageId) + ".jpg";
+            foreach (var collectionDir in Directory.GetDirectories(CacheDir))
+            {
+                foreach (var dateDir in Directory.GetDirectories(collectionDir))
+                {
+                    var candidate = Path.Combine(dateDir, fileName);
+                    if (File.Exists(candidate) && new FileInfo(candidate).Length > 100 * 1024)
+                        return candidate;
+                }
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

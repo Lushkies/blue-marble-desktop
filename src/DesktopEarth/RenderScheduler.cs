@@ -238,20 +238,37 @@ public class RenderScheduler : IDisposable
         window.Load += () =>
         {
             gl = GL.GetApi(window);
-            InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
-            ReportStatus("Renderer initialized.");
-            // Clean blacklisted images from cache on startup
-            _imageCache.CleanBlacklistedImages(settings.BlacklistedIdPrefixes);
-            _epicCache.CleanBlacklistedImages(settings.BlacklistedIdPrefixes);
 
-            // Clean old caches on startup (protect favorited images)
-            int epicDays = settings.EpicCacheDurationDays;
-            int imageDays = settings.CacheDurationDays;
-            if (epicDays > 0) _epicCache.CleanOldCache(epicDays);
-            if (imageDays > 0)
+            // Init failures (e.g. an unreadable texture) must not kill the render
+            // thread — mark the mode dirty so the render loop retries each interval.
+            try
             {
+                InitializeRenderers(gl, settings, ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
+                ReportStatus("Renderer initialized.");
+            }
+            catch (Exception ex)
+            {
+                DisposeRenderers(ref earthRenderer, ref flatMapRenderer, ref moonRenderer, ref stillImageRenderer);
+                currentMode = (DisplayMode)(-1); // Force the re-init branch next cycle
+                ReportStatus($"Renderer init failed: {ex.Message}");
+            }
+
+            try
+            {
+                // Clean blacklisted images from cache on startup
+                _imageCache.CleanBlacklistedImages(settings.BlacklistedIdPrefixes);
+                _epicCache.CleanBlacklistedImages(settings.BlacklistedIdPrefixes);
+
+                // Clean old caches on startup (protect favorited images)
+                int epicDays = settings.EpicCacheDurationDays;
+                int imageDays = settings.CacheDurationDays;
                 var protectedIds = GetProtectedImageIds(settings);
-                _imageCache.CleanOldCache(protectedIds, imageDays);
+                if (epicDays > 0) _epicCache.CleanOldCache(epicDays, protectedIds);
+                if (imageDays > 0) _imageCache.CleanOldCache(protectedIds, imageDays);
+            }
+            catch (Exception ex)
+            {
+                ReportStatus($"Cache cleanup error: {ex.Message}");
             }
         };
 
@@ -378,6 +395,10 @@ public class RenderScheduler : IDisposable
             catch (Exception ex)
             {
                 ReportStatus($"Render error: {ex.Message}");
+                // Back off ~60s after a failure instead of retrying immediately —
+                // a persistent failure would otherwise spin the loop hot. User
+                // triggers (signal) bypass the interval check and retry at once.
+                lastUpdate = DateTime.UtcNow.AddSeconds(-Math.Max(0, settings.UpdateIntervalSeconds - 60));
             }
         };
 
@@ -1166,8 +1187,12 @@ public class RenderScheduler : IDisposable
     /// </summary>
     private static HashSet<string> GetProtectedImageIds(AppSettings settings)
     {
-        return new HashSet<string>(
-            settings.Favorites.Select(f => ImageCache.SanitizeFileName(f.ImageId)));
+        // Snapshot under the lock — the UI thread mutates Favorites
+        lock (settings.FavoritesLock)
+        {
+            return new HashSet<string>(
+                settings.Favorites.Select(f => ImageCache.SanitizeFileName(f.ImageId)));
+        }
     }
 
     /// <summary>
@@ -1299,7 +1324,14 @@ public class RenderScheduler : IDisposable
 
     private void ReportStatus(string message)
     {
-        StatusChanged?.Invoke(message);
+        try
+        {
+            StatusChanged?.Invoke(message);
+        }
+        catch
+        {
+            // A UI subscriber racing form disposal must never kill the render thread
+        }
     }
 
     private void SaveAsBmp(byte[] rgbaPixels, int width, int height, string path)

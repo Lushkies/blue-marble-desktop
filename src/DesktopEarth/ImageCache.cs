@@ -303,6 +303,11 @@ public class ImageCache
             return userMgr.GetImagePath(fav.ImageId);
         }
 
+        // EPIC images live in the separate epic_images cache (organized by
+        // type/date), not in image_cache
+        if (fav.Source == ImageSource.NasaEpic)
+            return EpicImageCache.FindCachedPathById(fav.ImageId);
+
         // Check standard image_cache
         var path = GetCachePath(fav.Source, fav.ImageId);
         if (File.Exists(path) && new FileInfo(path).Length > 50 * 1024)

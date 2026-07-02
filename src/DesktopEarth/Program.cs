@@ -91,8 +91,12 @@ AppDomain.CurrentDomain.UnhandledException += (_, args) =>
     catch { }
 };
 
+// Launched by the Windows startup entry: start silently in the tray
+bool launchedAtStartup = args.Contains("--startup");
+
 var renderScheduler = new RenderScheduler(settingsManager, assets);
-var trayContext = new TrayApplicationContext(settingsManager, renderScheduler);
+var trayContext = new TrayApplicationContext(settingsManager, renderScheduler,
+    showSettingsOnLaunch: !launchedAtStartup);
 
 Application.Run(trayContext);
 

@@ -9,7 +9,8 @@ public class TrayApplicationContext : ApplicationContext
     private readonly RenderScheduler _renderScheduler;
     private SettingsForm? _settingsForm;
 
-    public TrayApplicationContext(SettingsManager settingsManager, RenderScheduler renderScheduler)
+    public TrayApplicationContext(SettingsManager settingsManager, RenderScheduler renderScheduler,
+        bool showSettingsOnLaunch = true)
     {
         _settingsManager = settingsManager;
         _renderScheduler = renderScheduler;
@@ -31,8 +32,10 @@ public class TrayApplicationContext : ApplicationContext
         _renderScheduler.StatusChanged += OnStatusChanged;
         _renderScheduler.Start();
 
-        // Open settings window on launch
-        ShowSettings();
+        // Open settings window on launch — skipped for silent --startup launches
+        // (Windows login) so the app starts quietly in the tray
+        if (showSettingsOnLaunch)
+            ShowSettings();
     }
 
     private ContextMenuStrip BuildContextMenu()
@@ -69,6 +72,9 @@ public class TrayApplicationContext : ApplicationContext
     {
         if (_settingsForm != null && !_settingsForm.IsDisposed)
         {
+            // BringToFront/Activate don't restore a minimized window
+            if (_settingsForm.WindowState == FormWindowState.Minimized)
+                _settingsForm.WindowState = FormWindowState.Normal;
             _settingsForm.BringToFront();
             _settingsForm.Activate();
             return;
