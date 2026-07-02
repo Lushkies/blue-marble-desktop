@@ -9,6 +9,10 @@ public class TrayApplicationContext : ApplicationContext
     private readonly RenderScheduler _renderScheduler;
     private SettingsForm? _settingsForm;
 
+    // App-level so the ~975 MB HD texture download survives the settings form
+    // being closed or recreated (dark-mode toggle) mid-download
+    private readonly HiResTextureManager _hdTextureManager = new();
+
     public TrayApplicationContext(SettingsManager settingsManager, RenderScheduler renderScheduler,
         bool showSettingsOnLaunch = true)
     {
@@ -80,7 +84,7 @@ public class TrayApplicationContext : ApplicationContext
             return;
         }
 
-        _settingsForm = new SettingsForm(_settingsManager, _renderScheduler);
+        _settingsForm = new SettingsForm(_settingsManager, _renderScheduler, _hdTextureManager);
         _settingsForm.RequestReopen += RecreateSettingsForm;
         _settingsForm.Show();
     }

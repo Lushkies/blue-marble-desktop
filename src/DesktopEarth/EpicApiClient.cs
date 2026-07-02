@@ -139,11 +139,25 @@ public class EpicApiClient
             var dir = Path.GetDirectoryName(cachePath)!;
             Directory.CreateDirectory(dir);
 
-            // Write to temp file first, then move (atomic)
-            tempPath = cachePath + ".tmp";
+            // Write to a uniquely-named temp file first, then move (atomic;
+            // concurrent downloads of the same image must not collide)
+            tempPath = cachePath + "." + Path.GetRandomFileName() + ".tmp";
             await using (var fileStream = File.Create(tempPath))
             {
                 await response.Content.CopyToAsync(fileStream, ct);
+            }
+
+            // Reject non-image payloads before they can poison the cache
+            try
+            {
+                SixLabors.ImageSharp.Image.Identify(tempPath);
+            }
+            catch
+            {
+                Console.WriteLine($"EPIC: {image.Image} download is not a valid image, discarding");
+                File.Delete(tempPath);
+                tempPath = null;
+                return null;
             }
 
             File.Move(tempPath, cachePath, overwrite: true);

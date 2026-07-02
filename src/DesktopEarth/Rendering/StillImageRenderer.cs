@@ -88,6 +88,11 @@ public class StillImageRenderer : IDisposable
         if (imagePath == _currentImagePath && _textures != null)
             return; // Already loaded
 
+        // Invalidate until the new image loads successfully — otherwise a failed
+        // decode leaves the old path paired with an empty texture set, and a
+        // reload of that path would wrongly early-return above
+        _currentImagePath = null;
+
         // Dispose old textures if reloading a different image
         _textures?.Dispose();
         _textures = new TextureManager(gl);

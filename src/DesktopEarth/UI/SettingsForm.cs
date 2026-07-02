@@ -8,6 +8,12 @@ public class SettingsForm : Form
     private readonly RenderScheduler _renderScheduler;
     private AppSettings _settings;
 
+    // Shared app-level HD texture download manager (owned by TrayApplicationContext);
+    // handlers are stored so Dispose can unsubscribe when the form closes
+    private readonly HiResTextureManager _hdTextureManager;
+    private Action<float, string>? _hdProgressHandler;
+    private Action<bool, string>? _hdCompletedHandler;
+
     // Debounce timer for live preview
     private readonly System.Windows.Forms.Timer _debounceTimer;
     private bool _isLoading;
@@ -193,10 +199,12 @@ public class SettingsForm : Form
         set { if (value >= 0 && value < _tabControl.TabCount) _tabControl.SelectedIndex = value; }
     }
 
-    public SettingsForm(SettingsManager settingsManager, RenderScheduler renderScheduler)
+    public SettingsForm(SettingsManager settingsManager, RenderScheduler renderScheduler,
+        HiResTextureManager hdTextureManager)
     {
         _settingsManager = settingsManager;
         _renderScheduler = renderScheduler;
+        _hdTextureManager = hdTextureManager;
         _settings = settingsManager.Settings;
 
         _debounceTimer = new System.Windows.Forms.Timer { Interval = 300 };
@@ -1538,9 +1546,13 @@ public class SettingsForm : Form
             Visible = false
         };
 
-        var hdManager = new HiResTextureManager();
-        hdManager.ProgressChanged += (progress, message) =>
+        // Shared app-level manager: the download keeps running if this form is
+        // closed or recreated; handlers are unsubscribed in Dispose and guarded
+        // against the form being disposed mid-download
+        var hdManager = _hdTextureManager;
+        _hdProgressHandler = (progress, message) =>
         {
+            if (IsDisposed) return;
             void UpdateProgress()
             {
                 hdProgressLabel.Text = message;
@@ -1549,13 +1561,21 @@ public class SettingsForm : Form
                 if (progress >= 0)
                     hdProgressBar.Value = Math.Clamp((int)(progress * 100), 0, 100);
             }
-            if (hdProgressLabel.InvokeRequired)
-                hdProgressLabel.Invoke(UpdateProgress);
-            else
-                UpdateProgress();
+            try
+            {
+                if (hdProgressLabel.InvokeRequired)
+                    hdProgressLabel.Invoke(UpdateProgress);
+                else
+                    UpdateProgress();
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         };
-        hdManager.DownloadCompleted += (success, message) =>
+        hdManager.ProgressChanged += _hdProgressHandler;
+
+        _hdCompletedHandler = (success, message) =>
         {
+            if (IsDisposed) return;
             void UpdateUI()
             {
                 hdProgressLabel.Text = message;
@@ -1569,8 +1589,23 @@ public class SettingsForm : Form
                     _renderScheduler.TriggerUpdate();
                 }
             }
-            if (hdButton.InvokeRequired) hdButton.Invoke(UpdateUI); else UpdateUI();
+            try
+            {
+                if (hdButton.InvokeRequired) hdButton.Invoke(UpdateUI); else UpdateUI();
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         };
+        hdManager.DownloadCompleted += _hdCompletedHandler;
+
+        // Reflect an in-flight download when the form is (re)opened mid-download
+        if (hdManager.IsDownloading)
+        {
+            hdButton.Text = "Cancel Download";
+            hdProgressLabel.Text = "Downloading HD textures...";
+            hdProgressLabel.Visible = true;
+            hdProgressBar.Visible = true;
+        }
         hdButton.Click += (_, _) =>
         {
             if (hdManager.IsDownloading)
@@ -3690,6 +3725,20 @@ public class SettingsForm : Form
             label.Text = "Wallpaper set!";
             label.ForeColor = Theme.SuccessText;
         }
+        else if (status.Contains("offline", StringComparison.OrdinalIgnoreCase))
+        {
+            label.Text = "Offline — showing a cached image.";
+            label.ForeColor = Theme.WarningText;
+        }
+        else if (status.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                 status.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+                 status.Contains("No images available", StringComparison.OrdinalIgnoreCase))
+        {
+            // Without this branch the label sticks on "Downloading image..."
+            // forever when a download or render fails
+            label.Text = status;
+            label.ForeColor = Theme.ErrorText;
+        }
     }
 
     private Label? GetActiveStatusLabel()
@@ -3711,6 +3760,8 @@ public class SettingsForm : Form
         if (disposing)
         {
             _renderScheduler.StatusChanged -= OnRenderStatusChanged;
+            if (_hdProgressHandler != null) _hdTextureManager.ProgressChanged -= _hdProgressHandler;
+            if (_hdCompletedHandler != null) _hdTextureManager.DownloadCompleted -= _hdCompletedHandler;
             _debounceTimer.Stop();
             _debounceTimer.Dispose();
             _cacheSizeTimer?.Stop();

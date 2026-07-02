@@ -156,20 +156,28 @@ public class HiResTextureManager
         ReportProgress(-1, -1, $"Downloading {description}...");
 
         string tempPath = destPath + ".tmp";
-        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
-
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        await using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
-
-        var buffer = new byte[81920]; // 80KB buffer
-        int bytesRead;
-        while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
+        try
         {
-            await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-        }
+            using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
 
-        fileStream.Close();
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            await using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                var buffer = new byte[81920]; // 80KB buffer
+                int bytesRead;
+                while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
+                {
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                }
+            }
+        }
+        catch
+        {
+            // Don't leave orphaned partial downloads behind on failure/cancel
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            throw;
+        }
 
         // Atomic rename
         if (File.Exists(destPath)) File.Delete(destPath);

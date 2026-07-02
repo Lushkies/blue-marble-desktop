@@ -230,6 +230,7 @@ public class RenderScheduler : IDisposable
         ImageStyle currentImageStyle = settings.ImageStyle;
 
         DateTime lastUpdate = DateTime.MinValue;
+        DateTime lastCacheClean = DateTime.UtcNow;
         bool firstRender = true;
         GL? gl = null;
 
@@ -384,6 +385,19 @@ public class RenderScheduler : IDisposable
                         SaveAsBmp(pixels, renderWidth, renderHeight, _wallpaperPath);
                         WallpaperSetter.SetWallpaper(_wallpaperPath, settings.MultiMonitorMode);
                     }
+                }
+
+                // Prune caches daily — this tray app runs for weeks between
+                // restarts, and startup-only pruning would let auto-rotate grow
+                // the cache unboundedly
+                if ((DateTime.UtcNow - lastCacheClean).TotalHours >= 24)
+                {
+                    lastCacheClean = DateTime.UtcNow;
+                    var protectedIds = GetProtectedImageIds(_settingsManager.Settings);
+                    if (settings.EpicCacheDurationDays > 0)
+                        _epicCache.CleanOldCache(settings.EpicCacheDurationDays, protectedIds);
+                    if (settings.CacheDurationDays > 0)
+                        _imageCache.CleanOldCache(protectedIds, settings.CacheDurationDays);
                 }
 
                 // Advance the schedule even when nothing was applied, so failures
@@ -711,9 +725,10 @@ public class RenderScheduler : IDisposable
             var effectiveSource = _randomImageSource ?? source;
             _randomImageSource = null;
 
-            if (File.Exists(overridePath))
+            if (File.Exists(overridePath) &&
+                TryLoadImage(renderer, gl, overridePath,
+                    deleteOnFailure: DetectSourceFromPath(overridePath) != ImageSource.UserImages))
             {
-                renderer.LoadImage(gl, overridePath);
                 if (!renderer.IsBelowMinimumQuality)
                 {
                     SetCurrentImage(effectiveSource, Path.GetFileNameWithoutExtension(overridePath), null, overridePath);
@@ -724,13 +739,14 @@ public class RenderScheduler : IDisposable
             }
         }
 
-        // User images are local files — no download needed
+        // User images are local files — no download needed (and never deleted on
+        // a failed load: they belong to the user)
         if (source == ImageSource.UserImages)
         {
             var path = settings.UserImageSelectedPath;
-            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            if (!string.IsNullOrEmpty(path) && File.Exists(path) &&
+                TryLoadImage(renderer, gl, path, deleteOnFailure: false))
             {
-                renderer.LoadImage(gl, path);
                 if (!renderer.IsBelowMinimumQuality)
                 {
                     SetCurrentImage(source, settings.UserImageSelectedId, null, path,
@@ -741,9 +757,8 @@ public class RenderScheduler : IDisposable
             // Fallback: try any user image
             var userMgr = new UserImageManager();
             var allPaths = userMgr.GetAllImagePaths();
-            if (allPaths.Count > 0)
+            if (allPaths.Count > 0 && TryLoadImage(renderer, gl, allPaths[0], deleteOnFailure: false))
             {
-                renderer.LoadImage(gl, allPaths[0]);
                 if (!renderer.IsBelowMinimumQuality)
                 {
                     SetCurrentImage(source, Path.GetFileNameWithoutExtension(allPaths[0]), null, allPaths[0]);
@@ -762,10 +777,9 @@ public class RenderScheduler : IDisposable
         {
             // No image selected — try cached fallback
             var cached = _imageCache.GetLatestCachedImagePath(source);
-            if (cached != null)
+            if (cached != null && TryLoadImage(renderer, gl, cached, deleteOnFailure: true))
             {
                 ReportStatus($"{source}: Using cached image (no selection)");
-                renderer.LoadImage(gl, cached);
                 SetCurrentImage(source, Path.GetFileNameWithoutExtension(cached), null, cached);
                 return renderer.Render(width, height);
             }
@@ -810,10 +824,9 @@ public class RenderScheduler : IDisposable
             Console.WriteLine($"{source} download error: {ex.Message}");
         }
 
-        if (imagePath != null && File.Exists(imagePath))
+        if (imagePath != null && File.Exists(imagePath) &&
+            TryLoadImage(renderer, gl, imagePath, deleteOnFailure: true))
         {
-            renderer.LoadImage(gl, imagePath);
-
             // Enforce minimum 1080p quality -- skip sub-1080p images
             if (renderer.IsBelowMinimumQuality)
             {
@@ -830,10 +843,9 @@ public class RenderScheduler : IDisposable
 
         // Download failed or below quality — try any cached image for this source
         var fallback = _imageCache.GetLatestCachedImagePath(source);
-        if (fallback != null)
+        if (fallback != null && TryLoadImage(renderer, gl, fallback, deleteOnFailure: true))
         {
             ReportStatus($"{source}: Using cached image (offline)");
-            renderer.LoadImage(gl, fallback);
             SetCurrentImage(source, Path.GetFileNameWithoutExtension(fallback), null, fallback);
             return renderer.Render(width, height);
         }
@@ -1004,16 +1016,41 @@ public class RenderScheduler : IDisposable
 
     /// <summary>
     /// Detect which ImageSource a file path belongs to based on its directory.
+    /// user_images is checked first — a user file NAMED e.g. "smithsonian.jpg"
+    /// must not be mislabeled as a cache image.
     /// </summary>
     private static ImageSource? DetectSourceFromPath(string path)
     {
+        if (path.Contains("user_images")) return ImageSource.UserImages;
         if (path.Contains("epic_images")) return ImageSource.NasaEpic;
         if (path.Contains("nasaapod")) return ImageSource.NasaApod;
         if (path.Contains("nationalparks")) return ImageSource.NationalParks;
         if (path.Contains("smithsonian")) return ImageSource.Smithsonian;
-        if (path.Contains("user_images")) return ImageSource.UserImages;
         if (path.Contains("nasagallery")) return ImageSource.NasaGallery;
         return null;
+    }
+
+    /// <summary>
+    /// Load an image into the renderer, returning false instead of throwing.
+    /// A corrupt cached download is deleted so it can't wedge rendering forever;
+    /// user-owned files are never deleted.
+    /// </summary>
+    private static bool TryLoadImage(StillImageRenderer renderer, GL gl, string path, bool deleteOnFailure)
+    {
+        try
+        {
+            renderer.LoadImage(gl, path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"RenderScheduler: Failed to load {Path.GetFileName(path)}: {ex.Message}");
+            if (deleteOnFailure)
+            {
+                try { File.Delete(path); } catch { }
+            }
+            return false;
+        }
     }
 
     /// <summary>
@@ -1214,9 +1251,10 @@ public class RenderScheduler : IDisposable
             var overridePath = _randomImageOverride;
             _randomImageOverride = null;
 
-            if (File.Exists(overridePath))
+            if (File.Exists(overridePath) &&
+                TryLoadImage(renderer, gl, overridePath,
+                    deleteOnFailure: DetectSourceFromPath(overridePath) != ImageSource.UserImages))
             {
-                renderer.LoadImage(gl, overridePath);
                 if (!renderer.IsBelowMinimumQuality)
                 {
                     SetCurrentImage(_randomImageSource ?? ImageSource.NasaEpic,
@@ -1232,9 +1270,8 @@ public class RenderScheduler : IDisposable
 
         string? imagePath = ResolveEpicImage(settings);
 
-        if (imagePath != null)
+        if (imagePath != null && TryLoadImage(renderer, gl, imagePath, deleteOnFailure: true))
         {
-            renderer.LoadImage(gl, imagePath);
             SetCurrentImage(ImageSource.NasaEpic,
                 Path.GetFileNameWithoutExtension(imagePath), null, imagePath, "NASA EPIC");
             return renderer.Render(width, height);

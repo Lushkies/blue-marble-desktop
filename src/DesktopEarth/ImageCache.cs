@@ -16,8 +16,13 @@ public class ImageCache
 
     private const int MaxCachedDays = 30;
 
+    // Refuse absurdly large downloads before streaming them to disk
+    private const long MaxDownloadBytes = 200L * 1024 * 1024;
+
     private static readonly HttpClient Http = new()
     {
+        // With ResponseHeadersRead this only bounds the wait for headers;
+        // body streaming is bounded per-download via a linked token
         Timeout = TimeSpan.FromSeconds(60)
     };
 
@@ -98,13 +103,43 @@ public class ImageCache
             }
 
             Console.WriteLine($"ImageCache: Downloading {source}/{imageId}...");
-            using var response = await Http.GetAsync(url, ct);
+
+            // Stream straight to disk (no full in-memory buffering) with a
+            // generous overall timeout — large NASA Gallery originals can far
+            // exceed what a 60s all-inclusive timeout allows on slow connections
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(10));
+
+            using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
             response.EnsureSuccessStatusCode();
 
-            tempPath = cachePath + ".tmp";
+            if (response.Content.Headers.ContentLength is > MaxDownloadBytes)
+            {
+                Console.WriteLine($"ImageCache: {source}/{imageId} too large " +
+                    $"({response.Content.Headers.ContentLength / (1024 * 1024)} MB), skipping");
+                return null;
+            }
+
+            // Unique temp name so concurrent downloads of the same image
+            // (render thread vs pool-build task) can't collide
+            tempPath = cachePath + "." + Path.GetRandomFileName() + ".tmp";
             await using (var fs = File.Create(tempPath))
             {
-                await response.Content.CopyToAsync(fs, ct);
+                await response.Content.CopyToAsync(fs, timeoutCts.Token);
+            }
+
+            // Reject non-image payloads (captive portals, CDN error pages)
+            // before they can poison the cache
+            try
+            {
+                SixLabors.ImageSharp.Image.Identify(tempPath);
+            }
+            catch
+            {
+                Console.WriteLine($"ImageCache: {source}/{imageId} is not a valid image, discarding");
+                File.Delete(tempPath);
+                tempPath = null;
+                return null;
             }
 
             File.Move(tempPath, cachePath, overwrite: true);
@@ -145,7 +180,7 @@ public class ImageCache
             using var response = await Http.GetAsync(thumbnailUrl, ct);
             response.EnsureSuccessStatusCode();
 
-            tempPath = cachePath + ".tmp";
+            tempPath = cachePath + "." + Path.GetRandomFileName() + ".tmp";
             await using (var fs = File.Create(tempPath))
             {
                 await response.Content.CopyToAsync(fs, ct);
