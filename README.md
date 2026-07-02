@@ -2,6 +2,11 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night illumination using OpenGL, and sets it as your wallpaper.
 
+| | |
+|---|---|
+| ![3D globe with day/night lighting](assets/screenshots/globe.png) | ![Flat map projection](assets/screenshots/flatmap.png) |
+| ![Moon view](assets/screenshots/moon.png) | ![Zoomed globe](assets/screenshots/zoomed.png) |
+
 ## Features
 
 **Live 3D Globe** - A rotating Earth showing real-time sunlight and shadow based on your local time. City lights appear on the night side. Zoom in, adjust lighting, and toggle between topographic and bathymetric textures.
@@ -30,8 +35,8 @@ A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day
 
 Download the latest installer from [Releases](https://github.com/Lushkies/blue-marble-desktop/releases):
 
-- **BlueMarbleDesktop-x64-setup.exe** - Standard Windows (x64)
-- **BlueMarbleDesktop-arm64-setup.exe** - Windows on ARM (ARM64)
+- **BlueMarbleDesktop-\<version\>-x64-setup.exe** - Standard Windows (x64)
+- **BlueMarbleDesktop-\<version\>-arm64-setup.exe** - Windows on ARM (ARM64)
 
 Both installers are self-contained and include the .NET 8 runtime.
 
@@ -59,13 +64,19 @@ dotnet run
 
 ### Publish (Self-contained)
 
+Not single-file: the Silk.NET native libraries must sit alongside the exe.
+
 ```bash
 # x64
-dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish/x64
+dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-x64 --self-contained -o publish/x64
 
 # ARM64
-dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-arm64 --self-contained -p:PublishSingleFile=true -o publish/arm64
+dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-arm64 --self-contained -o publish/arm64
 ```
+
+Or run `.\build.ps1` (builds both architectures and copies assets).
+
+**ARM64 note:** the ARM64 installer bundles Mesa3D as a software OpenGL fallback. Place `opengl32.dll` and `libEGL.dll` (prebuilt from [mmozeiko/build-mesa](https://github.com/mmozeiko/build-mesa)) in `lib/mesa3d/` — they are not tracked in the repo, and `build.ps1` verifies `opengl32.dll` against a pinned SHA-256.
 
 ## Tech Stack
 
@@ -85,6 +96,7 @@ Image sources and data:
 - **Smithsonian Institution** -- Art and design from the Smithsonian Open Access collection (CC0 public domain).
 - **NASA/GSFC Scientific Visualization Studio** -- Moon texture.
 - **api.data.gov** -- API access provided by the U.S. General Services Administration.
+- **Mesa3D** -- software OpenGL renderer bundled with the ARM64 build (MIT license; prebuilt binaries from [mmozeiko/build-mesa](https://github.com/mmozeiko/build-mesa)).
 
 ## License
 

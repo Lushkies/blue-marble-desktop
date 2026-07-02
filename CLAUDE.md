@@ -24,13 +24,17 @@ dotnet run
 
 ## Publish (Self-contained)
 
+NOT single-file (`<PublishSingleFile>false</PublishSingleFile>` in the csproj) — Silk.NET native libraries must sit alongside the exe.
+
 ```bash
 # x64
-dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish/x64
+dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-x64 --self-contained -o publish/x64
 
 # ARM64
-dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-arm64 --self-contained -p:PublishSingleFile=true -o publish/arm64
+dotnet publish src/DesktopEarth/DesktopEarth.csproj -c Release -r win-arm64 --self-contained -o publish/arm64
 ```
+
+ARM64 additionally needs Mesa3D DLLs in `lib/mesa3d/` (prebuilt from github.com/mmozeiko/build-mesa; `build.ps1` verifies opengl32.dll against a pinned SHA-256).
 
 Build installers with Inno Setup:
 ```bash
@@ -144,7 +148,7 @@ lib/
 - **SixLabors.ImageSharp** 3.1.12 -- texture loading, BMP export
 - **GLSL 3.3** shaders
 - **Inno Setup 6** -- Windows installers
-- **GitHub Releases** -- distribution (no `gh` CLI, use curl + API)
+- **GitHub Releases** -- distribution (`gh` CLI available and authenticated since 2026-07)
 
 ---
 
@@ -159,7 +163,7 @@ lib/
 1. Update version in 3 places: `DesktopEarth.csproj`, `BlueMarbleDesktop-x64.iss`, `BlueMarbleDesktop-arm64.iss`
 2. Build + publish x64 and ARM64
 3. Build both installers with ISCC.exe
-4. Commit, push, create GitHub release via API, upload both .exe installers
+4. Commit, push, create GitHub release via `gh release create`, upload both .exe installers
 5. **No emoji in GitHub release notes. Ever.**
 
 ### Code Style
@@ -186,8 +190,8 @@ lib/
 - NPS photos often include people (park rangers, visitors, buildings) rather than nature landscapes -- no API-level filter exists for this
 - Smithsonian search results depend on the art_design category -- some terms work better than others
 - EPIC images are sometimes delayed 24-48 hours from NASA
-- The SettingsForm is one large file (~3400 lines) -- could benefit from being split into partial classes or user controls if it grows further
-- Per-display rendering uses logical pixels (post-DPI-scaling), so wallpapers may look slightly soft on high-DPI monitors at >100% scaling
+- The SettingsForm is one large file (~3800 lines) -- could benefit from being split into partial classes or user controls if it grows further
+- The UI scales with monitor DPI via `AutoScaleMode.Dpi` (added 2026-07). Any RUNTIME layout math (assigning .Top/.Height after construction) must use the form's `Dpi()` helper or neighboring-control bounds -- never raw pixel constants, which only apply at 100% scaling.
 
 ### Potential Future Features
 - Filter NPS results to exclude photos with people (would need image analysis or metadata heuristics)

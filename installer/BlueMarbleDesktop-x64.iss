@@ -26,8 +26,10 @@ SetupIconFile=..\src\DesktopEarth\Resources\bluemarbledesktop.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+; x64os (not x64compatible): ARM64 machines emulate x64 but should use the
+; ARM64 installer, which bundles the Mesa3D OpenGL fallback
+ArchitecturesAllowed=x64os
+ArchitecturesInstallIn64BitMode=x64os
 UninstallDisplayIcon={app}\{#MyAppExeName}
 PrivilegesRequired=lowest
 CloseApplications=yes
@@ -68,18 +70,15 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 ; Kill running instance before uninstall
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillApp"
 
-[UninstallDelete]
-; Clean up wallpaper temp file
-Type: files; Name: "{tmp}\BlueMarbleDesktop_wallpaper.bmp"
-
 [Code]
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    // Ask if user wants to remove settings
-    if MsgBox('Do you want to remove Blue Marble Desktop settings?'#13#10 +
-              '(Settings are stored in ' + ExpandConstant('{localappdata}') + '\BlueMarbleDesktop)',
+    // Ask if user wants to remove settings and data
+    if MsgBox('Do you want to remove Blue Marble Desktop settings, cached images,' +
+              ' favorites, and imported images?'#13#10 +
+              '(Stored in ' + ExpandConstant('{userappdata}') + '\BlueMarbleDesktop)',
               mbConfirmation, MB_YESNO) = IDYES then
     begin
       DelTree(ExpandConstant('{userappdata}\BlueMarbleDesktop'), True, True, True);

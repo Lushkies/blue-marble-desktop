@@ -47,6 +47,8 @@ Source: "..\publish\arm64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 ; Mesa3D software renderer fallback (required for ARM64 without native OpenGL)
 Source: "..\lib\mesa3d\opengl32.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\lib\mesa3d\libEGL.dll"; DestDir: "{app}"; Flags: ignoreversion
+; Mesa is MIT-licensed; its license must accompany redistributed copies
+Source: "..\lib\mesa3d\MESA_LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Assets
 Source: "..\assets\textures\*"; DestDir: "{app}\assets\textures"; Flags: ignoreversion recursesubdirs
@@ -72,18 +74,15 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 ; Kill running instance before uninstall
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillApp"
 
-[UninstallDelete]
-; Clean up wallpaper temp file
-Type: files; Name: "{tmp}\BlueMarbleDesktop_wallpaper.bmp"
-
 [Code]
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    // Ask if user wants to remove settings
-    if MsgBox('Do you want to remove Blue Marble Desktop settings?'#13#10 +
-              '(Settings are stored in ' + ExpandConstant('{localappdata}') + '\BlueMarbleDesktop)',
+    // Ask if user wants to remove settings and data
+    if MsgBox('Do you want to remove Blue Marble Desktop settings, cached images,' +
+              ' favorites, and imported images?'#13#10 +
+              '(Stored in ' + ExpandConstant('{userappdata}') + '\BlueMarbleDesktop)',
               mbConfirmation, MB_YESNO) = IDYES then
     begin
       DelTree(ExpandConstant('{userappdata}\BlueMarbleDesktop'), True, True, True);
