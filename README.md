@@ -6,10 +6,11 @@ A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day
 |---|---|
 | ![3D globe with day/night lighting](assets/screenshots/globe.png) | ![Flat map projection](assets/screenshots/flatmap.png) |
 | ![Moon view](assets/screenshots/moon.png) | ![Zoomed globe](assets/screenshots/zoomed.png) |
+| ![Settings: centering the globe](assets/screenshots/settings-wallpaper.png) | ![Settings: picking a photo](assets/screenshots/settings-photos.png) |
 
 ## Features
 
-**Live 3D Globe** - A rotating Earth showing real-time sunlight and shadow based on your local time. City lights appear on the night side. Zoom in, adjust lighting, and toggle between topographic and bathymetric textures.
+**Live 3D Globe** - Earth with real-time sunlight and shadow and city lights on the night side. Click anywhere on a world map to center the globe there, zoom smoothly from the whole planet down to a region, slide the picture anywhere on screen, and choose land-only or ocean-floor imagery.
 
 **Multiple Views** - Switch between a 3D globe, flat map projection, moon view, or still images from several sources.
 
@@ -23,13 +24,15 @@ A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day
 
 **Auto-Rotate Wallpaper** - Automatically cycle through images from any source (or all sources at once) on a configurable timer.
 
-**Multi-Monitor Support** - Same wallpaper on all displays, span across monitors, or configure each display independently.
+**Multi-Monitor Support** - Same wallpaper on all displays, one picture spanning them all, or a different view on each display. Your monitors are drawn to scale with what each one is showing, so you pick the screen you want by clicking it. Per-display settings follow the physical monitor, even after Windows renumbers displays when you dock or reboot.
 
 **HD Textures** - Download ultra-high-resolution Earth textures (21600x10800) for crisp detail at any zoom level.
 
 **Favorites & Collections** - Favorite any image, browse your collection across all sources, and export images.
 
 **Settings Presets** - Save and load named appearance configurations.
+
+**Pick, then Set** - Browsing sources and selecting pictures never changes your wallpaper; press **Set** to put the picture on the display you chose. A live preview shows exactly what each display looks like.
 
 ## Download
 

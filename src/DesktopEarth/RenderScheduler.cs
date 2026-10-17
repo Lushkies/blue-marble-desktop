@@ -64,8 +64,13 @@ public class RenderScheduler : IDisposable
     private string _currentDisplayKey = AllDisplaysKey;
 
     /// <summary>When the wallpaper was last applied, and when the next scheduled update is due (UTC).</summary>
-    public DateTime? LastAppliedUtc { get; private set; }
-    public DateTime? NextUpdateUtc { get; private set; }
+    public DateTime? LastAppliedUtc => _times.Last;
+    public DateTime? NextUpdateUtc => _times.Next;
+
+    // One immutable snapshot, swapped atomically: the UI reads these from another
+    // thread, and a 16-byte DateTime? could otherwise be read half-written
+    private sealed record UpdateTimes(DateTime? Last, DateTime? Next);
+    private volatile UpdateTimes _times = new(null, null);
 
     /// <summary>Raised on the render thread after a new wallpaper has been applied.</summary>
     public event Action? WallpaperApplied;
@@ -220,6 +225,7 @@ public class RenderScheduler : IDisposable
     private void PrepareRotation(AppSettings displaySettings, string key, bool allowSkip, out bool skip)
     {
         skip = false;
+        _keptCurrent = null;
         DisplayRequest? request = _activeRequests.TryGetValue(key, out var r) ? r
             : _activeRequests.TryGetValue(AllDisplaysKey, out var all) ? all : null;
 
@@ -238,6 +244,7 @@ public class RenderScheduler : IDisposable
         {
             _randomImageOverride = current.Path;
             _randomImageSource = current.Source;
+            _keptCurrent = current; // Re-record the original id/url, not the file name
             return;
         }
         // Unknown (e.g. first render since launch): leave the display as it is
@@ -281,9 +288,19 @@ public class RenderScheduler : IDisposable
 
     private void SetCurrentImage(ImageSource source, string? id, string? url, string? path, string? title = null)
     {
+        if (_keptCurrent != null && path == _keptCurrent.Path)
+        {
+            _currentImages[_currentDisplayKey] = _keptCurrent;
+            _keptCurrent = null;
+            return;
+        }
         if (string.IsNullOrEmpty(id)) { ClearCurrentImage(); return; }
         _currentImages[_currentDisplayKey] = new CurrentImageInfo(source, id, url, path, title);
     }
+
+    // The image PrepareRotation chose to keep showing, so re-showing it keeps its
+    // full identity (cache file names are sanitized and carry no URL)
+    private CurrentImageInfo? _keptCurrent;
 
     private void ClearCurrentImage() => _currentImages.TryRemove(_currentDisplayKey, out _);
 
@@ -501,11 +518,11 @@ public class RenderScheduler : IDisposable
                 lastUpdate = DateTime.UtcNow;
                 if (applied)
                 {
-                    LastAppliedUtc = DateTime.UtcNow;
+                    _times = _times with { Last = DateTime.UtcNow };
                     ReportStatus($"Wallpaper updated at {DateTime.Now:HH:mm:ss}");
                     try { WallpaperApplied?.Invoke(); } catch { /* UI subscriber racing disposal */ }
                 }
-                NextUpdateUtc = lastUpdate.AddSeconds(settings.UpdateIntervalSeconds);
+                _times = _times with { Next = lastUpdate.AddSeconds(settings.UpdateIntervalSeconds) };
             }
             catch (Exception ex)
             {
@@ -514,7 +531,12 @@ public class RenderScheduler : IDisposable
                 // a persistent failure would otherwise spin the loop hot. User
                 // triggers (signal) bypass the interval check and retry at once.
                 lastUpdate = DateTime.UtcNow.AddSeconds(-Math.Max(0, settings.UpdateIntervalSeconds - 60));
-                NextUpdateUtc = DateTime.UtcNow.AddSeconds(60);
+                _times = _times with { Next = DateTime.UtcNow.AddSeconds(60) };
+
+                // Requests this failed render consumed ("Set", "Next image") are
+                // retried with it, rather than lost
+                foreach (var (requestKey, request) in _activeRequests)
+                    _displayRequests.TryAdd(requestKey, request);
             }
         };
 
@@ -568,19 +590,27 @@ public class RenderScheduler : IDisposable
         }
 
         ReportStatus($"Rendering per-display ({displays.Count} monitors)...");
-        _currentImages.TryRemove(AllDisplaysKey, out _);
+        // Coming from Same-for-all/Span: every display was showing the shared
+        // image, so seed each display's "current image" from it before dropping it
+        if (_currentImages.TryRemove(AllDisplaysKey, out var shared))
+            foreach (var display in displays)
+                _currentImages.TryAdd(display.MonitorId, shared);
 
         // Create composite image, seeded from the previous wallpaper when the
         // layout matches — a display that fails to render this cycle keeps its
         // last image instead of going black.
         using var composite = new SixLabors.ImageSharp.Image<Rgba32>(vdWidth, vdHeight, new Rgba32(0, 0, 0, 255));
+        bool seeded = false; // Only a seeded composite lets a display keep its old pixels
         try
         {
             if (File.Exists(_wallpaperPath))
             {
                 using var previous = SixLabors.ImageSharp.Image.Load<Rgba32>(ImageDecoding.Options, _wallpaperPath);
                 if (previous.Width == vdWidth && previous.Height == vdHeight)
+                {
                     composite.Mutate(x => x.DrawImage(previous, new SixLabors.ImageSharp.Point(0, 0), 1f));
+                    seeded = true;
+                }
             }
         }
         catch { /* Unreadable previous wallpaper — start from black */ }
@@ -634,7 +664,7 @@ public class RenderScheduler : IDisposable
             // A display that should stay untouched keeps its pixels in the composite.
             if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled)
             {
-                PrepareRotation(displaySettings, key, allowSkip: true, out bool keepAsIs);
+                PrepareRotation(displaySettings, key, allowSkip: seeded, out bool keepAsIs);
                 if (keepAsIs) continue;
             }
 
@@ -706,9 +736,15 @@ public class RenderScheduler : IDisposable
             _perDisplayRenderers[key].Dispose();
             _perDisplayRenderers.Remove(key);
         }
+        foreach (var key in _currentImages.Keys.Where(k => !connectedNames.Contains(k)).ToList())
+            _currentImages.TryRemove(key, out _);
 
         // No display produced an image — keep the existing wallpaper untouched
-        if (!anyRendered) return false;
+        if (!anyRendered)
+        {
+            ReportStatus("Wallpaper unchanged");
+            return false;
+        }
 
         // Save composite and set as spanned wallpaper
         Directory.CreateDirectory(Path.GetDirectoryName(_wallpaperPath)!);

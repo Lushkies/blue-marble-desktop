@@ -54,7 +54,7 @@ public class ApodApiClient
             if (items == null) return null;
 
             return items
-                .Where(i => i.MediaType == "image") // Skip video entries
+                .Where(IsRealPicture) // Skip videos and placeholder entries
                 .OrderByDescending(i => i.Date)
                 .Select(i => new ImageSourceInfo
                 {
@@ -90,7 +90,7 @@ public class ApodApiClient
             var json = await response.Content.ReadAsStringAsync();
             var item = JsonSerializer.Deserialize<ApodItem>(json, JsonOptions);
 
-            if (item == null || item.MediaType != "image") return null;
+            if (item == null || !IsRealPicture(item)) return null;
 
             return new ImageSourceInfo
             {
@@ -111,6 +111,17 @@ public class ApodApiClient
             return null;
         }
     }
+
+    /// <summary>
+    /// True for an actual picture. Videos are skipped, and so are placeholders:
+    /// since APOD moved to science.nasa.gov (2026) the API often answers every
+    /// date with "NASA Science" and the site's logo instead of the picture.
+    /// </summary>
+    private static bool IsRealPicture(ApodItem i) =>
+        i.MediaType == "image" &&
+        !string.IsNullOrEmpty(i.Url) &&
+        !i.Url.Contains("/wp-content/themes/", StringComparison.OrdinalIgnoreCase) &&
+        !i.Url.Contains("nasa-logo", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Get the best URL for wallpaper use (prefer HD).

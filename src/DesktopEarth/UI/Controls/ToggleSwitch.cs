@@ -40,7 +40,15 @@ public class ToggleSwitch : StudioControl
         Toggled?.Invoke(this, EventArgs.Empty);
     }
 
-    protected override void OnClick(EventArgs e) { base.OnClick(e); Focus(); Flip(); }
+    // Mouse-up inside the switch, not OnClick: Click isn't raised reliably for
+    // custom-painted controls
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (e.Button != MouseButtons.Left || !ClientRectangle.Contains(e.Location)) return;
+        Focus();
+        Flip();
+    }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {

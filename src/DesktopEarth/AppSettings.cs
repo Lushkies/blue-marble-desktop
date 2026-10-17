@@ -19,7 +19,7 @@ public class AppSettings : IDisplaySettings
     public ImageSource StillImageSource { get; set; } = ImageSource.NasaEpic;
 
     // View controls — Zoom combines old ZoomLevel + FieldOfView into a single control
-    // Default: zoom slider 25 (full globe visible, nicely framed)
+    // Default: the whole globe visible, nicely framed (camera distance in globe radii + FOV; see ViewMath)
     public float ZoomLevel { get; set; } = 3.94f;
     public float FieldOfView { get; set; } = 50.3f;
 

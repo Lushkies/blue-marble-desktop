@@ -388,8 +388,11 @@ public partial class SettingsForm
     private void LoadDisplayIntoUi()
     {
         bool multi = _displays.Count > 1;
-        _modeLabel.Visible = multi;
-        _modeCombo.Visible = multi;
+        // With one monitor the mode only matters if it was left on something else
+        // (e.g. Per-display after undocking) — keep it reachable then
+        bool showMode = multi || _settings.MultiMonitorMode != MultiMonitorMode.SameForAll;
+        _modeLabel.Visible = showMode;
+        _modeCombo.Visible = showMode;
         _modeCombo.SelectedIndex = Array.IndexOf(ModeOrder, _settings.MultiMonitorMode) is int m and >= 0 ? m : 1;
 
         _monitorPicker.SetDisplays(_displays);
@@ -463,9 +466,9 @@ public partial class SettingsForm
 
         _sunLine.Text = mode switch
         {
-            DisplayMode.Moon => "☀  The Moon's near side, lit by the real Sun",
-            DisplayMode.FlatMap => "☀  Day and night follow the real Sun",
-            _ => "☀  Day and night follow the real Sun · drag the map to move the view"
+            DisplayMode.Moon => "The Moon's near side — the face we always see from Earth",
+            DisplayMode.FlatMap => "Day and night follow the real Sun",
+            _ => "Day and night follow the real Sun · click the map to move the view"
         };
     }
 
@@ -504,7 +507,7 @@ public partial class SettingsForm
         _settings.MultiMonitorMode = mode;
         _settingsManager.Save();
         _renderScheduler.TriggerUserUpdate();
-        SetStatusOverride("Updating…", Theme.Accent);
+        BeginUpdateStatus();
 
         _loading = true;
         try { LoadDisplayIntoUi(); }
@@ -552,7 +555,11 @@ public partial class SettingsForm
     private void RefreshPresets()
     {
         _presetFlow.SuspendLayout();
-        foreach (Control c in _presetFlow.Controls.Cast<Control>().ToList()) c.Dispose();
+        foreach (Control c in _presetFlow.Controls.Cast<Control>().ToList())
+        {
+            c.ContextMenuStrip?.Dispose(); // A component, not a child — not disposed with the chip
+            c.Dispose();
+        }
         _presetFlow.Controls.Clear();
 
         foreach (var preset in _settings.Presets.ToList())
@@ -630,6 +637,8 @@ public partial class SettingsForm
             t.ImageStyle = p.ImageStyle;
             t.EpicImageType = p.EpicImageType;
         });
+        // A photo preset should show its picture now, even on a rotating display
+        if (p.DisplayMode == DisplayMode.StillImage) _showSelectionOnCommit = true;
         _browsingPhotos.Remove(CurrentImageKey);
         _loading = true;
         try { LoadDisplayIntoUi(); }

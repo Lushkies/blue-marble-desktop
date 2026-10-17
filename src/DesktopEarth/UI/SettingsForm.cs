@@ -160,7 +160,9 @@ public partial class SettingsForm : Form
     private DisplayInfo? SelectedDisplay =>
         _displays.Count > 0 ? _displays[Math.Clamp(_displayIndex, 0, _displays.Count - 1)] : null;
 
-    private bool PerDisplay => _settings.MultiMonitorMode == MultiMonitorMode.PerDisplay && _displays.Count > 1;
+    // Must match RenderScheduler, which uses per-display configs whenever this mode
+    // is on — even with one monitor connected (e.g. a laptop undocked)
+    private bool PerDisplay => _settings.MultiMonitorMode == MultiMonitorMode.PerDisplay;
 
     /// <summary>The settings currently shown for the selected display (read-only use).</summary>
     private IDisplaySettings ViewSettings =>
@@ -208,7 +210,7 @@ public partial class SettingsForm : Form
             if (_advanceRotationOnCommit) _renderScheduler.TriggerNextImage(CurrentImageKey);
             else if (_showSelectionOnCommit) _renderScheduler.TriggerShowSelection(CurrentImageKey);
             else _renderScheduler.TriggerUserUpdate();
-            SetStatusOverride("Updating…", Theme.Accent);
+            BeginUpdateStatus();
         }
         _advanceRotationOnCommit = false;
         _showSelectionOnCommit = false;
@@ -233,6 +235,7 @@ public partial class SettingsForm : Form
             Image = Icon?.ToBitmap(), SizeMode = PictureBoxSizeMode.Zoom,
             Size = new Size(24, 24), Location = new Point(8, 4), BackColor = Color.Transparent
         };
+        logo.Disposed += (_, _) => logo.Image?.Dispose(); // PictureBox doesn't own its image
         var name = new StudioLabel { Text = "Blue Marble", Font = Theme.DisplayFont(12.5f, FontStyle.Bold), Location = new Point(40, 2) };
         var sub = new StudioLabel { Text = "Desktop", ForeColor = Theme.TextMuted, Font = Theme.UiFont(8.75f), Location = new Point(41, 24) };
         brand.Controls.AddRange([logo, name, sub]);
@@ -278,7 +281,7 @@ public partial class SettingsForm : Form
                 _renderScheduler.TriggerNextImage(CurrentImageKey);
             else
                 _renderScheduler.TriggerShowSelection(CurrentImageKey);
-            SetStatusOverride("Updating…", Theme.Accent);
+            BeginUpdateStatus();
         };
         status.Controls.AddRange([_statusDot, _statusTitle, _statusSub, _updateNowButton]);
 
@@ -315,29 +318,58 @@ public partial class SettingsForm : Form
     private void HandleRenderStatus(string status)
     {
         if (IsDisposed) return;
-        if (status.StartsWith("Downloading", StringComparison.OrdinalIgnoreCase))
-            SetStatusOverride("Downloading image…", Theme.Accent);
-        else if (status.StartsWith("Rendering", StringComparison.OrdinalIgnoreCase))
-            SetStatusOverride("Updating…", Theme.Accent);
-        else if (status.Contains("offline", StringComparison.OrdinalIgnoreCase))
-            SetStatusOverride("Offline — using a cached image", Theme.Warning);
+        // A warning stays up until the user's next action — otherwise the
+        // "updated" message from the other displays would hide it at once
+        if (status.Contains("offline", StringComparison.OrdinalIgnoreCase))
+            ShowWarning("Offline", "Showing a cached picture");
         else if (status.Contains("error", StringComparison.OrdinalIgnoreCase) ||
                  status.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
                  status.Contains("No image", StringComparison.OrdinalIgnoreCase) ||
                  status.Contains("below minimum", StringComparison.OrdinalIgnoreCase))
-            SetStatusOverride(FriendlyError(status), Theme.Warning);
+            ShowWarning(FriendlyError(status));
+        else if (_statusWarningSticky)
+            return;
+        else if (status.StartsWith("Downloading", StringComparison.OrdinalIgnoreCase))
+            SetStatusOverride("Downloading image…", Theme.Accent);
+        else if (status.StartsWith("Rendering", StringComparison.OrdinalIgnoreCase))
+            SetStatusOverride("Updating…", Theme.Accent);
+        else if (status.StartsWith("Wallpaper unchanged", StringComparison.OrdinalIgnoreCase))
+        {
+            SetStatusOverride("", Theme.Success);
+            RefreshOnDisplayMarkers();
+        }
         else if (status.StartsWith("Wallpaper updated", StringComparison.OrdinalIgnoreCase))
             SetStatusOverride("", Theme.Success);
     }
 
-    private static string FriendlyError(string status)
+    private bool _statusWarningSticky;
+
+    private string _statusDetail = "";
+
+    private void ShowWarning((string Title, string Detail) warning) => ShowWarning(warning.Title, warning.Detail);
+
+    private void ShowWarning(string title, string detail)
     {
-        if (status.Contains("No images available", StringComparison.OrdinalIgnoreCase) ||
-            status.Contains("No image selected", StringComparison.OrdinalIgnoreCase))
-            return "Couldn't get that image — kept the current wallpaper";
+        _statusWarningSticky = true;
+        _statusDetail = detail;
+        SetStatusOverride(title, Theme.Warning);
+        RefreshOnDisplayMarkers(); // Re-enable "Set" after a failed attempt
+    }
+
+    /// <summary>A new user-triggered update: clear any old warning and show progress.</summary>
+    private void BeginUpdateStatus()
+    {
+        _statusWarningSticky = false;
+        SetStatusOverride("Updating…", Theme.Accent);
+    }
+
+    private static (string Title, string Detail) FriendlyError(string status)
+    {
+        if (status.Contains("No image", StringComparison.OrdinalIgnoreCase))
+            return ("Couldn't get that picture", "Kept your wallpaper. Check your connection.");
         if (status.Contains("below minimum", StringComparison.OrdinalIgnoreCase))
-            return "Image is smaller than 1080p — skipped";
-        return "Update failed — will retry";
+            return ("Picture skipped", "It's smaller than 1080p and would look blurry.");
+        return ("Update failed", "Trying again in a minute.");
     }
 
     private void SetStatusOverride(string text, Color color)
@@ -383,7 +415,7 @@ public partial class SettingsForm : Form
                 : wait.TotalHours < 48 ? $"Next update in {wait.TotalHours:0.#} h"
                 : $"Next update {nextUtc.ToLocalTime():MMM d}";
         }
-        _statusSub.Text = next;
+        _statusSub.Text = _statusWarningSticky ? _statusDetail : next;
 
         bool rotating = ViewSettings.DisplayMode == DisplayMode.StillImage && ViewSettings.RandomRotationEnabled;
         _updateNowButton.Text = rotating ? "Next image" : "Update now";
@@ -398,7 +430,7 @@ public partial class SettingsForm : Form
             BeginInvoke(() =>
             {
                 if (IsDisposed) return;
-                SetStatusOverride("", Theme.Success);
+                if (!_statusWarningSticky) SetStatusOverride("", Theme.Success);
                 RefreshPreviewsAsync();
                 RefreshOnDisplayMarkers();
             });

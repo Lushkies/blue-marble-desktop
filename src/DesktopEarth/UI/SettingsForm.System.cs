@@ -108,7 +108,9 @@ public partial class SettingsForm
         _apiKeyBox.TextChanged += (_, _) =>
         {
             if (_loading) return;
-            _settings.ApiDataGovKey = _apiKeyBox.Text.Trim();
+            // Empty means the shared demo key (the box shows it as the placeholder)
+            var key = _apiKeyBox.Text.Trim();
+            _settings.ApiDataGovKey = key.Length == 0 ? "DEMO_KEY" : key;
             QueueCommit(render: false);
         };
         var verify = new StudioButton { Text = "Check", Width = 80 };
@@ -133,7 +135,8 @@ public partial class SettingsForm
             _settings.DarkModeEnabled = dark;
             Theme.IsDarkMode = dark;
             _settingsManager.Save();
-            RequestReopen?.Invoke();
+            // Recreating the window disposes it — never from inside this control's own event
+            BeginInvoke(() => RequestReopen?.Invoke());
         };
         var theme = SettingRow("Appearance", "Theme for this window", _themeSegment);
 

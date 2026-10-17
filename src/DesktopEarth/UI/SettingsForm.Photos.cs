@@ -30,6 +30,7 @@ public partial class SettingsForm
     private readonly Dictionary<ImageSource, ThumbnailGridPanel> _grids = new();
     private readonly Dictionary<ImageSource, Panel> _toolbars = new();
     private readonly HashSet<ImageSource> _loadedSources = new();
+    private readonly Dictionary<ImageSource, int> _loadGenerations = new();
     private ImageSource _browseSource = ImageSource.NasaGallery;
 
     private ToggleSwitch _rotateSwitch = null!;
@@ -315,14 +316,22 @@ public partial class SettingsForm
             chip.Selected = !_settings.ExcludedRotationSources.Contains((RotationSource)chip.Tag!);
         _apodDaysCombo.SelectedIndex = Math.Max(0, Array.IndexOf(ApodDaysValues, v.ApodRecentDays) is int i and >= 0 ? i : 1);
 
-        if (_gallerySearch.Text.Length == 0) _gallerySearch.Text = v.NasaGallerySearchQuery;
-        if (_npsSearch.Text.Length == 0) _npsSearch.Text = v.NpsSearchQuery;
-        if (_smithsonianSearch.Text.Length == 0) _smithsonianSearch.Text = v.SmithsonianSearchQuery;
+        // Each display remembers its own searches; a different query means a reload
+        SyncQuery(_gallerySearch, v.NasaGallerySearchQuery, ImageSource.NasaGallery);
+        SyncQuery(_npsSearch, v.NpsSearchQuery, ImageSource.NationalParks);
+        SyncQuery(_smithsonianSearch, v.SmithsonianSearchQuery, ImageSource.Smithsonian);
 
         UpdateRotationUi();
         if (_viewSegment.SelectedIndex == 3)
             ShowSource(v.DisplayMode == DisplayMode.StillImage ? v.StillImageSource : _browseSource, userPicked: false);
         RefreshOnDisplayMarkers();
+    }
+
+    private void SyncQuery(TextField box, string saved, ImageSource source)
+    {
+        if (string.IsNullOrEmpty(saved) || box.Text == saved) return;
+        box.Text = saved;
+        _loadedSources.Remove(source);
     }
 
     private void ShowSource(ImageSource source, bool userPicked)
@@ -372,7 +381,7 @@ public partial class SettingsForm
         _rotationNote.Left = rotating ? _rotateSourceCombo.Right + Dpi(14) : _rotateSourceCombo.Left;
         _rotationNote.Text = rotating
             ? $"New picture {IntervalPhrase(_settings.UpdateIntervalSeconds)} on {TargetName}"
-            : $"Off — turn on to change {TargetName}'s picture automatically";
+            : $"Off — turn on to change the picture on {TargetName} automatically";
         _rotationNote.Width = Math.Max(Dpi(60), _rotationCard.Width - _rotationNote.Left - Dpi(14));
     }
 
@@ -408,12 +417,41 @@ public partial class SettingsForm
         }
         else
         {
-            // Keep whatever picture is showing; just stop changing it
-            Edit(t => t.RandomRotationEnabled = false, render: false);
+            // Keep the picture that is showing: make it the display's selection,
+            // or the next update would fall back to an older saved pick
+            var current = _renderScheduler.GetCurrentImage(CurrentImageKey);
+            Edit(t =>
+            {
+                t.RandomRotationEnabled = false;
+                if (current != null) PinAsSelection(t, current);
+            }, render: false);
         }
         UpdateRotationUi();
         UpdatePhotosFooter();
         UpdateStatusCard();
+    }
+
+    /// <summary>Make an image that is on screen the display's saved selection.</summary>
+    private void PinAsSelection(IDisplaySettings t, RenderScheduler.CurrentImageInfo c)
+    {
+        t.StillImageSource = c.Source;
+        string url = c.Url ?? "";
+        switch (c.Source)
+        {
+            case ImageSource.NasaEpic:
+                t.EpicUseLatest = false;
+                t.EpicSelectedImage = c.Id;
+                if (ParseEpicDate(c.Id) is string date) t.EpicSelectedDate = date;
+                break;
+            case ImageSource.NasaApod: t.ApodSelectedImageId = c.Id; t.ApodSelectedImageUrl = url; break;
+            case ImageSource.NasaGallery: t.NasaGallerySelectedId = c.Id; t.NasaGallerySelectedImageUrl = url; break;
+            case ImageSource.NationalParks: t.NpsSelectedImageId = c.Id; t.NpsSelectedImageUrl = url; break;
+            case ImageSource.Smithsonian: t.SmithsonianSelectedId = c.Id; t.SmithsonianSelectedImageUrl = url; break;
+            case ImageSource.UserImages:
+                t.UserImageSelectedId = c.Id;
+                t.UserImageSelectedPath = c.Path ?? _userImageManager.GetImagePath(c.Id) ?? "";
+                break;
+        }
     }
 
     private void OnRotationSourceChanged()
@@ -597,6 +635,9 @@ public partial class SettingsForm
     private async void LoadGrid(ImageSource source, string loadingText, Func<Task<List<ImageSourceInfo>?>> fetch,
         string emptyText, string failText)
     {
+        // Only the newest load for a source may fill its grid: two quick searches
+        // can finish out of order
+        int generation = _loadGenerations[source] = _loadGenerations.GetValueOrDefault(source) + 1;
         var grid = _grids[source];
         grid.SetImages(new List<ImageSourceInfo>());
         grid.EmptyText = loadingText;
@@ -606,10 +647,12 @@ public partial class SettingsForm
         try { images = await Task.Run(fetch); }
         catch { images = null; }
         if (IsDisposed) return;
+        if (_loadGenerations[source] != generation) return;
 
         if (images == null || images.Count == 0)
         {
             grid.EmptyText = images == null ? failText : emptyText;
+            if (images == null) _loadedSources.Remove(source); // Retry when the source is shown again
             return;
         }
         lock (_settings.FavoritesLock)
@@ -667,14 +710,14 @@ public partial class SettingsForm
             int days = ApodDaysValues[Math.Max(0, _apodDaysCombo.SelectedIndex)];
             LoadGrid(ImageSource.NasaApod, "Loading NASA's Picture of the Day…",
                 () => _apodApi.GetRecentAsync(key, days),
-                "No pictures in that range.", "Couldn't reach NASA APOD. Check your API key in Settings.");
+                "NASA's Picture of the Day feed is sending placeholders instead of pictures right now. Your saved APOD favorites still work.", "Couldn't reach NASA APOD. Check your API key in Settings.");
         }
         else
         {
             string date = _apodDatePicker.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             LoadGrid(ImageSource.NasaApod, "Loading…",
                 async () => await _apodApi.GetByDateAsync(key, date) is { } one ? new List<ImageSourceInfo> { one } : null,
-                "No picture that day.", "No picture for that date (some days are videos), or NASA is unreachable.");
+                "No picture that day.", "No picture for that date (it may be a video, or NASA's feed is sending placeholders).");
         }
     }
 

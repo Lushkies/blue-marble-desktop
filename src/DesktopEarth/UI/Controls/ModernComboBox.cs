@@ -155,7 +155,7 @@ public class TextField : StudioControl
         set { _box.PlaceholderText = value; AccessibleName = value; _box.AccessibleName = value; }
     }
 
-    protected override void OnClick(EventArgs e) { base.OnClick(e); _box.Focus(); }
+    protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); _box.Focus(); }
 
     protected override void OnLayout(LayoutEventArgs e)
     {
