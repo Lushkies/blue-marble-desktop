@@ -86,6 +86,8 @@ public class SettingsManager
             return;
         }
 
+        AdoptLegacyDisplayConfigs();
+
         // Subsequent launch: skip the first render to preserve existing wallpaper
         if (Settings.HasLaunchedBefore)
         {
@@ -246,6 +248,36 @@ public class SettingsManager
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Give per-display configs saved before v2.2 (keyed only by \\.\DISPLAYn)
+    /// their stable monitor id now, and save it — so a later renumbering by
+    /// Windows can't attach them to a different monitor.
+    /// </summary>
+    private void AdoptLegacyDisplayConfigs()
+    {
+        bool hasLegacy;
+        lock (Settings.DisplayConfigsLock)
+            hasLegacy = Settings.DisplayConfigs.Any(c => c.MonitorId.Length == 0);
+        if (!hasLegacy) return;
+
+        try
+        {
+            bool adopted = false;
+            foreach (var display in MonitorManager.GetDisplays())
+            {
+                bool wasLegacy;
+                lock (Settings.DisplayConfigsLock)
+                    wasLegacy = Settings.DisplayConfigs.Any(c => c.MonitorId.Length == 0 && c.DeviceName == display.DeviceName);
+                if (wasLegacy && Settings.FindDisplayConfig(display) != null) adopted = true;
+            }
+            if (adopted) Save();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Settings: display config adoption skipped ({ex.Message})");
+        }
     }
 
     /// <summary>
