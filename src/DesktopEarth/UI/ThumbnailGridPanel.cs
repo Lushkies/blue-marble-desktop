@@ -1,221 +1,244 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using Glyph = DesktopEarth.UI.Controls.Glyph;
 
 namespace DesktopEarth.UI;
 
 /// <summary>
-/// A scrollable grid of image thumbnails with lazy loading, favorites, and quality badges.
-/// Dynamic column count based on panel width (minimum 3 columns).
+/// A scrollable grid of image thumbnails with lazy loading, favorites, quality
+/// badges and an "on display" marker. Columns adapt to the width. Clicking a
+/// cell only selects it (<see cref="ImageSelected"/>); double-click or Enter
+/// raises <see cref="ImageActivated"/>.
 /// </summary>
 public class ThumbnailGridPanel : Panel
 {
-    // Design-time (96 DPI) metrics; the scaled copies below are recomputed from
-    // the control's current DPI so cells stay proportional at 125-150% scaling
-    private const int MinColumns = 3;
-    private const int ThumbSize = 130;
-    private const int CellPadding = 6;
-    private const int TitleHeight = 20;
-    private const int StarSize = 20;
-    private const int BadgeWidth = 24;
-    private const int BadgeHeight = 14;
+    // Design-time (96 DPI) metrics, scaled by DeviceDpi at layout time
+    private const int MinCellWidth = 168;
+    private const int Gap = 12;
+    private const int TitleHeight = 22;
+    private const int StarSize = 26;
 
-    // DPI-scaled cell metrics (see UpdateScaledMetrics)
-    private int _thumbSize = ThumbSize;
-    private int _cellPadding = CellPadding;
-    private int _titleHeight = TitleHeight;
-    private int _starSize = StarSize;
-    private int _badgeWidth = BadgeWidth;
-    private int _badgeHeight = BadgeHeight;
-    private int _cellWidth = ThumbSize + CellPadding * 2;
-    private int _cellHeight = ThumbSize + TitleHeight + CellPadding * 2;
-
-    private int _columns = MinColumns;
+    private int _columns = 3;
+    private int _cellWidth, _thumbHeight, _cellHeight, _gap;
     private List<ImageSourceInfo> _images = new();
-    private int _selectedIndex = -1;
+    private int _selectedIndex = -1, _hoverIndex = -1;
     private readonly ImageCache _cache;
-    private readonly Dictionary<string, System.Drawing.Image?> _loadedThumbs = new();
+    private readonly Dictionary<string, Image?> _loadedThumbs = new();
     private readonly HashSet<string> _loadingThumbs = new();
     private CancellationTokenSource _loadCts = new();
-
-    // Inner panel for scrolling (holds the actual painted content)
     private readonly Panel _innerPanel;
+    private string _emptyText = "";
 
-    /// <summary>Fires when a user clicks on an image cell.</summary>
+    /// <summary>Fires when the user clicks an image (selection only).</summary>
     public event EventHandler<ImageSourceInfo>? ImageSelected;
 
-    /// <summary>Fires when a user clicks the star icon on an image.</summary>
+    /// <summary>Fires on double-click or Enter — "use this one".</summary>
+    public event EventHandler<ImageSourceInfo>? ImageActivated;
+
+    /// <summary>Fires when the user clicks the star on an image.</summary>
     public event EventHandler<ImageSourceInfo>? FavoriteToggled;
 
-    /// <summary>When true, show a source label badge on each thumbnail (e.g. "APOD", "NPS").</summary>
-    public bool ShowSourceBadge { get; set; } = false;
+    /// <summary>Show a source label (APOD, NASA…) on each thumbnail.</summary>
+    public bool ShowSourceBadge { get; set; }
 
-    private bool _dimmed;
-    /// <summary>When true, draws a semi-transparent overlay to visually mute the grid (clicks still work).</summary>
-    public bool Dimmed
+    /// <summary>Ids of the images currently on screen; they get an "ON DISPLAY" tag.</summary>
+    public HashSet<string> OnDisplayIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Message shown when the grid is empty ("Loading…", "No results").</summary>
+    public string EmptyText
     {
-        get => _dimmed;
-        set { if (_dimmed == value) return; _dimmed = value; _innerPanel.Invalidate(); }
+        get => _emptyText;
+        set { _emptyText = value ?? ""; _innerPanel.Invalidate(); Invalidate(); }
     }
 
     public ImageSourceInfo? SelectedImage =>
-        _selectedIndex >= 0 && _selectedIndex < _images.Count
-            ? _images[_selectedIndex] : null;
+        _selectedIndex >= 0 && _selectedIndex < _images.Count ? _images[_selectedIndex] : null;
+
+    public int Count => _images.Count;
 
     public ThumbnailGridPanel(ImageCache cache)
     {
         _cache = cache;
         AutoScroll = true;
-        BackColor = Theme.ControlBackground;
-        BorderStyle = BorderStyle.FixedSingle;
-
-        // Dark scrollbars for this panel
+        BackColor = Theme.Ground;
+        TabStop = true;
+        SetStyle(ControlStyles.Selectable, true);
         Theme.StyleScrollableControl(this);
 
-        _innerPanel = new Panel
-        {
-            Location = new Point(0, 0),
-            BackColor = Theme.ControlBackground
-        };
+        _innerPanel = new Panel { Location = new Point(0, 0), BackColor = Theme.Ground };
         _innerPanel.Paint += InnerPanel_Paint;
         _innerPanel.MouseClick += InnerPanel_MouseClick;
-
-        // Enable double-buffering on inner panel via reflection
+        _innerPanel.MouseDoubleClick += InnerPanel_MouseDoubleClick;
+        _innerPanel.MouseMove += (_, e) => SetHover(GetIndexAtPoint(e.Location));
+        _innerPanel.MouseLeave += (_, _) => SetHover(-1);
         typeof(Panel).GetProperty("DoubleBuffered",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?
             .SetValue(_innerPanel, true);
-
         Controls.Add(_innerPanel);
     }
 
-    /// <summary>
-    /// Replace all images in the grid. Cancels in-flight thumbnail loads.
-    /// </summary>
+    protected override void OnBackColorChanged(EventArgs e)
+    {
+        base.OnBackColorChanged(e);
+        if (_innerPanel is not null) _innerPanel.BackColor = BackColor; // Null during base construction
+    }
+
+    /// <summary>Replace all images. Cancels in-flight thumbnail loads; clears selection.</summary>
     public void SetImages(List<ImageSourceInfo> images)
     {
-        // Cancel pending thumbnail downloads
         _loadCts.Cancel();
         _loadCts.Dispose();
         _loadCts = new CancellationTokenSource();
 
         _images = images ?? new List<ImageSourceInfo>();
-        _selectedIndex = -1; // No pre-selection — user must click to select
+        _selectedIndex = -1;
+        _hoverIndex = -1;
 
-        // Dispose old thumbnails
-        foreach (var thumb in _loadedThumbs.Values)
-            thumb?.Dispose();
+        foreach (var thumb in _loadedThumbs.Values) thumb?.Dispose();
         _loadedThumbs.Clear();
         _loadingThumbs.Clear();
 
+        AutoScrollPosition = new Point(0, 0);
         RecalculateLayout();
     }
 
-    /// <summary>
-    /// Select an image by its ID. Used to restore saved selection after SetImages().
-    /// Returns true if the image was found and selected.
-    /// </summary>
+    /// <summary>Select an image by id (no event). Returns true if found.</summary>
     public bool SelectById(string? imageId)
     {
-        if (string.IsNullOrEmpty(imageId))
-            return false;
-
-        for (int i = 0; i < _images.Count; i++)
-        {
-            if (_images[i].Id == imageId)
-            {
-                _selectedIndex = i;
-                _innerPanel.Invalidate();
-                return true;
-            }
-        }
-        return false;
+        if (string.IsNullOrEmpty(imageId)) return false;
+        int i = _images.FindIndex(img => string.Equals(img.Id, imageId, StringComparison.OrdinalIgnoreCase));
+        if (i < 0) return false;
+        _selectedIndex = i;
+        _innerPanel.Invalidate();
+        return true;
     }
 
-    /// <summary>
-    /// Update the favorite status of a specific image in the grid.
-    /// </summary>
+    public void ClearSelection()
+    {
+        _selectedIndex = -1;
+        _innerPanel.Invalidate();
+    }
+
     public void UpdateFavoriteStatus(string imageId, bool isFavorited)
     {
         var img = _images.Find(i => i.Id == imageId);
-        if (img != null)
-        {
-            img.IsFavorited = isFavorited;
-            _innerPanel.Invalidate();
-        }
+        if (img == null) return;
+        img.IsFavorited = isFavorited;
+        _innerPanel.Invalidate();
     }
+
+    /// <summary>Repaint after changing <see cref="OnDisplayIds"/> or favorites.</summary>
+    public void RepaintCells() => _innerPanel.Invalidate();
+
+    /// <summary>The loaded thumbnail for an image, if any (owned by the grid — copy it to keep it).</summary>
+    public Image? GetThumbnail(string imageId) =>
+        _loadedThumbs.TryGetValue(imageId, out var t) ? t : null;
+
+    /// <summary>All images currently in the grid.</summary>
+    public IReadOnlyList<ImageSourceInfo> Images => _images;
 
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        RecalculateLayout();
+        if (_innerPanel is not null) RecalculateLayout();
     }
+
+    private int Px(float v) => (int)Math.Round(v * DeviceDpi / 96f);
 
     private void RecalculateLayout()
     {
-        UpdateScaledMetrics();
+        _gap = Px(Gap);
+        int available = Math.Max(1, ClientSize.Width - SystemInformation.VerticalScrollBarWidth - _gap);
+        _columns = Math.Max(2, (available + _gap) / (Px(MinCellWidth) + _gap));
+        _cellWidth = (available - _gap * (_columns - 1)) / _columns;
+        _thumbHeight = _cellWidth * 10 / 16;
+        _cellHeight = _thumbHeight + Px(TitleHeight) + _gap;
 
-        // Calculate columns based on available width (account for scrollbar)
-        int availableWidth = ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 2;
-        _columns = Math.Max(MinColumns, availableWidth / _cellWidth);
+        int rows = (_images.Count + _columns - 1) / _columns;
+        _innerPanel.Size = new Size(available, Math.Max(rows * _cellHeight, 10));
+        _innerPanel.Invalidate();
+        Invalidate();
+    }
 
-        int rows = (_images.Count + _columns - 1) / Math.Max(_columns, 1);
-        _innerPanel.Size = new Size(_columns * _cellWidth + 2, Math.Max(rows * _cellHeight, 10));
+    private Rectangle GetCellBounds(int index)
+    {
+        int col = index % _columns, row = index / _columns;
+        return new Rectangle(col * (_cellWidth + _gap), row * _cellHeight, _cellWidth, _cellHeight - _gap);
+    }
+
+    private Rectangle GetThumbBounds(int index)
+    {
+        var c = GetCellBounds(index);
+        return new Rectangle(c.X, c.Y, c.Width, _thumbHeight);
+    }
+
+    private Rectangle GetStarBounds(int index)
+    {
+        var t = GetThumbBounds(index);
+        int s = Px(StarSize);
+        return new Rectangle(t.Right - s - Px(6), t.Top + Px(6), s, s);
+    }
+
+    private int GetIndexAtPoint(Point p)
+    {
+        for (int i = 0; i < _images.Count; i++)
+            if (GetCellBounds(i).Contains(p)) return i;
+        return -1;
+    }
+
+    private void SetHover(int i)
+    {
+        if (i == _hoverIndex) return;
+        _hoverIndex = i;
+        _innerPanel.Cursor = i >= 0 ? Cursors.Hand : Cursors.Default;
         _innerPanel.Invalidate();
     }
 
-    private void UpdateScaledMetrics()
+    protected override void OnPaint(PaintEventArgs e)
     {
-        float f = DeviceDpi / 96f;
-        _thumbSize = (int)Math.Round(ThumbSize * f);
-        _cellPadding = (int)Math.Round(CellPadding * f);
-        _titleHeight = (int)Math.Round(TitleHeight * f);
-        _starSize = (int)Math.Round(StarSize * f);
-        _badgeWidth = (int)Math.Round(BadgeWidth * f);
-        _badgeHeight = (int)Math.Round(BadgeHeight * f);
-        _cellWidth = _thumbSize + _cellPadding * 2;
-        _cellHeight = _thumbSize + _titleHeight + _cellPadding * 2;
+        base.OnPaint(e);
+        if (_images.Count == 0 && _emptyText.Length > 0)
+            TextRenderer.DrawText(e.Graphics, _emptyText, Theme.UiFont(10f), ClientRectangle, Theme.TextMuted,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
     }
 
     private void InnerPanel_Paint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        Theme.HighQuality(g);
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
-        using var titleFont = new Font("Segoe UI", 7.5f);
-        using var titleBrush = new SolidBrush(Theme.ThumbnailTitle);
-        using var placeholderBrush = new SolidBrush(Theme.Placeholder);
-        using var selectedPen = new Pen(Color.FromArgb(0, 120, 215), 2);
-        using var starBrush = new SolidBrush(Color.FromArgb(255, 200, 50));
-        using var starOutlinePen = new Pen(Theme.StarOutline, 1);
-        using var badgeFont = new Font("Segoe UI", 7f, FontStyle.Bold);
+        if (_images.Count == 0 && _emptyText.Length > 0)
+        {
+            TextRenderer.DrawText(g, _emptyText, Theme.UiFont(10f),
+                new Rectangle(0, 0, _innerPanel.Width, Math.Max(Px(120), ClientSize.Height)), Theme.TextMuted,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+            return;
+        }
+
+        float radius = Px(8);
+        var titleFont = Theme.UiFont(8.75f);
+        var badgeFont = Theme.Semibold(7f);
 
         for (int i = 0; i < _images.Count; i++)
         {
-            var cellRect = GetCellBounds(i);
-
-            // Only paint visible cells
-            if (!e.ClipRectangle.IntersectsWith(cellRect))
-                continue;
+            var cell = GetCellBounds(i);
+            if (!e.ClipRectangle.IntersectsWith(cell)) continue;
 
             var img = _images[i];
-            var thumbRect = new Rectangle(
-                cellRect.X + _cellPadding,
-                cellRect.Y + _cellPadding,
-                _thumbSize, _thumbSize);
+            var thumbRect = GetThumbBounds(i);
+            using var thumbPath = Theme.RoundedRect(thumbRect, radius);
 
-            // Draw thumbnail or placeholder
+            var state = g.Save();
+            g.SetClip(thumbPath);
             if (_loadedThumbs.TryGetValue(img.Id, out var thumb) && thumb != null)
             {
-                // Draw with aspect ratio maintained, centered in the thumb rect
-                DrawThumbnailFit(g, thumb, thumbRect);
+                DrawCover(g, thumb, thumbRect);
             }
             else
             {
-                // Draw placeholder
-                g.FillRectangle(placeholderBrush, thumbRect);
-
-                // Queue thumbnail load if not already loading
-                // Load if there's a URL to download, OR if the cache already has it (local images)
+                using var ph = new SolidBrush(Theme.Placeholder);
+                g.FillRectangle(ph, thumbRect);
                 if (!_loadingThumbs.Contains(img.Id) &&
                     (!string.IsNullOrEmpty(img.ThumbnailUrl) || _cache.IsThumbCached(img.Source, img.Id)))
                 {
@@ -223,186 +246,107 @@ public class ThumbnailGridPanel : Panel
                     _ = LoadThumbnailAsync(img, _loadCts.Token);
                 }
             }
+            if (i == _hoverIndex && i != _selectedIndex)
+            {
+                using var hover = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
+                g.FillRectangle(hover, thumbRect);
+            }
+            g.Restore(state);
 
-            // Selection highlight
             if (i == _selectedIndex)
             {
-                g.DrawRectangle(selectedPen, thumbRect.X - 1, thumbRect.Y - 1,
-                    thumbRect.Width + 2, thumbRect.Height + 2);
+                using var sel = new Pen(Theme.Accent, Px(2.5f));
+                using var selPath = Theme.RoundedRect(RectangleF.Inflate(thumbRect, Px(1), Px(1)), radius + Px(1));
+                g.DrawPath(sel, selPath);
             }
 
-            // Quality badge (bottom-right of thumbnail)
-            DrawQualityBadge(g, img.QualityTier, thumbRect, badgeFont);
-
-            // Source badge (bottom-left of thumbnail, only when ShowSourceBadge is enabled)
+            // Bottom-right quality tag, bottom-left source tag, top-left "on display"
+            DrawTag(g, QualityText(img.QualityTier), badgeFont, thumbRect, alignRight: true, bottom: true,
+                fore: img.QualityTier == ImageQualityTier.UD ? Theme.Gold : img.QualityTier == ImageQualityTier.HD ? Theme.Hex(0x7FB2FF) : Color.FromArgb(220, 220, 225),
+                back: Color.FromArgb(200, 11, 13, 18));
             if (ShowSourceBadge)
-                DrawSourceBadge(g, img.Source, thumbRect, badgeFont);
+                DrawTag(g, SourceText(img.Source), badgeFont, thumbRect, alignRight: false, bottom: true,
+                    fore: Color.FromArgb(225, 230, 235), back: Color.FromArgb(200, 11, 13, 18));
+            if (OnDisplayIds.Contains(img.Id) || OnDisplayIds.Contains(ImageCache.SanitizeFileName(img.Id)))
+                DrawTag(g, "ON DISPLAY", badgeFont, thumbRect, alignRight: false, bottom: false,
+                    fore: Theme.OnAccent, back: Theme.Accent);
 
-            // Title text (truncated)
-            var titleRect = new Rectangle(
-                cellRect.X + _cellPadding,
-                cellRect.Y + _cellPadding + _thumbSize + 2,
-                _thumbSize, _titleHeight);
-            var title = TruncateText(img.Title, titleFont, _thumbSize, g);
-            g.DrawString(title, titleFont, titleBrush, titleRect);
-
-            // Favorite star
-            var starRect = GetStarBounds(i);
-            if (img.IsFavorited)
+            // Star: always visible when favorited, otherwise on hover/selection
+            if (img.IsFavorited || i == _hoverIndex || i == _selectedIndex)
             {
-                DrawStar(g, starRect, starBrush, null);
+                var s = GetStarBounds(i);
+                using (var circle = new SolidBrush(Color.FromArgb(170, 11, 13, 18)))
+                    g.FillEllipse(circle, s);
+                TextRenderer.DrawText(g, img.IsFavorited ? Glyph.StarFilled : Glyph.Star,
+                    Glyph.Font(9.5f), s, img.IsFavorited ? Theme.Star : Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
-            else
-            {
-                // Only draw outline star on hover area (always draw faintly for discoverability)
-                using var faintBrush = new SolidBrush(Color.FromArgb(60, 200, 200, 200));
-                DrawStar(g, starRect, faintBrush, starOutlinePen);
-            }
+
+            var titleRect = new Rectangle(cell.X + Px(2), thumbRect.Bottom + Px(4), cell.Width - Px(4), Px(TitleHeight) - Px(4));
+            TextRenderer.DrawText(g, img.Title, titleFont, titleRect,
+                i == _selectedIndex ? Theme.Text : Theme.TextSecondary,
+                TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis |
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         }
 
-        // Draw dim overlay when auto-rotate is active
-        if (_dimmed)
+        if (Focused && ShowFocusCues && _selectedIndex >= 0)
         {
-            using var dimBrush = new SolidBrush(Color.FromArgb(100,
-                Theme.IsDarkMode ? Color.FromArgb(20, 20, 20) : Color.FromArgb(255, 255, 255)));
-            g.FillRectangle(dimBrush, 0, 0, _innerPanel.Width, _innerPanel.Height);
+            using var focus = new Pen(Theme.Text, 1) { DashStyle = DashStyle.Dot };
+            var fr = Rectangle.Inflate(GetThumbBounds(_selectedIndex), Px(4), Px(4));
+            g.DrawRectangle(focus, fr);
         }
     }
 
-    private void DrawQualityBadge(Graphics g, ImageQualityTier tier,
-        Rectangle thumbRect, Font font)
+    private void DrawTag(Graphics g, string text, Font font, Rectangle thumb, bool alignRight, bool bottom, Color fore, Color back)
     {
-        string text;
-        Color bgColor;
-
-        switch (tier)
-        {
-            case ImageQualityTier.UD:
-                text = "UD";
-                bgColor = Color.FromArgb(200, 180, 140, 20); // Gold
-                break;
-            case ImageQualityTier.HD:
-                text = "HD";
-                bgColor = Color.FromArgb(200, 0, 100, 200); // Blue
-                break;
-            case ImageQualityTier.SD:
-                text = "SD";
-                bgColor = Color.FromArgb(200, 120, 120, 120); // Gray
-                break;
-            default:
-                text = "?";
-                bgColor = Color.FromArgb(160, 60, 60, 60); // Dark gray
-                break;
-        }
-
-        var badgeRect = new Rectangle(
-            thumbRect.Right - _badgeWidth - 2,
-            thumbRect.Bottom - _badgeHeight - 2,
-            _badgeWidth, _badgeHeight);
-
-        using var bgBrush = new SolidBrush(bgColor);
-        using var textBrush = new SolidBrush(Color.White);
-
-        // Rounded rectangle badge
-        g.FillRectangle(bgBrush, badgeRect);
-
-        // Center text in badge
-        var textSize = g.MeasureString(text, font);
-        float tx = badgeRect.X + (badgeRect.Width - textSize.Width) / 2;
-        float ty = badgeRect.Y + (badgeRect.Height - textSize.Height) / 2;
-        g.DrawString(text, font, textBrush, tx, ty);
+        if (text.Length == 0) return;
+        var size = TextRenderer.MeasureText(text, font, Size.Empty, TextFormatFlags.NoPadding);
+        int w = size.Width + Px(10), h = Px(17);
+        int x = alignRight ? thumb.Right - w - Px(6) : thumb.Left + Px(6);
+        int y = bottom ? thumb.Bottom - h - Px(6) : thumb.Top + Px(6);
+        var r = new Rectangle(x, y, w, h);
+        using (var path = Theme.RoundedRect(r, h / 2f))
+        using (var b = new SolidBrush(back))
+            g.FillPath(b, path);
+        TextRenderer.DrawText(g, text, font, r, fore,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
 
-    private void DrawSourceBadge(Graphics g, ImageSource source,
-        Rectangle thumbRect, Font font)
+    private static string QualityText(ImageQualityTier tier) => tier switch
     {
-        string text = source switch
-        {
-            ImageSource.NasaEpic => "EPIC",
-            ImageSource.NasaApod => "APOD",
-            ImageSource.NationalParks => "NPS",
-            ImageSource.Smithsonian => "SI",
-            ImageSource.UserImages => "USER",
-            ImageSource.NasaGallery => "NASA",
-            _ => ""
-        };
-        if (string.IsNullOrEmpty(text)) return;
+        ImageQualityTier.UD => "UD",
+        ImageQualityTier.HD => "HD",
+        ImageQualityTier.SD => "SD",
+        _ => ""
+    };
 
-        var textSize = g.MeasureString(text, font);
-        int badgeW = (int)textSize.Width + 6;
-        var badgeRect = new Rectangle(
-            thumbRect.Left + 2,
-            thumbRect.Bottom - _badgeHeight - 2,
-            badgeW, _badgeHeight);
-
-        using var bgBrush = new SolidBrush(Color.FromArgb(180, 30, 30, 30));
-        using var textBrush = new SolidBrush(Color.White);
-
-        g.FillRectangle(bgBrush, badgeRect);
-        float tx = badgeRect.X + 3;
-        float ty = badgeRect.Y + (badgeRect.Height - textSize.Height) / 2;
-        g.DrawString(text, font, textBrush, tx, ty);
-    }
-
-    private static void DrawThumbnailFit(Graphics g, System.Drawing.Image thumb, Rectangle destRect)
+    private static string SourceText(ImageSource source) => source switch
     {
-        float imgAspect = (float)thumb.Width / thumb.Height;
-        float destAspect = (float)destRect.Width / destRect.Height;
+        ImageSource.NasaEpic => "EPIC",
+        ImageSource.NasaApod => "APOD",
+        ImageSource.NationalParks => "PARKS",
+        ImageSource.Smithsonian => "SMITHSONIAN",
+        ImageSource.UserImages => "MINE",
+        ImageSource.NasaGallery => "NASA",
+        _ => ""
+    };
 
-        int drawW, drawH;
-        if (imgAspect > destAspect)
-        {
-            drawW = destRect.Width;
-            drawH = (int)(destRect.Width / imgAspect);
-        }
-        else
-        {
-            drawH = destRect.Height;
-            drawW = (int)(destRect.Height * imgAspect);
-        }
-
-        int drawX = destRect.X + (destRect.Width - drawW) / 2;
-        int drawY = destRect.Y + (destRect.Height - drawH) / 2;
-
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.DrawImage(thumb, drawX, drawY, drawW, drawH);
-    }
-
-    private static void DrawStar(Graphics g, Rectangle rect, Brush fill, Pen? outline)
+    private static void DrawCover(Graphics g, Image img, Rectangle dest)
     {
-        // 5-pointed star
-        float cx = rect.X + rect.Width / 2f;
-        float cy = rect.Y + rect.Height / 2f;
-        float outerR = rect.Width / 2f;
-        float innerR = outerR * 0.4f;
-
-        var points = new PointF[10];
-        for (int i = 0; i < 10; i++)
-        {
-            float angle = (float)(Math.PI / 2 + i * Math.PI / 5);
-            float r = i % 2 == 0 ? outerR : innerR;
-            points[i] = new PointF(
-                cx + r * (float)Math.Cos(angle),
-                cy - r * (float)Math.Sin(angle));
-        }
-
-        g.FillPolygon(fill, points);
-        if (outline != null)
-            g.DrawPolygon(outline, points);
+        float scale = Math.Max((float)dest.Width / img.Width, (float)dest.Height / img.Height);
+        float w = img.Width * scale, h = img.Height * scale;
+        g.DrawImage(img, dest.X + (dest.Width - w) / 2, dest.Y + (dest.Height - h) / 2, w, h);
     }
 
     private void InnerPanel_MouseClick(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
-
+        Focus();
         int index = GetIndexAtPoint(e.Location);
-        if (index < 0 || index >= _images.Count) return;
-
+        if (index < 0) return;
         var img = _images[index];
 
-        // Check if click was on the star
-        var starRect = GetStarBounds(index);
-        if (starRect.Contains(e.Location))
+        if (GetStarBounds(index).Contains(e.Location))
         {
             img.IsFavorited = !img.IsFavorited;
             FavoriteToggled?.Invoke(this, img);
@@ -410,132 +354,104 @@ public class ThumbnailGridPanel : Panel
             return;
         }
 
-        // Regular selection
         _selectedIndex = index;
         _innerPanel.Invalidate();
         ImageSelected?.Invoke(this, img);
     }
 
+    private void InnerPanel_MouseDoubleClick(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        int index = GetIndexAtPoint(e.Location);
+        if (index < 0 || GetStarBounds(index).Contains(e.Location)) return;
+        ImageActivated?.Invoke(this, _images[index]);
+    }
+
+    protected override bool IsInputKey(Keys keyData) =>
+        keyData is Keys.Left or Keys.Right or Keys.Up or Keys.Down || base.IsInputKey(keyData);
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (_images.Count == 0) return;
+        if (e.KeyCode == Keys.Enter && SelectedImage != null)
+        {
+            ImageActivated?.Invoke(this, SelectedImage);
+            e.Handled = true;
+            return;
+        }
+        int i = _selectedIndex < 0 ? 0 : _selectedIndex;
+        int next = e.KeyCode switch
+        {
+            Keys.Left => i - 1, Keys.Right => i + 1,
+            Keys.Up => i - _columns, Keys.Down => i + _columns,
+            _ => int.MinValue
+        };
+        if (next == int.MinValue) return;
+        next = Math.Clamp(next, 0, _images.Count - 1);
+        _selectedIndex = next;
+        ScrollControlIntoView(_innerPanel);
+        var cell = GetCellBounds(next);
+        if (cell.Top + AutoScrollPosition.Y < 0 || cell.Bottom + AutoScrollPosition.Y > ClientSize.Height)
+            AutoScrollPosition = new Point(0, Math.Max(0, cell.Top - _gap));
+        _innerPanel.Invalidate();
+        ImageSelected?.Invoke(this, _images[next]);
+        e.Handled = true;
+    }
+
+    protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); _innerPanel.Invalidate(); }
+    protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); _innerPanel.Invalidate(); }
+
     private async Task LoadThumbnailAsync(ImageSourceInfo image, CancellationToken ct)
     {
         try
         {
-            // Try to load from thumbnail cache first
-            string? localPath = null;
-            if (_cache.IsThumbCached(image.Source, image.Id))
-            {
-                localPath = _cache.GetThumbCachePath(image.Source, image.Id);
-            }
-            else
-            {
-                localPath = await _cache.DownloadThumbnail(
-                    image.Source, image.Id, image.ThumbnailUrl, ct);
-            }
+            string? localPath = _cache.IsThumbCached(image.Source, image.Id)
+                ? _cache.GetThumbCachePath(image.Source, image.Id)
+                : await _cache.DownloadThumbnail(image.Source, image.Id, image.ThumbnailUrl, ct);
 
             if (ct.IsCancellationRequested) return;
             if (localPath == null)
             {
-                // Download failed — allow a retry on a later paint instead of
-                // leaving a permanent gray placeholder
+                // Download failed — allow a retry on a later paint
                 _loadingThumbs.Remove(image.Id);
                 return;
             }
 
-            // Load bitmap on background thread
-            System.Drawing.Image? bitmap = null;
+            Image? bitmap = null;
             await Task.Run(() =>
             {
                 try
                 {
                     // Copy via Bitmap so the file handle is released immediately —
-                    // Image.FromFile keeps the file locked for the image's
-                    // lifetime, which silently blocks cache pruning and deletion
-                    using var fromFile = System.Drawing.Image.FromFile(localPath);
+                    // Image.FromFile keeps the file locked for the image's lifetime,
+                    // which silently blocks cache pruning and deletion
+                    using var fromFile = Image.FromFile(localPath);
                     bitmap = new Bitmap(fromFile);
                 }
-                catch
-                {
-                    bitmap = null;
-                }
+                catch { bitmap = null; }
             }, ct);
 
-            if (ct.IsCancellationRequested)
+            if (ct.IsCancellationRequested || IsDisposed || _innerPanel.IsDisposed)
             {
                 bitmap?.Dispose();
                 return;
             }
 
-            // Store and invalidate on UI thread
-            if (IsDisposed || _innerPanel.IsDisposed) { bitmap?.Dispose(); return; }
-
-            try
+            // Continuations run on the UI thread (WinForms context)
+            if (!_loadedThumbs.ContainsKey(image.Id))
             {
-                _innerPanel.Invoke(() =>
-                {
-                    if (!_loadedThumbs.ContainsKey(image.Id))
-                    {
-                        _loadedThumbs[image.Id] = bitmap;
-                        _innerPanel.Invalidate();
-                    }
-                    else
-                    {
-                        bitmap?.Dispose();
-                    }
-                });
+                _loadedThumbs[image.Id] = bitmap;
+                _innerPanel.Invalidate();
             }
-            catch (ObjectDisposedException)
-            {
-                bitmap?.Dispose();
-            }
+            else bitmap?.Dispose();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             Console.WriteLine($"Thumbnail load error ({image.Id}): {ex.Message}");
-            // Continuations run on the UI thread (WinForms context), so this
-            // mutation is safe; allows a retry on a later paint
             _loadingThumbs.Remove(image.Id);
         }
-    }
-
-    private int GetIndexAtPoint(Point p)
-    {
-        int col = p.X / _cellWidth;
-        int row = p.Y / _cellHeight;
-        if (col < 0 || col >= _columns) return -1;
-        int index = row * _columns + col;
-        return index >= 0 && index < _images.Count ? index : -1;
-    }
-
-    private Rectangle GetCellBounds(int index)
-    {
-        int col = index % _columns;
-        int row = index / _columns;
-        return new Rectangle(col * _cellWidth, row * _cellHeight, _cellWidth, _cellHeight);
-    }
-
-    private Rectangle GetStarBounds(int index)
-    {
-        var cell = GetCellBounds(index);
-        return new Rectangle(
-            cell.X + _cellPadding + _thumbSize - _starSize - 2,
-            cell.Y + _cellPadding + 2,
-            _starSize, _starSize);
-    }
-
-    private static string TruncateText(string text, Font font, int maxWidth, Graphics g)
-    {
-        if (string.IsNullOrEmpty(text)) return "";
-        var size = g.MeasureString(text, font);
-        if (size.Width <= maxWidth) return text;
-
-        for (int i = text.Length - 1; i > 0; i--)
-        {
-            var truncated = text[..i] + "...";
-            if (g.MeasureString(truncated, font).Width <= maxWidth)
-                return truncated;
-        }
-        return "...";
     }
 
     protected override void Dispose(bool disposing)
@@ -544,8 +460,7 @@ public class ThumbnailGridPanel : Panel
         {
             _loadCts.Cancel();
             _loadCts.Dispose();
-            foreach (var thumb in _loadedThumbs.Values)
-                thumb?.Dispose();
+            foreach (var thumb in _loadedThumbs.Values) thumb?.Dispose();
             _loadedThumbs.Clear();
         }
         base.Dispose(disposing);

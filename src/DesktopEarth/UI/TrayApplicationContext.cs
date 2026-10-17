@@ -44,27 +44,29 @@ public class TrayApplicationContext : ApplicationContext
 
     private ContextMenuStrip BuildContextMenu()
     {
-        var menu = new ContextMenuStrip();
+        var menu = new ContextMenuStrip { Renderer = new Controls.StudioMenuRenderer() };
 
-        var updateNowItem = new ToolStripMenuItem("Update Wallpaper Now");
+        var updateNowItem = new ToolStripMenuItem("Update wallpaper now");
         updateNowItem.Click += (_, _) => _renderScheduler.TriggerUserUpdate();
 
-        var favoriteItem = new ToolStripMenuItem("Favorite Current Wallpaper");
+        var favoriteItem = new ToolStripMenuItem("Favorite current wallpaper");
         favoriteItem.Click += (_, _) => FavoriteCurrentWallpaper();
 
-        var settingsItem = new ToolStripMenuItem("Settings...");
+        var settingsItem = new ToolStripMenuItem("Open Blue Marble Desktop") { Font = Theme.Semibold(9.5f) };
         settingsItem.Click += (_, _) => ShowSettings();
 
-        var aboutItem = new ToolStripMenuItem("About Blue Marble Desktop");
+        var aboutItem = new ToolStripMenuItem("About");
         aboutItem.Click += (_, _) => ShowAbout();
 
         var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => ExitApplication();
 
+        menu.Font = Theme.UiFont(9.5f);
+        menu.Items.Add(settingsItem);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(updateNowItem);
         menu.Items.Add(favoriteItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(settingsItem);
         menu.Items.Add(aboutItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -100,7 +102,7 @@ public class TrayApplicationContext : ApplicationContext
         if (_settingsForm != null && !_settingsForm.IsDisposed)
         {
             savedLocation = _settingsForm.Location;
-            savedTabIndex = _settingsForm.SelectedTabIndex;
+            savedTabIndex = _settingsForm.SelectedPage;
             _settingsForm.RequestReopen -= RecreateSettingsForm;
             _settingsForm.Close();
             _settingsForm.Dispose();
@@ -121,7 +123,7 @@ public class TrayApplicationContext : ApplicationContext
             _settingsForm.Location = savedLocation.Value;
         }
         _settingsForm.Show();
-        _settingsForm.SelectedTabIndex = savedTabIndex;
+        _settingsForm.SelectedPage = savedTabIndex;
     }
 
     private void FavoriteCurrentWallpaper()

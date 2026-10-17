@@ -36,9 +36,15 @@ public class RenderScheduler : IDisposable
     private int _poolBuildCycleCount;
     private bool _isTimerTick; // Distinguishes timer ticks from user-triggered renders
 
-    // Set by "Next image" / turning auto-rotate on: the next render advances
-    // rotation even though it is user-triggered, not a timer tick
-    private volatile bool _advanceRotationRequested;
+    // What a user-triggered render should do for specific displays (keyed by
+    // MonitorId, or AllDisplaysKey for every display):
+    //   Advance       — move auto-rotate on to its next image ("Next image")
+    //   ShowSelection — show the display's chosen image even though it rotates ("Set")
+    // A rotating display with no request keeps showing its current image, so
+    // editing one display never makes another one jump.
+    private enum DisplayRequest { Advance, ShowSelection }
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DisplayRequest> _displayRequests = new();
+    private Dictionary<string, DisplayRequest> _activeRequests = new();
 
     // Gate: prevents all rendering until user explicitly triggers an update.
     // Defaults to true (first-ever run renders immediately).
@@ -189,10 +195,55 @@ public class RenderScheduler : IDisposable
     /// Re-render now and move auto-rotate on to its next image (a plain user
     /// trigger re-renders the current image instead).
     /// </summary>
-    public void TriggerNextImage()
+    public void TriggerNextImage(string displayKey = AllDisplaysKey)
     {
-        _advanceRotationRequested = true;
+        _displayRequests[displayKey] = DisplayRequest.Advance;
         TriggerUserUpdate();
+    }
+
+    /// <summary>
+    /// Re-render now showing the display's selected image even if it auto-rotates
+    /// (the user just pressed "Set"). Other rotating displays keep their image.
+    /// </summary>
+    public void TriggerShowSelection(string displayKey = AllDisplaysKey)
+    {
+        _displayRequests[displayKey] = DisplayRequest.ShowSelection;
+        TriggerUserUpdate();
+    }
+
+    /// <summary>
+    /// Decide what an auto-rotating display shows on this render: the next image
+    /// (timer tick or "Next image"), its selected image ("Set" — leaves no
+    /// override), or the image already on screen. <paramref name="skip"/> is set
+    /// when the display should keep its existing pixels untouched.
+    /// </summary>
+    private void PrepareRotation(AppSettings displaySettings, string key, bool allowSkip, out bool skip)
+    {
+        skip = false;
+        DisplayRequest? request = _activeRequests.TryGetValue(key, out var r) ? r
+            : _activeRequests.TryGetValue(AllDisplaysKey, out var all) ? all : null;
+
+        if (_isTimerTick || request == DisplayRequest.Advance)
+        {
+            PickNextImage(displaySettings, displaySettings.RandomRotationSource);
+            if (_isTimerTick) MaybeProactiveFetch(displaySettings);
+            return;
+        }
+        if (request == DisplayRequest.ShowSelection)
+            return;
+
+        // Unrelated re-render: keep showing the image already on screen
+        var current = GetCurrentImage(key);
+        if (current?.Path != null && File.Exists(current.Path))
+        {
+            _randomImageOverride = current.Path;
+            _randomImageSource = current.Source;
+            return;
+        }
+        // Unknown (e.g. first render since launch): leave the display as it is
+        // where possible, otherwise move on to a fresh rotation image
+        if (allowSkip) { skip = true; return; }
+        PickNextImage(displaySettings, displaySettings.RandomRotationSource);
     }
 
     /// <summary>
@@ -330,10 +381,13 @@ public class RenderScheduler : IDisposable
             }
 
             _renderNowSignal.Reset();
-            // Timer ticks advance auto-rotate; user-triggered renders re-render the
-            // current image unless "Next image" explicitly asked to advance
-            _isTimerTick = !signaled || _advanceRotationRequested;
-            _advanceRotationRequested = false;
+            // Timer ticks advance auto-rotate everywhere; a user-triggered render
+            // only changes rotating displays that asked for it (see PrepareRotation)
+            _isTimerTick = !signaled;
+            _activeRequests = new Dictionary<string, DisplayRequest>();
+            foreach (var requestKey in _displayRequests.Keys.ToList())
+                if (_displayRequests.TryRemove(requestKey, out var request))
+                    _activeRequests[requestKey] = request;
             firstRender = false;
 
             try
@@ -386,12 +440,9 @@ public class RenderScheduler : IDisposable
                         currentImageStyle = settings.ImageStyle;
                     }
 
-                    // Handle image rotation for still image sources (only on timer ticks, not user-triggered renders)
-                    if (settings.DisplayMode == DisplayMode.StillImage && settings.RandomRotationEnabled && _isTimerTick)
-                    {
-                        PickNextImage(settings, settings.RandomRotationSource);
-                        MaybeProactiveFetch(settings);
-                    }
+                    // Auto-rotate: advance, keep the current image, or show the selection
+                    if (settings.DisplayMode == DisplayMode.StillImage && settings.RandomRotationEnabled)
+                        PrepareRotation(settings, AllDisplaysKey, allowSkip: false, out bool _keepUnused);
 
                     string modeName = GetModeName(settings);
                     ReportStatus($"Rendering {modeName}...");
@@ -579,11 +630,12 @@ public class RenderScheduler : IDisposable
                 displayState.Style = displaySettings.ImageStyle;
             }
 
-            // Handle image rotation for this display (only on timer ticks, not user-triggered renders)
-            if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled && _isTimerTick)
+            // Auto-rotate: advance, keep the current image, or show the selection.
+            // A display that should stay untouched keeps its pixels in the composite.
+            if (displaySettings.DisplayMode == DisplayMode.StillImage && displaySettings.RandomRotationEnabled)
             {
-                PickNextImage(displaySettings, displaySettings.RandomRotationSource);
-                MaybeProactiveFetch(displaySettings);
+                PrepareRotation(displaySettings, key, allowSkip: true, out bool keepAsIs);
+                if (keepAsIs) continue;
             }
 
             // Render this display with its own cached renderers. These are never
@@ -789,7 +841,12 @@ public class RenderScheduler : IDisposable
         string? imageUrl = GetSelectedImageUrl(settings, source);
         string? imageId = GetSelectedImageId(settings, source);
 
-        if (string.IsNullOrEmpty(imageUrl) || string.IsNullOrEmpty(imageId))
+        // A selection that is already cached needs no URL (favorites saved with
+        // only a local path). Without this, such a pick fell through to "latest
+        // cached image of this source" and silently showed a different picture.
+        bool selectionCached = !string.IsNullOrEmpty(imageId) && _imageCache.IsCached(source, imageId);
+
+        if ((string.IsNullOrEmpty(imageUrl) && !selectionCached) || string.IsNullOrEmpty(imageId))
         {
             // No image selected — try cached fallback
             var cached = _imageCache.GetLatestCachedImagePath(source);
@@ -831,7 +888,7 @@ public class RenderScheduler : IDisposable
             else
             {
                 ReportStatus($"Downloading {source} image...");
-                imagePath = _imageCache.DownloadToCache(source, imageId, imageUrl)
+                imagePath = _imageCache.DownloadToCache(source, imageId, imageUrl ?? "")
                     .GetAwaiter().GetResult();
             }
         }
@@ -846,27 +903,20 @@ public class RenderScheduler : IDisposable
             // Enforce minimum 1080p quality -- skip sub-1080p images
             if (renderer.IsBelowMinimumQuality)
             {
-                ReportStatus($"{source}: Image below minimum 1080p quality, trying fallback");
+                ReportStatus($"{source}: Image below minimum 1080p quality");
                 Console.WriteLine($"RenderScheduler: Skipping {imageId} -- below 1080p minimum");
+                return null;
             }
-            else
-            {
-                SetCurrentImage(source, imageId, imageUrl, imagePath);
-                ReportStatus("Wallpaper updated");
-                return renderer.Render(width, height);
-            }
-        }
 
-        // Download failed or below quality — try any cached image for this source
-        var fallback = _imageCache.GetLatestCachedImagePath(source);
-        if (fallback != null && TryLoadImage(renderer, gl, fallback, deleteOnFailure: true))
-        {
-            ReportStatus($"{source}: Using cached image (offline)");
-            SetCurrentImage(source, Path.GetFileNameWithoutExtension(fallback), null, fallback);
+            SetCurrentImage(source, imageId, imageUrl, imagePath);
+            ReportStatus("Wallpaper updated");
             return renderer.Render(width, height);
         }
 
-        ReportStatus($"{source}: No images available");
+        // The chosen image couldn't be fetched (offline, removed upstream).
+        // Keep the current wallpaper — substituting some other cached image
+        // made it look like the app picked the wrong picture.
+        ReportStatus($"{source}: No image available (download failed)");
         return null;
     }
 

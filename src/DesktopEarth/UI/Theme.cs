@@ -1,294 +1,242 @@
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.Runtime.InteropServices;
 
 namespace DesktopEarth.UI;
 
 /// <summary>
-/// Centralized theme colors for the settings UI.
-/// When IsDarkMode is false, returns the original light-mode colors.
-/// When IsDarkMode is true, returns dark-mode equivalents.
+/// The "Studio" design tokens (colors, type, radii) for both themes, plus the
+/// Win32 calls that make native window chrome and scrollbars follow the theme.
+/// Custom-painted controls read these at paint time, so they always match.
 /// </summary>
 public static partial class Theme
 {
     public static bool IsDarkMode { get; set; }
 
-    // --- Win32 dark mode APIs ---
+    // ─── Surfaces ───
+    /// <summary>Main content background.</summary>
+    public static Color Ground => IsDarkMode ? Hex(0x0E1116) : Hex(0xF4F6F9);
+    /// <summary>Sidebar, footers and title bar.</summary>
+    public static Color Chrome => IsDarkMode ? Hex(0x0B0D12) : Hex(0xEAEDF2);
+    /// <summary>Cards.</summary>
+    public static Color Surface => IsDarkMode ? Hex(0x141820) : Hex(0xFFFFFF);
+    /// <summary>Buttons, hovered rows, inputs on cards.</summary>
+    public static Color Raised => IsDarkMode ? Hex(0x1A1F28) : Hex(0xF0F3F7);
+    public static Color RaisedHover => IsDarkMode ? Hex(0x232936) : Hex(0xE4E9F0);
+    /// <summary>Text boxes and wells sitting on a card.</summary>
+    public static Color Well => IsDarkMode ? Hex(0x0E1116) : Hex(0xF6F8FB);
 
+    public static Color Border => IsDarkMode ? Hex(0x1F2530) : Hex(0xDDE2EA);
+    public static Color BorderStrong => IsDarkMode ? Hex(0x2A313D) : Hex(0xC9D0DA);
+    public static Color Divider => IsDarkMode ? Hex(0x1C212A) : Hex(0xE1E5EC);
+
+    // ─── Text ───
+    public static Color Text => IsDarkMode ? Hex(0xE9EDF3) : Hex(0x121620);
+    public static Color TextSecondary => IsDarkMode ? Hex(0xC9D1DC) : Hex(0x3A4352);
+    /// <summary>Captions and labels (≥4.5:1 on Surface in both themes).</summary>
+    public static Color TextMuted => IsDarkMode ? Hex(0x949EAD) : Hex(0x5B6676);
+
+    // ─── Accent and status ───
+    public static Color Accent => IsDarkMode ? Hex(0x5B9DFF) : Hex(0x2F6FE0);
+    public static Color AccentHover => IsDarkMode ? Hex(0x79AEFF) : Hex(0x285FC2);
+    /// <summary>Text drawn on an Accent fill.</summary>
+    public static Color OnAccent => IsDarkMode ? Hex(0x0B1220) : Hex(0xFFFFFF);
+    public static Color AccentSoft => IsDarkMode ? Color.FromArgb(36, 0x5B, 0x9D, 0xFF) : Color.FromArgb(28, 0x2F, 0x6F, 0xE0);
+    public static Color Success => IsDarkMode ? Hex(0x4CC38A) : Hex(0x1E8A55);
+    public static Color Warning => IsDarkMode ? Hex(0xF2B45A) : Hex(0xA8650B);
+    public static Color Error => IsDarkMode ? Hex(0xF07178) : Hex(0xC23B44);
+    public static Color Star => Hex(0xF5C04A);
+    public static Color Gold => Hex(0xF2C14E);
+
+    // ─── Legacy names still used by a few dialogs ───
+    public static Color FormBackground => Ground;
+    public static Color PrimaryText => Text;
+    public static Color SecondaryText => TextMuted;
+    public static Color ControlBackground => Raised;
+    public static Color Placeholder => IsDarkMode ? Hex(0x1A1F28) : Hex(0xE6EAF0);
+    public static Color ErrorText => Error;
+    public static Color SuccessText => Success;
+    public static Color WarningText => Warning;
+
+    // ─── Shape ───
+    public const int RadiusCard = 12;
+    public const int RadiusControl = 8;
+
+    // ─── Type ───
+    // Segoe UI Variable is the Windows 11 UI face; fall back to Segoe UI on 10
+    private static readonly Lazy<string> TextFamily = new(() => FirstInstalled("Segoe UI Variable Text", "Segoe UI"));
+    private static readonly Lazy<string> DisplayFamily = new(() => FirstInstalled("Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI"));
+    private static readonly Dictionary<(string, float, FontStyle), Font> FontCache = new();
+
+    /// <summary>Body font at a size in points (shared, do not dispose).</summary>
+    public static Font UiFont(float points = 9.75f, FontStyle style = FontStyle.Regular) =>
+        CachedFont(TextFamily.Value, points, style);
+
+    /// <summary>Headline font (shared, do not dispose).</summary>
+    public static Font DisplayFont(float points, FontStyle style = FontStyle.Bold) =>
+        CachedFont(DisplayFamily.Value, points, style);
+
+    /// <summary>Semibold where the family has it (Variable), else bold.</summary>
+    public static Font Semibold(float points = 9.75f)
+    {
+        string semibold = TextFamily.Value == "Segoe UI Variable Text" ? "Segoe UI Variable Text Semibold" : "";
+        return semibold.Length > 0 && IsInstalled(semibold)
+            ? CachedFont(semibold, points, FontStyle.Regular)
+            : CachedFont(TextFamily.Value, points, FontStyle.Bold);
+    }
+
+    private static Font CachedFont(string family, float points, FontStyle style)
+    {
+        lock (FontCache)
+        {
+            if (!FontCache.TryGetValue((family, points, style), out var font))
+            {
+                font = new Font(family, points, style);
+                FontCache[(family, points, style)] = font;
+            }
+            return font;
+        }
+    }
+
+    private static string FirstInstalled(params string[] families) =>
+        families.FirstOrDefault(IsInstalled) ?? "Segoe UI";
+
+    private static HashSet<string>? _installed;
+    private static bool IsInstalled(string family)
+    {
+        _installed ??= new HashSet<string>(
+            new InstalledFontCollection().Families.Select(f => f.Name), StringComparer.OrdinalIgnoreCase);
+        return _installed.Contains(family);
+    }
+
+    // ─── Drawing helpers ───
+    public static Color Hex(int rgb) => Color.FromArgb(255, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+
+    public static GraphicsPath RoundedRect(RectangleF r, float radius)
+    {
+        var path = new GraphicsPath();
+        float d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
+        if (d <= 0.5f) { path.AddRectangle(r); return path; }
+        path.AddArc(r.X, r.Y, d, d, 180, 90);
+        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    /// <summary>Anti-aliased, ClearType-text Graphics setup for custom paint.</summary>
+    public static void HighQuality(Graphics g)
+    {
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+    }
+
+    public static Color Blend(Color a, Color b, float t) => Color.FromArgb(
+        (int)(a.A + (b.A - a.A) * t), (int)(a.R + (b.R - a.R) * t),
+        (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
+
+    // ─── Win32: window chrome and scrollbars ───
     [LibraryImport("dwmapi.dll")]
     private static partial int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_CAPTION_COLOR = 35;
+    private const int DWMWA_TEXT_COLOR = 36;
+    private const int DWMWCP_ROUND = 2;
 
-    // uxtheme ordinal 135 — SetPreferredAppMode (app-level dark preference)
     [DllImport("uxtheme.dll", EntryPoint = "#135", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern int SetPreferredAppMode(int preferredAppMode);
 
-    // uxtheme ordinal 133 — AllowDarkModeForWindow (per-window dark scrollbars/controls)
     [DllImport("uxtheme.dll", EntryPoint = "#133", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool AllowDarkModeForWindow(IntPtr hwnd, bool allow);
 
-    // SetWindowTheme — apply a visual style theme class to a specific control
     [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
     private static extern int SetWindowTheme(IntPtr hwnd, string? pszSubAppName, string? pszSubIdList);
 
-    private const int DefaultAppMode = 0;
-    private const int AllowDark = 1;
-
-    /// <summary>
-    /// Tell Windows to use dark theme for common controls (scrollbars, dropdown menus, etc.).
-    /// Must be called before any forms are created. Works on Windows 10 1903+.
-    /// Also reverts to the default mode when dark mode is toggled off — otherwise
-    /// menus and scrollbars stay dark until the app restarts.
-    /// </summary>
+    /// <summary>Opt the process into dark native scrollbars/menus (call before creating windows).</summary>
     public static void EnableDarkScrollbars()
     {
-        try { SetPreferredAppMode(IsDarkMode ? AllowDark : DefaultAppMode); }
-        catch { } // Graceful fallback on older Windows versions
+        try { SetPreferredAppMode(IsDarkMode ? 1 : 0); }
+        catch { } // Older Windows versions
     }
 
     /// <summary>
-    /// Apply dark mode to a form: dark title bar, dark window borders, and dark scrollbars/controls.
-    /// Combines DwmSetWindowAttribute (title bar) + AllowDarkModeForWindow (scrollbars/common controls).
-    /// Call after the form handle is created. Works on Windows 10 1809+.
+    /// Theme the native title bar: dark mode flag, plus on Windows 11 a caption
+    /// and border colored like the app chrome and rounded corners.
     /// </summary>
     public static void ApplyDarkMode(Form form)
     {
-        if (!IsDarkMode) return;
         try
         {
-            // Dark title bar and window borders via DWM
-            int value = 1;
-            DwmSetWindowAttribute(form.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int));
+            int dark = IsDarkMode ? 1 : 0;
+            DwmSetWindowAttribute(form.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+            if (IsDarkMode) AllowDarkModeForWindow(form.Handle, true);
 
-            // Dark scrollbars and common controls for this specific window
-            AllowDarkModeForWindow(form.Handle, true);
+            // Windows 11 only — earlier versions ignore these attributes
+            int caption = ToColorRef(Chrome);
+            DwmSetWindowAttribute(form.Handle, DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
+            int border = ToColorRef(Divider);
+            DwmSetWindowAttribute(form.Handle, DWMWA_BORDER_COLOR, ref border, sizeof(int));
+            int text = ToColorRef(TextSecondary);
+            DwmSetWindowAttribute(form.Handle, DWMWA_TEXT_COLOR, ref text, sizeof(int));
+            int round = DWMWCP_ROUND;
+            DwmSetWindowAttribute(form.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
         }
         catch { } // Graceful fallback on older Windows versions
     }
 
-    // --- Backgrounds ---
-
-    public static Color FormBackground =>
-        IsDarkMode ? Color.FromArgb(32, 32, 32) : SystemColors.Control;
-
-    public static Color PanelBackground =>
-        IsDarkMode ? Color.FromArgb(45, 45, 48) : SystemColors.Control;
-
-    public static Color ControlBackground =>
-        IsDarkMode ? Color.FromArgb(51, 51, 55) : SystemColors.Window;
-
-    public static Color GroupBoxBackground =>
-        IsDarkMode ? Color.FromArgb(40, 40, 43) : SystemColors.Control;
-
-    public static Color TabBackground =>
-        IsDarkMode ? Color.FromArgb(38, 38, 38) : SystemColors.Control;
-
-    // --- Text ---
-
-    public static Color PrimaryText =>
-        IsDarkMode ? Color.FromArgb(230, 230, 230) : SystemColors.ControlText;
-
-    public static Color SecondaryText =>
-        IsDarkMode ? Color.FromArgb(160, 160, 160) : Color.Gray;
-
-    public static Color DimText =>
-        IsDarkMode ? Color.FromArgb(100, 100, 100) : Color.FromArgb(170, 170, 170);
-
-    public static Color DescriptionText =>
-        IsDarkMode ? Color.FromArgb(140, 140, 140) : Color.FromArgb(80, 80, 80);
-
-    public static Color DetailText =>
-        IsDarkMode ? Color.FromArgb(130, 130, 130) : Color.FromArgb(100, 100, 100);
-
-    // --- Status colors ---
-
-    public static Color ErrorText =>
-        IsDarkMode ? Color.FromArgb(220, 100, 100) : Color.FromArgb(180, 80, 80);
-
-    public static Color SuccessText =>
-        IsDarkMode ? Color.FromArgb(80, 180, 80) : Color.FromArgb(60, 130, 60);
-
-    public static Color WarningText =>
-        IsDarkMode ? Color.FromArgb(220, 160, 40) : Color.FromArgb(180, 120, 0);
-
-    // --- Accent panel (blue info box around view selection) ---
-
-    public static Color AccentPanelBackground =>
-        IsDarkMode ? Color.FromArgb(35, 40, 50) : Color.FromArgb(248, 250, 253);
-
-    public static Color AccentPanelBorder =>
-        IsDarkMode ? Color.FromArgb(60, 65, 75) : Color.FromArgb(204, 204, 204);
-
-    public static Color AccentPanelStripe =>
-        Color.FromArgb(74, 144, 217); // Same in both modes
-
-    // --- Auto-rotate info banner ---
-
-    public static Color InfoBannerBackground =>
-        IsDarkMode ? Color.FromArgb(30, 45, 65) : Color.FromArgb(232, 242, 252);
-
-    public static Color InfoBannerBorder =>
-        IsDarkMode ? Color.FromArgb(50, 70, 100) : Color.FromArgb(180, 210, 240);
-
-    public static Color InfoBannerText =>
-        IsDarkMode ? Color.FromArgb(160, 190, 230) : Color.FromArgb(40, 80, 140);
-
-    // --- Search chips: Blue (NPS park chips) ---
-
-    public static Color BlueChipBackground =>
-        IsDarkMode ? Color.FromArgb(35, 45, 65) : Color.FromArgb(235, 240, 250);
-
-    public static Color BlueChipText =>
-        IsDarkMode ? Color.FromArgb(140, 170, 220) : Color.FromArgb(40, 60, 100);
-
-    public static Color BlueChipBorder =>
-        IsDarkMode ? Color.FromArgb(60, 75, 100) : Color.FromArgb(180, 195, 220);
-
-    // --- Search chips: Tan (Smithsonian art chips) ---
-
-    public static Color TanChipBackground =>
-        IsDarkMode ? Color.FromArgb(50, 45, 35) : Color.FromArgb(240, 235, 225);
-
-    public static Color TanChipText =>
-        IsDarkMode ? Color.FromArgb(200, 180, 140) : Color.FromArgb(80, 60, 30);
-
-    public static Color TanChipBorder =>
-        IsDarkMode ? Color.FromArgb(80, 70, 55) : Color.FromArgb(210, 195, 170);
-
-    // --- Search chips: NASA Gallery ---
-
-    public static Color GalleryChipBackground =>
-        IsDarkMode ? Color.FromArgb(30, 40, 55) : Color.FromArgb(225, 235, 245);
-
-    public static Color GalleryChipText =>
-        IsDarkMode ? Color.FromArgb(130, 165, 215) : Color.FromArgb(30, 60, 100);
-
-    public static Color GalleryChipBorder =>
-        IsDarkMode ? Color.FromArgb(55, 70, 95) : Color.FromArgb(170, 190, 220);
-
-    // --- ThumbnailGridPanel ---
-
-    public static Color ThumbnailTitle =>
-        IsDarkMode ? Color.FromArgb(200, 200, 200) : Color.FromArgb(60, 60, 60);
-
-    public static Color Placeholder =>
-        IsDarkMode ? Color.FromArgb(55, 55, 55) : Color.FromArgb(230, 230, 230);
-
-    public static Color StarOutline =>
-        IsDarkMode ? Color.FromArgb(120, 120, 120) : Color.FromArgb(180, 180, 180);
-
-    // --- Control styling helpers ---
-
-    public static void StyleButton(Button btn)
-    {
-        if (IsDarkMode)
-        {
-            btn.FlatStyle = FlatStyle.Flat;
-            btn.BackColor = Color.FromArgb(55, 55, 58);
-            btn.ForeColor = Color.FromArgb(220, 220, 220);
-            btn.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 75);
-        }
-        else
-        {
-            btn.FlatStyle = FlatStyle.Standard;
-            btn.BackColor = SystemColors.Control;
-            btn.ForeColor = SystemColors.ControlText;
-        }
-    }
-
-    public static void StyleComboBox(ComboBox combo)
-    {
-        if (IsDarkMode)
-        {
-            combo.BackColor = Color.FromArgb(51, 51, 55);
-            combo.ForeColor = Color.FromArgb(220, 220, 220);
-            combo.FlatStyle = FlatStyle.Flat;
-        }
-    }
-
-    public static void StyleTextBox(TextBox textBox)
-    {
-        if (IsDarkMode)
-        {
-            textBox.BackColor = Color.FromArgb(51, 51, 55);
-            textBox.ForeColor = Color.FromArgb(220, 220, 220);
-            textBox.BorderStyle = BorderStyle.FixedSingle;
-        }
-    }
-
-    public static void StyleGroupBox(GroupBox group)
-    {
-        if (IsDarkMode)
-        {
-            group.ForeColor = Color.FromArgb(200, 200, 200);
-            group.BackColor = GroupBoxBackground;
-        }
-    }
-
-    public static void StyleCheckBox(CheckBox check)
-    {
-        if (IsDarkMode)
-        {
-            check.ForeColor = Color.FromArgb(220, 220, 220);
-        }
-    }
-
-    public static void StyleRadioButton(RadioButton radio)
-    {
-        if (IsDarkMode)
-        {
-            radio.ForeColor = Color.FromArgb(220, 220, 220);
-        }
-    }
+    private static int ToColorRef(Color c) => c.R | (c.G << 8) | (c.B << 16);
 
     /// <summary>
-    /// Apply DarkMode_Explorer theme to a scrollable control to get dark scrollbars.
-    /// Uses SetWindowTheme to apply the same dark Explorer theme that Windows File Explorer uses.
-    /// Deferred via HandleCreated event since SetWindowTheme needs a valid HWND.
+    /// Dark native scrollbars for an AutoScroll container. Never use on
+    /// TrackBars (it makes them invisible) — they are custom-drawn anyway.
     /// </summary>
     public static void StyleScrollableControl(Control control)
     {
         if (!IsDarkMode) return;
-
-        // SetWindowTheme requires a valid window handle. If the handle doesn't exist yet
-        // (control not shown), defer until it's created. If it already exists, apply now.
         if (control.IsHandleCreated)
-        {
-            ApplyDarkThemeToControl(control);
-        }
+            ApplyExplorerDark(control);
         else
-        {
-            control.HandleCreated += (sender, _) =>
-            {
-                if (sender is Control c)
-                    ApplyDarkThemeToControl(c);
-            };
-        }
+            control.HandleCreated += (sender, _) => { if (sender is Control c) ApplyExplorerDark(c); };
     }
 
-    /// <summary>
-    /// Apply DarkMode_Explorer theme to an individual control's window handle.
-    /// </summary>
-    private static void ApplyDarkThemeToControl(Control control)
+    private static void ApplyExplorerDark(Control control)
     {
         try { SetWindowTheme(control.Handle, "DarkMode_Explorer", null); }
-        catch { } // Graceful fallback
+        catch { }
     }
 
-    /// <summary>
-    /// Style a DateTimePicker for the current theme.
-    /// Note: The dropdown calendar is a native control and cannot be fully themed in .NET 8.
-    /// This styles the picker itself (text area + calendar colors where supported).
-    /// </summary>
+    /// <summary>Flat button styling for plain dialogs (MessageBox-like prompts).</summary>
+    public static void StyleButton(Button btn)
+    {
+        btn.FlatStyle = FlatStyle.Flat;
+        btn.BackColor = Raised;
+        btn.ForeColor = Text;
+        btn.FlatAppearance.BorderColor = BorderStrong;
+        btn.FlatAppearance.MouseOverBackColor = RaisedHover;
+        btn.Font = UiFont(9.5f);
+    }
+
+    public static void StyleTextBox(TextBox textBox)
+    {
+        textBox.BackColor = Well;
+        textBox.ForeColor = Text;
+        textBox.BorderStyle = BorderStyle.FixedSingle;
+        textBox.Font = UiFont(10f);
+    }
+
     public static void StyleDateTimePicker(DateTimePicker dtp)
     {
-        if (!IsDarkMode) return;
-        dtp.CalendarMonthBackground = ControlBackground;
-        dtp.CalendarForeColor = PrimaryText;
-        dtp.CalendarTitleBackColor = Color.FromArgb(45, 45, 48);
-        dtp.CalendarTitleForeColor = PrimaryText;
-        dtp.CalendarTrailingForeColor = SecondaryText;
-        dtp.BackColor = ControlBackground;
-        dtp.ForeColor = PrimaryText;
+        dtp.CalendarMonthBackground = Surface;
+        dtp.CalendarForeColor = Text;
+        dtp.CalendarTitleBackColor = Raised;
+        dtp.CalendarTitleForeColor = Text;
+        dtp.CalendarTrailingForeColor = TextMuted;
+        dtp.Font = UiFont(9.75f);
     }
 }

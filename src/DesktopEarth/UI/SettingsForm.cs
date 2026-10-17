@@ -1,200 +1,61 @@
 using System.Drawing;
+using DesktopEarth.UI.Controls;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace DesktopEarth.UI;
 
-public class SettingsForm : Form
+/// <summary>
+/// The settings window ("Studio" layout): a sidebar with three pages —
+/// Wallpaper, My Collection and Settings — split across partial files.
+///
+/// Editing model: every control writes only the setting it owns, to exactly one
+/// place — the selected display's config in Per-display mode, otherwise the
+/// global settings (<see cref="EditTarget"/>). Saves and re-renders are
+/// debounced. Nothing ever re-saves the whole form, so a slider can't quietly
+/// put back an old picture or view, and browsing images never changes the
+/// wallpaper until "Set" is pressed.
+/// </summary>
+public partial class SettingsForm : Form
 {
     private readonly SettingsManager _settingsManager;
     private readonly RenderScheduler _renderScheduler;
-    private AppSettings _settings;
-
-    // Shared app-level HD texture download manager (owned by TrayApplicationContext);
-    // handlers are stored so Dispose can unsubscribe when the form closes
+    private readonly AppSettings _settings;
     private readonly HiResTextureManager _hdTextureManager;
-    private Action<float, string>? _hdProgressHandler;
-    private Action<bool, string>? _hdCompletedHandler;
-
-    // Debounce timer for live preview
-    private readonly System.Windows.Forms.Timer _debounceTimer;
-    private bool _isLoading;
-
-    // Layout constants (compacted to eliminate scrollbar)
-    private const int LeftMargin = 20;
-    private const int RightValueX = 480;
-    private const int SliderWidth = 480;
-    private const int IndentMargin = 40;
-    private const int IndentSliderWidth = 460;
-    private const int LabelHeight = 20;
-    private const int SliderRowHeight = 26;
-    private const int RowGap = 4;
-
-    // Location presets
-    private static readonly (string Name, float Lon, float Lat)[] LocationPresets =
-    [
-        ("Custom", 0, 0),
-        ("New York", 74, 41),
-        ("Chicago", 88, 42),
-        ("Los Angeles", 118, 34),
-        ("London", 0, 52),
-        ("Paris", -2, 49),
-        ("Tokyo", -140, 36),
-        ("Hong Kong", -114, 22),
-        ("Sydney", -151, -34),
-        ("Dubai", -55, 25),
-        ("Sao Paulo", 47, -24),
-        ("Cape Town", -18, -34),
-        ("Mumbai", -73, 19),
-    ];
-
-    // Appearance tab controls
-    private ComboBox _displayModeCombo = null!;
-    private ComboBox _locationCombo = null!;
-    private Panel _sphericalPanel = null!;
-    private TrackBar _longitudeSlider = null!;
-    private Label _longitudeValue = null!;
-    private TrackBar _latitudeSlider = null!;
-    private Label _latitudeValue = null!;
-    private TrackBar _zoomSlider = null!;
-    private Label _zoomValue = null!;
-    private CheckBox _nightLightsCheck = null!;
-    private TrackBar _nightBrightnessSlider = null!;
-    private Label _nightBrightnessValue = null!;
-    private TrackBar _ambientSlider = null!;
-    private Label _ambientValue = null!;
-    private TrackBar _offsetXSlider = null!;
-    private Label _offsetXValue = null!;
-    private TrackBar _offsetYSlider = null!;
-    private Label _offsetYValue = null!;
-    private RadioButton _topoRadio = null!;
-    private RadioButton _topoBathyRadio = null!;
-
-    // Mode panels
-    private Panel _globeControlsPanel = null!;
-    private Panel _stillImagePanel = null!;
-
-    // View accent panel and promoted controls
-    private Panel _viewAccentPanel = null!;
-    private Label _sourceLabel = null!;
-    private Label _sourceHintLabel = null!;
-
-    // Still Image source sub-dropdown
-    private ComboBox _stillImageSourceCombo = null!;
-
-    // Sub-panels inside still image panel (toggled by source dropdown)
-    private Panel _epicSubPanel = null!;
-    private Panel _apodSubPanel = null!;
-    private Panel _npsSubPanel = null!;
-    private Panel _smithsonianSubPanel = null!;
-
-    // EPIC controls
-    private ComboBox _epicTypeCombo = null!;
-    private RadioButton _epicLatestRadio = null!;
-    private RadioButton _epicDateRadio = null!;
-    private DateTimePicker _epicDatePicker = null!;
-    private ThumbnailGridPanel _epicGrid = null!;
-    private Label _epicStatusLabel = null!;
-    private Button _epicRefreshButton = null!;
-    private readonly EpicApiClient _epicApi = new();
-    private DateTime _lastEpicRefresh = DateTime.MinValue;
-    private Label _epicLatestDateLabel = null!;
-    private DateTime? _epicLatestAvailableDate;
-
-    // APOD controls
-    private RadioButton _apodLatestRadio = null!;
-    private ComboBox _apodRecentDaysCombo = null!;
-    private RadioButton _apodDateRadio = null!;
-    private DateTimePicker _apodDatePicker = null!;
-    private ThumbnailGridPanel _apodGrid = null!;
-    private Label _apodStatusLabel = null!;
-    private Button _apodRefreshButton = null!;
-    private readonly ApodApiClient _apodApi = new();
-    private DateTime _lastApodRefresh = DateTime.MinValue;
-
-    // NPS controls
-    private TextBox _npsSearchBox = null!;
-    private ThumbnailGridPanel _npsGrid = null!;
-    private Label _npsStatusLabel = null!;
-    private Button _npsSearchButton = null!;
-    private FlowLayoutPanel _npsChipsPanel = null!;
-    private readonly NpsApiClient _npsApi = new();
-
-    // Smithsonian controls
-    private TextBox _smithsonianSearchBox = null!;
-    private ThumbnailGridPanel _smithsonianGrid = null!;
-    private Label _smithsonianStatusLabel = null!;
-    private Button _smithsonianSearchButton = null!;
-    private FlowLayoutPanel _smithsonianChipsPanel = null!;
-    private readonly SmithsonianApiClient _smithsonianApi = new();
-
-    // NASA Gallery controls
-    private Panel _nasaGallerySubPanel = null!;
-    private TextBox _nasaGallerySearchBox = null!;
-    private ThumbnailGridPanel _nasaGalleryGrid = null!;
-    private Label _nasaGalleryStatusLabel = null!;
-    private Button _nasaGallerySearchButton = null!;
-    private FlowLayoutPanel _nasaGalleryChipsPanel = null!;
-    private readonly NasaGalleryApiClient _nasaGalleryApi = new();
-
-    // Unified image cache for new sources
     private readonly ImageCache _imageCache = new();
-
-    // Cache size periodic refresh
-    private System.Windows.Forms.Timer? _cacheSizeTimer;
-    private Label? _cacheSizeLabel;
-
-    // Auto-rotation controls
-    private GroupBox _autoRotateGroup = null!;
-    private CheckBox _randomRotationCheck = null!;
-    private ComboBox _rotationSourceCombo = null!;
-    private Label _autoRotateBanner = null!;
-    private readonly CheckBox[] _rotationSourceChecks = new CheckBox[7];
-
-    // System tab controls
-    private ComboBox _updateIntervalCombo = null!;
-    private CheckBox _runOnStartupCheck = null!;
-    private RadioButton _sameForAllRadio = null!;
-    private RadioButton _spanAcrossRadio = null!;
-    private RadioButton _perDisplayRadio = null!;
-    private ComboBox _renderResCombo = null!;
-
-    // Per-display controls (merged into GroupBox)
-    private ComboBox _monitorSelectCombo = null!;
-    private Label _monitorSelectLabel = null!;
-    private string _selectedMonitorDevice = "";
-
-    // API Keys tab controls
-    private TextBox _apiKeyBox = null!;
-
-    // Shared Reset button
-    private Button _resetButton = null!;
-
-    // Presets controls
-    private Panel _presetsPanel = null!;
-    private ComboBox _presetCombo = null!;
-
-    // User images controls
-    private Panel _userImagesSubPanel = null!;
-    private ThumbnailGridPanel _userImagesGrid = null!;
-    private Label _userImagesStatusLabel = null!;
     private readonly UserImageManager _userImageManager = new();
 
-    // My Collection tab controls
-    private ThumbnailGridPanel? _favoritesGrid;
-    private Label? _favoritesCountLabel;
-    private ThumbnailGridPanel? _userImagesCollectionGrid;
-    private Label? _userImagesCountLabel;
+    // Displays, in physical left-to-right order, and the one being edited
+    private List<DisplayInfo> _displays = new();
+    private int _displayIndex;
 
-    // Tab control (DarkTabControl for dark mode border/header fix)
-    private DarkTabControl _tabControl = null!;
+    // Debounced save (+ optional re-render) after edits
+    private readonly System.Windows.Forms.Timer _commitTimer;
+    private bool _pendingRender;
 
-    /// <summary>
-    /// Get or set the selected tab index. Used to preserve tab across dark mode toggle.
-    /// </summary>
-    public int SelectedTabIndex
-    {
-        get => _tabControl.SelectedIndex;
-        set { if (value >= 0 && value < _tabControl.TabCount) _tabControl.SelectedIndex = value; }
-    }
+    // True while code (not the user) is filling controls
+    private bool _loading;
+
+    // Pages and navigation
+    private readonly Panel _content;
+    private readonly StudioButton[] _navButtons = new StudioButton[3];
+    private readonly Panel[] _pages = new Panel[3];
+    private int _page = -1;
+
+    // Sidebar status card
+    private StudioLabel _statusTitle = null!;
+    private StudioLabel _statusSub = null!;
+    private StatusDot _statusDot = null!;
+    private StudioButton _updateNowButton = null!;
+    private readonly System.Windows.Forms.Timer _statusTimer;
+    private string _statusOverride = "";
+    private Color _statusOverrideColor;
+
+    // Per-display wallpaper crops for the preview and monitor thumbnails
+    private readonly Dictionary<string, Bitmap> _previews = new();
+    private int _previewGeneration;
+
+    public event Action? RequestReopen;
 
     public SettingsForm(SettingsManager settingsManager, RenderScheduler renderScheduler,
         HiResTextureManager hdTextureManager)
@@ -204,299 +65,22 @@ public class SettingsForm : Form
         _hdTextureManager = hdTextureManager;
         _settings = settingsManager.Settings;
 
-        _debounceTimer = new System.Windows.Forms.Timer { Interval = 300 };
-        _debounceTimer.Tick += (_, _) =>
-        {
-            _debounceTimer.Stop();
-            ApplyLivePreview();
-        };
+        _commitTimer = new System.Windows.Forms.Timer { Interval = 250 };
+        _commitTimer.Tick += (_, _) => CommitNow();
+        _statusTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+        _statusTimer.Tick += (_, _) => UpdateStatusCard();
 
-        // try/finally so an exception mid-load can never leave _isLoading stuck
-        // true (which would silently disable all saving until the form reopens)
-        _isLoading = true;
-        try
-        {
-            InitializeForm();
-            LoadCurrentSettings();
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-    }
-
-    private void SchedulePreview()
-    {
-        if (_isLoading) return;
-        _debounceTimer.Stop();
-        _debounceTimer.Start();
-    }
-
-    private void ApplyLivePreview()
-    {
-        _settingsManager.ApplyAndSave(s =>
-        {
-            if (_perDisplayRadio.Checked && !string.IsNullOrEmpty(_selectedMonitorDevice))
-            {
-                var config = GetOrCreateDisplayConfig(_selectedMonitorDevice);
-                SaveAppearanceToDisplayConfig(config);
-            }
-            else
-            {
-                SaveAppearanceToGlobalSettings(s);
-            }
-
-            s.UpdateIntervalSeconds = _updateIntervalCombo.SelectedIndex switch
-            {
-                0 => 60, 1 => 120, 2 => 300, 3 => 600,
-                4 => 900, 5 => 1800, 6 => 3600, 7 => 21600,
-                8 => 43200, 9 => 86400, 10 => 604800, 11 => 1209600,
-                12 => 2592000, 13 => int.MaxValue, _ => 600
-            };
-
-            if (_sameForAllRadio.Checked)
-                s.MultiMonitorMode = MultiMonitorMode.SameForAll;
-            else if (_spanAcrossRadio.Checked)
-                s.MultiMonitorMode = MultiMonitorMode.SpanAcross;
-            else
-                s.MultiMonitorMode = MultiMonitorMode.PerDisplay;
-
-            (s.RenderWidth, s.RenderHeight) = _renderResCombo.SelectedIndex switch
-            {
-                1 => (1920, 1080), 2 => (2560, 1440),
-                3 => (3840, 2160), 4 => (5120, 2880), _ => (0, 0)
-            };
-
-            // API key
-            s.ApiDataGovKey = _apiKeyBox.Text.Trim();
-        });
-
-        StartupManager.SetRunOnStartup(_runOnStartupCheck.Checked);
-        _renderScheduler.TriggerUpdate();
-    }
-
-    private static (float distance, float fov) ZoomSliderToCamera(int sliderValue)
-    {
-        float t = (sliderValue - 1) / 99f;
-        float distance = 6.0f * MathF.Pow(1.15f / 6.0f, t);
-        float fov = 60f - t * 50f; // 60° at min zoom → 10° at max zoom
-        return (distance, fov);
-    }
-
-    private void SaveAppearanceToGlobalSettings(AppSettings s)
-    {
-        s.DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex;
-        s.StillImageSource = (ImageSource)_stillImageSourceCombo.SelectedIndex;
-        s.LongitudeOffset = _longitudeSlider.Value;
-        s.CameraTilt = _latitudeSlider.Value;
-
-        var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
-        s.ZoomLevel = distance;
-        s.FieldOfView = fov;
-
-        s.ImageOffsetX = _offsetXSlider.Value;
-        s.ImageOffsetY = _offsetYSlider.Value;
-
-        s.NightLightsEnabled = _nightLightsCheck.Checked;
-        s.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
-        s.AmbientLight = _ambientSlider.Value / 100f;
-        s.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
-
-        // EPIC
-        s.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
-        s.EpicUseLatest = _epicLatestRadio.Checked;
-        s.EpicSelectedDate = _epicDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        if (_epicGrid.SelectedImage != null)
-            s.EpicSelectedImage = _epicGrid.SelectedImage.Id;
-
-        // APOD
-        s.ApodUseLatest = _apodLatestRadio.Checked;
-        s.ApodSelectedDate = _apodDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        if (_apodGrid.SelectedImage != null)
-        {
-            s.ApodSelectedImageId = _apodGrid.SelectedImage.Id;
-            s.ApodSelectedImageUrl = ApodApiClient.GetBestUrl(_apodGrid.SelectedImage);
-        }
-
-        // NPS
-        s.NpsSearchQuery = _npsSearchBox.Text;
-        if (_npsGrid.SelectedImage != null)
-        {
-            s.NpsSelectedImageId = _npsGrid.SelectedImage.Id;
-            s.NpsSelectedImageUrl = _npsGrid.SelectedImage.HdImageUrl;
-        }
-
-        // Smithsonian
-        s.SmithsonianSearchQuery = _smithsonianSearchBox.Text;
-        if (_smithsonianGrid.SelectedImage != null)
-        {
-            s.SmithsonianSelectedId = _smithsonianGrid.SelectedImage.Id;
-            s.SmithsonianSelectedImageUrl = _smithsonianGrid.SelectedImage.HdImageUrl;
-        }
-
-        // NASA Gallery
-        s.NasaGallerySearchQuery = _nasaGallerySearchBox.Text;
-        if (_nasaGalleryGrid.SelectedImage != null)
-        {
-            s.NasaGallerySelectedId = _nasaGalleryGrid.SelectedImage.Id;
-            s.NasaGallerySelectedImageUrl = !string.IsNullOrEmpty(_nasaGalleryGrid.SelectedImage.HdImageUrl)
-                ? _nasaGalleryGrid.SelectedImage.HdImageUrl
-                : _nasaGalleryGrid.SelectedImage.ThumbnailUrl;
-        }
-
-        // User images
-        if (_userImagesGrid?.SelectedImage != null)
-        {
-            s.UserImageSelectedId = _userImagesGrid.SelectedImage.Id;
-            s.UserImageSelectedPath = _userImageManager.GetImagePath(
-                _userImagesGrid.SelectedImage.Id) ?? "";
-        }
-
-        // Auto-rotation
-        s.RandomRotationEnabled = _randomRotationCheck.Checked;
-        s.RandomRotationSource = (RotationSource)_rotationSourceCombo.SelectedIndex;
-
-        // APOD recent days
-        s.ApodRecentDays = GetApodRecentDays();
-    }
-
-    private static readonly int[] ApodDaysValues = [7, 14, 30, 60, 90];
-
-    private int GetApodRecentDays()
-    {
-        int idx = _apodRecentDaysCombo.SelectedIndex;
-        return idx >= 0 && idx < ApodDaysValues.Length ? ApodDaysValues[idx] : 14;
-    }
-
-    private static int ApodDaysToIndex(int days)
-    {
-        return Array.IndexOf(ApodDaysValues, days) is int i and >= 0 ? i : 1; // default to 14 days
-    }
-
-    private void SaveAppearanceToDisplayConfig(DisplayConfig config)
-    {
-        config.DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex;
-        config.StillImageSource = (ImageSource)_stillImageSourceCombo.SelectedIndex;
-        config.LongitudeOffset = _longitudeSlider.Value;
-        config.CameraTilt = _latitudeSlider.Value;
-
-        var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
-        config.ZoomLevel = distance;
-        config.FieldOfView = fov;
-
-        config.ImageOffsetX = _offsetXSlider.Value;
-        config.ImageOffsetY = _offsetYSlider.Value;
-
-        config.NightLightsEnabled = _nightLightsCheck.Checked;
-        config.NightLightsBrightness = _nightBrightnessSlider.Value / 10f;
-        config.AmbientLight = _ambientSlider.Value / 100f;
-        config.ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo;
-
-        // EPIC
-        config.EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
-        config.EpicUseLatest = _epicLatestRadio.Checked;
-        config.EpicSelectedDate = _epicDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        if (_epicGrid.SelectedImage != null)
-            config.EpicSelectedImage = _epicGrid.SelectedImage.Id;
-
-        // APOD
-        config.ApodUseLatest = _apodLatestRadio.Checked;
-        config.ApodSelectedDate = _apodDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        if (_apodGrid.SelectedImage != null)
-        {
-            config.ApodSelectedImageId = _apodGrid.SelectedImage.Id;
-            config.ApodSelectedImageUrl = ApodApiClient.GetBestUrl(_apodGrid.SelectedImage);
-        }
-
-        // NPS
-        config.NpsSearchQuery = _npsSearchBox.Text;
-        if (_npsGrid.SelectedImage != null)
-        {
-            config.NpsSelectedImageId = _npsGrid.SelectedImage.Id;
-            config.NpsSelectedImageUrl = _npsGrid.SelectedImage.HdImageUrl;
-        }
-
-        // Smithsonian
-        config.SmithsonianSearchQuery = _smithsonianSearchBox.Text;
-        if (_smithsonianGrid.SelectedImage != null)
-        {
-            config.SmithsonianSelectedId = _smithsonianGrid.SelectedImage.Id;
-            config.SmithsonianSelectedImageUrl = _smithsonianGrid.SelectedImage.HdImageUrl;
-        }
-
-        // NASA Gallery
-        config.NasaGallerySearchQuery = _nasaGallerySearchBox.Text;
-        if (_nasaGalleryGrid.SelectedImage != null)
-        {
-            config.NasaGallerySelectedId = _nasaGalleryGrid.SelectedImage.Id;
-            config.NasaGallerySelectedImageUrl = !string.IsNullOrEmpty(_nasaGalleryGrid.SelectedImage.HdImageUrl)
-                ? _nasaGalleryGrid.SelectedImage.HdImageUrl
-                : _nasaGalleryGrid.SelectedImage.ThumbnailUrl;
-        }
-
-        // User images
-        if (_userImagesGrid?.SelectedImage != null)
-        {
-            config.UserImageSelectedId = _userImagesGrid.SelectedImage.Id;
-            config.UserImageSelectedPath = _userImageManager.GetImagePath(
-                _userImagesGrid.SelectedImage.Id) ?? "";
-        }
-
-        // Auto-rotation
-        config.RandomRotationEnabled = _randomRotationCheck.Checked;
-        config.RandomRotationSource = (RotationSource)_rotationSourceCombo.SelectedIndex;
-
-        // APOD recent days
-        config.ApodRecentDays = GetApodRecentDays();
-    }
-
-    private DisplayConfig GetOrCreateDisplayConfig(string deviceName)
-    {
-        // Locked: the render thread enumerates DisplayConfigs concurrently
-        lock (_settings.DisplayConfigsLock)
-        {
-            var existing = _settings.DisplayConfigs.Find(c => c.DeviceName == deviceName);
-            if (existing != null) return existing;
-            var config = new DisplayConfig { DeviceName = deviceName };
-            _settings.DisplayConfigs.Add(config);
-            return config;
-        }
-    }
-
-    // Event fired when the form needs to be recreated (e.g., theme change)
-    public event Action? RequestReopen;
-
-    /// <summary>
-    /// The DisplayConfig being edited when Per-Display mode is active, else null.
-    /// Grid selection restores must use this — restoring from global settings
-    /// would overwrite the monitor's saved image on the next debounced save.
-    /// </summary>
-    private DisplayConfig? ActiveDisplayConfig =>
-        _perDisplayRadio.Checked && !string.IsNullOrEmpty(_selectedMonitorDevice)
-            ? _settings.DisplayConfigs.Find(c => c.DeviceName == _selectedMonitorDevice)
-            : null;
-
-    private void InitializeForm()
-    {
-        Text = "Blue Marble Desktop Settings";
+        SuspendLayout();
+        Text = "Blue Marble Desktop";
         Icon = TrayApplicationContext.LoadAppIcon();
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox = false;
-        StartPosition = FormStartPosition.CenterScreen;
-
-        // Scale the fixed pixel layout with the monitor DPI. The process is
-        // PerMonitorV2-aware (Program.cs), so at 125-150% scaling fonts grow
-        // regardless — without this the layout stays at 96-DPI pixel positions
-        // and text clips/overlaps everywhere.
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
-
-        ClientSize = new Size(560, 865);
-        ShowInTaskbar = true;
-        BackColor = Theme.FormBackground;
-        ForeColor = Theme.PrimaryText;
-
-        // Esc closes the window (but not while a dropdown is open)
+        StartPosition = FormStartPosition.CenterScreen;
+        ClientSize = new Size(1120, 740);
+        MinimumSize = new Size(980, 660);
+        BackColor = Theme.Ground;
+        ForeColor = Theme.Text;
+        Font = Theme.UiFont();
         KeyPreview = true;
         KeyDown += (_, e) =>
         {
@@ -504,3342 +88,458 @@ public class SettingsForm : Form
                 Close();
         };
 
-        _tabControl = new DarkTabControl
+        _displays = MonitorManager.GetDisplays();
+        _displayIndex = Math.Max(0, _displays.FindIndex(d => d.Primary));
+
+        _content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Ground };
+        _pages[0] = BuildWallpaperPage();
+        _pages[1] = BuildCollectionPage();
+        _pages[2] = BuildSettingsPage();
+        foreach (var page in _pages)
         {
-            Location = new Point(0, 0),
-            Size = new Size(ClientSize.Width, ClientSize.Height - 20),
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
-            Padding = new Point(8, 4)
-        };
-        _tabControl.ApplyTheme();
-        var tabControl = _tabControl;
+            page.Dock = DockStyle.Fill;
+            page.Visible = false;
+            _content.Controls.Add(page);
+        }
 
-        tabControl.TabPages.Add(CreateAppearanceTab());
-        tabControl.TabPages.Add(CreateMyCollectionTab());
-        tabControl.TabPages.Add(CreateSystemTab());
+        Controls.Add(_content);
+        Controls.Add(new Panel { Dock = DockStyle.Left, Width = 1, BackColor = Theme.Divider });
+        Controls.Add(BuildSidebar());
+        ResumeLayout(true);
 
-        // Refresh My Collection tab when user switches to it
-        tabControl.SelectedIndexChanged += (_, _) =>
-        {
-            if (tabControl.SelectedIndex == 1) RefreshMyCollectionTab();
-        };
-
-        Controls.Add(tabControl);
-
-        // Apply theme to all controls recursively (buttons, comboboxes, groupboxes, etc.)
-        ThemeAllControls(this);
-
-        // Version label at bottom-left of window (visible on all tabs)
-        var version = System.Reflection.Assembly.GetExecutingAssembly()
-            .GetName().Version?.ToString(3) ?? "0.0.0";
-        Controls.Add(new Label
-        {
-            Text = $"v{version}",
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.DimText,
-            AutoSize = true,
-            Location = new Point(8, ClientSize.Height - 18),
-            Anchor = AnchorStyles.Bottom | AnchorStyles.Left
-        });
-
-        // Dark title bar and window borders (Windows 10 1809+ / Windows 11).
-        // Applied last: it touches Handle, and creating the handle before the
-        // controls exist would interfere with DPI auto-scaling.
-        Theme.ApplyDarkMode(this);
-
-        // Listen for download/render status updates
         _renderScheduler.StatusChanged += OnRenderStatusChanged;
+        _renderScheduler.WallpaperApplied += OnWallpaperApplied;
+
+        _loading = true;
+        try { LoadDisplayIntoUi(); }
+        finally { _loading = false; }
+
+        ShowPage(0);
+        UpdateStatusCard();
+        _statusTimer.Start();
     }
 
-    /// <summary>
-    /// Scale a design-time (96 DPI) pixel value to the form's current DPI.
-    /// Static layout is handled by AutoScaleMode.Dpi; this is for layout math
-    /// done at runtime, which would otherwise mix unscaled constants with
-    /// already-scaled control measurements.
-    /// </summary>
-    private int Dpi(int designPixels) => (int)Math.Round(designPixels * (DeviceDpi / 96f));
+    /// <summary>The page shown (0 Wallpaper, 1 My Collection, 2 Settings); kept across theme switches.</summary>
+    public int SelectedPage
+    {
+        get => _page;
+        set => ShowPage(value);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Theme.ApplyDarkMode(this);
+    }
 
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
 
-        // On small high-DPI screens (e.g. 1080p at 125-150%) the scaled window
-        // is taller than the desktop. Clamp it and let the tab pages scroll.
+        // On small high-DPI screens the window can be bigger than the desktop
         var workArea = Screen.FromControl(this).WorkingArea;
-        if (Height > workArea.Height)
-            Height = workArea.Height;
+        if (Height > workArea.Height) Height = workArea.Height;
+        if (Width > workArea.Width) Width = workArea.Width;
         if (Top < workArea.Top) Top = workArea.Top;
-        if (Top + Height > workArea.Bottom)
-            Top = Math.Max(workArea.Top, workArea.Bottom - Height);
+
+        LoadMapImageAsync();
+        RefreshPreviewsAsync();
     }
 
-    private int AddSliderRow(Control parent, string labelText, string defaultValue,
-        int x, int y, int min, int max, int initial, int sliderWidth,
-        out TrackBar slider, out Label valueLabel, Action<TrackBar, Label> onScroll)
+    protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        parent.Controls.Add(MakeLabel(labelText, x, y));
-        valueLabel = MakeLabel(defaultValue, RightValueX, y);
-        parent.Controls.Add(valueLabel);
-
-        slider = MakeSlider(x, y + LabelHeight, min, max, initial, sliderWidth);
-        var sl = slider;
-        var vl = valueLabel;
-        slider.Scroll += (_, _) =>
-        {
-            onScroll(sl, vl);
-            SchedulePreview();
-        };
-        parent.Controls.Add(slider);
-
-        return y + LabelHeight + SliderRowHeight + RowGap;
+        CommitNow(); // Never lose an edit made in the last 250 ms
+        base.OnFormClosing(e);
     }
 
-    private TabPage CreateAppearanceTab()
+    /// <summary>Scale a 96-DPI design value for layout done at runtime.</summary>
+    private int Dpi(int designPixels) => (int)Math.Round(designPixels * (DeviceDpi / 96f));
+
+    // ─────────────────────────────── Edit model ───────────────────────────────
+
+    private DisplayInfo? SelectedDisplay =>
+        _displays.Count > 0 ? _displays[Math.Clamp(_displayIndex, 0, _displays.Count - 1)] : null;
+
+    private bool PerDisplay => _settings.MultiMonitorMode == MultiMonitorMode.PerDisplay && _displays.Count > 1;
+
+    /// <summary>The settings currently shown for the selected display (read-only use).</summary>
+    private IDisplaySettings ViewSettings =>
+        PerDisplay && SelectedDisplay != null
+            ? (IDisplaySettings?)_settings.FindDisplayConfig(SelectedDisplay) ?? _settings
+            : _settings;
+
+    /// <summary>Where edits go: the display's own config (created on first edit) or the globals.</summary>
+    private IDisplaySettings EditTarget =>
+        PerDisplay && SelectedDisplay != null
+            ? _settings.GetOrCreateDisplayConfig(SelectedDisplay)
+            : _settings;
+
+    /// <summary>RenderScheduler key for what the edited display(s) currently show.</summary>
+    private string CurrentImageKey =>
+        PerDisplay && SelectedDisplay != null ? SelectedDisplay.MonitorId : RenderScheduler.AllDisplaysKey;
+
+    /// <summary>Who an edit affects, for button labels: "LG ULTRAGEAR", "all displays".</summary>
+    private string TargetName =>
+        PerDisplay && SelectedDisplay != null ? SelectedDisplay.Title
+        : _displays.Count > 1 ? "all displays" : "your desktop";
+
+    /// <summary>Apply one change to the edit target, then save (and optionally re-render) shortly.</summary>
+    private void Edit(Action<IDisplaySettings> change, bool render = true)
     {
-        // AutoScroll: on height-clamped windows (small high-DPI screens) the
-        // bottom of the tab must stay reachable
-        var tab = new TabPage("Appearance") { BackColor = Theme.TabBackground, AutoScroll = true };
-        int y = 10;
+        if (_loading) return;
+        change(EditTarget);
+        QueueCommit(render);
+    }
 
-        // -- MULTI-DISPLAY MODE (with monitor selector merged inside) --
-        var monitorGroup = new GroupBox
+    private void QueueCommit(bool render)
+    {
+        _pendingRender |= render;
+        _commitTimer.Stop();
+        _commitTimer.Start();
+    }
+
+    private void CommitNow()
+    {
+        _commitTimer.Stop();
+        _settingsManager.Save();
+        if (_pendingRender)
         {
-            Text = "Multi-Display Mode",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 115)
-        };
-
-        _sameForAllRadio = new RadioButton
-        {
-            Text = "Same wallpaper on all displays",
-            AutoSize = true,
-            Location = new Point(15, 20)
-        };
-        _sameForAllRadio.CheckedChanged += (_, _) => { UpdatePerDisplayVisibility(); SchedulePreview(); };
-
-        _spanAcrossRadio = new RadioButton
-        {
-            Text = "Span wallpaper across all displays",
-            AutoSize = true,
-            Location = new Point(15, 40)
-        };
-        _spanAcrossRadio.CheckedChanged += (_, _) => { UpdatePerDisplayVisibility(); SchedulePreview(); };
-
-        _perDisplayRadio = new RadioButton
-        {
-            Text = "Per display (independent settings)",
-            AutoSize = true,
-            Location = new Point(15, 60)
-        };
-        _perDisplayRadio.CheckedChanged += (_, _) => { UpdatePerDisplayVisibility(); SchedulePreview(); };
-
-        // Monitor selector (inside GroupBox, toggled by per-display radio)
-        _monitorSelectLabel = MakeLabel("Configure:", 30, 84);
-        _monitorSelectLabel.Enabled = false;
-
-        _monitorSelectCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(105, 81),
-            Width = 370,
-            Enabled = false
-        };
-
-        var screens = MonitorManager.GetAllScreens();
-        var friendlyNames = MonitorNameHelper.GetMonitorTargets().ToDictionary(kv => kv.Key, kv => kv.Value.FriendlyName);
-        for (int i = 0; i < screens.Length; i++)
-        {
-            var s = screens[i];
-            string deviceName = s.DeviceName.TrimEnd('\0');
-            string monitorName = friendlyNames.TryGetValue(deviceName, out var name) ? name : deviceName;
-            string primary = s.Primary ? " [Primary]" : "";
-            _monitorSelectCombo.Items.Add($"Display {i + 1}: {monitorName} ({s.Bounds.Width}x{s.Bounds.Height}){primary}");
+            _pendingRender = false;
+            if (_advanceRotationOnCommit) _renderScheduler.TriggerNextImage(CurrentImageKey);
+            else if (_showSelectionOnCommit) _renderScheduler.TriggerShowSelection(CurrentImageKey);
+            else _renderScheduler.TriggerUserUpdate();
+            SetStatusOverride("Updating…", Theme.Accent);
         }
-        if (_monitorSelectCombo.Items.Count > 0) _monitorSelectCombo.SelectedIndex = 0;
+        _advanceRotationOnCommit = false;
+        _showSelectionOnCommit = false;
+    }
 
-        _monitorSelectCombo.SelectedIndexChanged += (_, _) =>
+    // Set by "Set": the commit's render shows the chosen image even on a rotating display
+    private bool _showSelectionOnCommit;
+
+    // Set when turning auto-rotate on or changing its source: the commit's
+    // render should move to a new image instead of re-rendering the current one
+    private bool _advanceRotationOnCommit;
+
+    // ─────────────────────────────── Sidebar ───────────────────────────────
+
+    private Panel BuildSidebar()
+    {
+        var sidebar = new Panel { Dock = DockStyle.Left, Width = 216, BackColor = Theme.Chrome, Padding = new Padding(12, 18, 12, 14) };
+
+        var brand = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Chrome };
+        var logo = new PictureBox
         {
-            if (_monitorSelectCombo.SelectedIndex >= 0 && _monitorSelectCombo.SelectedIndex < screens.Length)
+            Image = Icon?.ToBitmap(), SizeMode = PictureBoxSizeMode.Zoom,
+            Size = new Size(24, 24), Location = new Point(8, 4), BackColor = Color.Transparent
+        };
+        var name = new StudioLabel { Text = "Blue Marble", Font = Theme.DisplayFont(12.5f, FontStyle.Bold), Location = new Point(40, 2) };
+        var sub = new StudioLabel { Text = "Desktop", ForeColor = Theme.TextMuted, Font = Theme.UiFont(8.75f), Location = new Point(41, 24) };
+        brand.Controls.AddRange([logo, name, sub]);
+
+        string[] labels = ["Wallpaper", "My Collection", "Settings"];
+        string[] glyphs = [Glyph.Monitor, Glyph.Library, Glyph.Settings];
+        var nav = new Panel { Dock = DockStyle.Top, Height = 3 * 44 + 8, BackColor = Theme.Chrome, Padding = new Padding(0, 8, 0, 0) };
+        for (int i = labels.Length - 1; i >= 0; i--)
+        {
+            int index = i;
+            var btn = new StudioButton
             {
-                _selectedMonitorDevice = screens[_monitorSelectCombo.SelectedIndex].DeviceName;
-                LoadAppearanceFromDisplayConfig(_selectedMonitorDevice);
-            }
-        };
-        if (screens.Length > 0) _selectedMonitorDevice = screens[0].DeviceName;
-
-        monitorGroup.Controls.AddRange([_sameForAllRadio, _spanAcrossRadio, _perDisplayRadio,
-            _monitorSelectLabel, _monitorSelectCombo]);
-        tab.Controls.Add(monitorGroup);
-        y += 120;
-
-        // -- VIEW MODE (accent panel with blue left bar) --
-        _viewAccentPanel = CreateAccentPanel(LeftMargin, y, 490, 72);
-
-        var viewLabel = new Label
-        {
-            Text = "View:",
-            AutoSize = true,
-            Location = new Point(10, 11),
-            Font = new Font("Segoe UI", 11, FontStyle.Bold),
-            BackColor = Color.Transparent
-        };
-        _viewAccentPanel.Controls.Add(viewLabel);
-
-        _displayModeCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(70, 8),
-            Width = 170
-        };
-        _displayModeCombo.Items.AddRange(["Globe", "Flat Map", "Moon", "Still Image"]);
-        _displayModeCombo.SelectedIndexChanged += (_, _) => { UpdateModeVisibility(); SchedulePreview(); };
-        _viewAccentPanel.Controls.Add(_displayModeCombo);
-
-        // Source row (inside accent panel, always visible — disabled when not Still Image)
-        _sourceLabel = new Label
-        {
-            Text = "Source:",
-            AutoSize = true,
-            Location = new Point(10, 42),
-            Font = new Font("Segoe UI", 10, FontStyle.Bold),
-            BackColor = Color.Transparent
-        };
-        _viewAccentPanel.Controls.Add(_sourceLabel);
-
-        _stillImageSourceCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(75, 39),
-            Width = 180,
-            Enabled = false // Disabled by default, enabled when Still Image selected
-        };
-        _stillImageSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "NASA Gallery", "National Parks", "Smithsonian", "My Images"]);
-        _stillImageSourceCombo.SelectedIndex = 0;
-        _stillImageSourceCombo.SelectedIndexChanged += (_, _) =>
-        {
-            UpdateStillImageSubPanel();
-            // Don't trigger render — user must click an image to set wallpaper
-        };
-        _viewAccentPanel.Controls.Add(_stillImageSourceCombo);
-
-        // Accent panel always shows both rows (View + Source)
-        _viewAccentPanel.Height = 72;
-
-        tab.Controls.Add(_viewAccentPanel);
-        y += 77; // accent panel (72) + gap (5)
-
-        // Hint label below accent panel — visible when NOT on Still Image, clickable to switch
-        _sourceHintLabel = new Label
-        {
-            Text = "Select Still Image view to explore NASA, National Parks, and more.",
-            Size = new Size(490, 18),
-            Location = new Point(LeftMargin, y),
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText,
-            Cursor = Cursors.Hand
-        };
-        _sourceHintLabel.Click += (_, _) =>
-        {
-            _displayModeCombo.SelectedIndex = 3; // Switch to Still Image
-        };
-        tab.Controls.Add(_sourceHintLabel);
-
-        // -- AUTO-ROTATION (grouped in its own box, visible for still image mode only) --
-        _autoRotateGroup = new GroupBox
-        {
-            Text = "Auto-Rotate",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 48),
-            Visible = false
-        };
-
-        _randomRotationCheck = new CheckBox
-        {
-            Text = "Auto-rotate wallpaper",
-            AutoSize = true,
-            Location = new Point(10, 18)
-        };
-        _randomRotationCheck.CheckedChanged += (_, _) =>
-        {
-            _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
-            UpdateRotationExclusionVisibility();
-            UpdateModeVisibility(); // Re-layout for exclusion panel visibility change
-            SchedulePreview();
-        };
-        _autoRotateGroup.Controls.Add(_randomRotationCheck);
-
-        _rotationSourceCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(230, 16),
-            Width = 160,
-            Enabled = false
-        };
-        _rotationSourceCombo.Items.AddRange(["NASA EPIC", "NASA APOD", "NASA Gallery", "National Parks", "Smithsonian", "My Images", "Favorites", "All Sources"]);
-        _rotationSourceCombo.SelectedIndex = 6; // Favorites default
-        _rotationSourceCombo.SelectedIndexChanged += (_, _) =>
-        {
-            if (!_isLoading) SchedulePreview();
-            UpdateRotationExclusionVisibility();
-            UpdateModeVisibility(); // Re-layout for exclusion panel visibility change
-        };
-        _autoRotateGroup.Controls.Add(_rotationSourceCombo);
-
-        // Source exclusion checkboxes (inside GroupBox, visible when "All Sources" selected)
-        string[] sourceLabels = ["EPIC", "APOD", "Gallery", "Parks", "Smithsonian", "My Images", "Favorites"];
-        RotationSource[] sourceValues = [
-            RotationSource.NasaEpic, RotationSource.NasaApod, RotationSource.NasaGallery,
-            RotationSource.NationalParks, RotationSource.Smithsonian, RotationSource.UserImages,
-            RotationSource.Favorites
-        ];
-
-        for (int i = 0; i < 7; i++)
-        {
-            int col = i % 4;
-            int row = i / 4;
-            var check = new CheckBox
-            {
-                Text = sourceLabels[i],
-                Checked = true,
-                AutoSize = true,
-                Font = new Font("Segoe UI", 7.5f),
-                Location = new Point(10 + col * 118, 46 + row * 20),
-                Visible = false,
-                Tag = sourceValues[i]
+                Text = labels[i], IconGlyph = glyphs[i], Variant = ButtonVariant.Nav,
+                Dock = DockStyle.Top, Height = 40, Font = Theme.UiFont(10.25f)
             };
-            check.CheckedChanged += OnRotationExclusionChanged;
-            _rotationSourceChecks[i] = check;
-            _autoRotateGroup.Controls.Add(check);
+            btn.Click += (_, _) => ShowPage(index);
+            _navButtons[i] = btn;
+            nav.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 4, BackColor = Theme.Chrome });
+            nav.Controls.Add(btn);
         }
 
-        tab.Controls.Add(_autoRotateGroup);
-
-        // Auto-rotate info banner (positioned dynamically by UpdateModeVisibility)
-        _autoRotateBanner = new Label
+        var status = new Card { Dock = DockStyle.Bottom, Height = 124, Padding = new Padding(14, 12, 14, 12) };
+        _statusDot = new StatusDot { Location = new Point(14, 19), ForeColor = Theme.Success };
+        _statusTitle = new StudioLabel
         {
-            Text = "Auto-rotate is on \u2014 your wallpaper will change on the next update. Browse to discover and favorite images.",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 36),
-            Font = new Font("Segoe UI", 8f),
-            ForeColor = Theme.InfoBannerText,
-            BackColor = Theme.InfoBannerBackground,
-            Padding = new Padding(8, 4, 8, 4),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Visible = false
+            AutoSize = false, Location = new Point(28, 11), Size = new Size(150, 22),
+            Font = Theme.UiFont(9f), ForeColor = Theme.TextSecondary, AutoEllipsis = true
         };
-        _autoRotateBanner.Paint += (sender, e) =>
+        _statusSub = new StudioLabel
         {
-            if (sender is Label lbl)
-            {
-                using var pen = new Pen(Theme.InfoBannerBorder);
-                e.Graphics.DrawRectangle(pen, 0, 0, lbl.Width - 1, lbl.Height - 1);
-            }
+            AutoSize = false, Location = new Point(14, 36), Size = new Size(164, 34),
+            Font = Theme.UiFont(8.5f), ForeColor = Theme.TextMuted
         };
-        tab.Controls.Add(_autoRotateBanner);
-
-        // -- MODE PANELS (positioned dynamically by UpdateModeVisibility) --
-        // Initial Y will be adjusted when UpdateModeVisibility runs
-        int panelY = y + 28;
-
-        _globeControlsPanel = CreateGlobePanel(panelY);
-        tab.Controls.Add(_globeControlsPanel);
-
-        _stillImagePanel = CreateStillImagePanel(panelY);
-        tab.Controls.Add(_stillImagePanel);
-
-        // -- SHARED RESET BUTTON --
-        _resetButton = new Button
+        _updateNowButton = new StudioButton
         {
-            Text = "Reset to Defaults",
-            Location = new Point(LeftMargin, panelY + 430),
-            Width = 140,
-            Height = 28
+            Text = "Update now", Variant = ButtonVariant.Secondary,
+            Location = new Point(14, 76), Size = new Size(164, 34), Font = Theme.UiFont(9.25f)
         };
-        _resetButton.Click += (_, _) => ResetToDefaults();
-        tab.Controls.Add(_resetButton);
-
-        // -- PRESETS (always visible, grouped into a panel for easy repositioning) --
-        _presetsPanel = new Panel
+        _updateNowButton.Click += (_, _) =>
         {
-            Location = new Point(0, panelY + 460),
-            Size = new Size(530, 60)
-        };
-
-        _presetsPanel.Controls.Add(MakeLabel("Presets:", LeftMargin, 3));
-
-        _presetCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(LeftMargin + 60, 0),
-            Width = 180
-        };
-        _presetsPanel.Controls.Add(_presetCombo);
-
-        var presetSaveBtn = new Button
-        {
-            Text = "Save",
-            Location = new Point(LeftMargin + 250, 0),
-            Width = 60, Height = 26
-        };
-        presetSaveBtn.Click += (_, _) => SavePreset();
-        _presetsPanel.Controls.Add(presetSaveBtn);
-
-        var presetLoadBtn = new Button
-        {
-            Text = "Load",
-            Location = new Point(LeftMargin + 315, 0),
-            Width = 60, Height = 26
-        };
-        presetLoadBtn.Click += (_, _) => LoadPreset();
-        _presetsPanel.Controls.Add(presetLoadBtn);
-
-        var presetDeleteBtn = new Button
-        {
-            Text = "Delete",
-            Location = new Point(LeftMargin + 380, 0),
-            Width = 60, Height = 26
-        };
-        presetDeleteBtn.Click += (_, _) => DeletePreset();
-        _presetsPanel.Controls.Add(presetDeleteBtn);
-
-        _presetsPanel.Controls.Add(new Label
-        {
-            Text = "Presets save view and lighting settings (not the selected image).",
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText,
-            AutoSize = true,
-            Location = new Point(LeftMargin + 60, 28)
-        });
-
-        tab.Controls.Add(_presetsPanel);
-
-        RefreshPresetCombo();
-
-        return tab;
-    }
-
-    private Panel CreateGlobePanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 420) };
-        int gy = 0;
-
-        // Location
-        panel.Controls.Add(MakeLabel("Location:", LeftMargin, gy + 3));
-        _locationCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(100, gy),
-            Width = 150
-        };
-        foreach (var preset in LocationPresets) _locationCombo.Items.Add(preset.Name);
-        _locationCombo.SelectedIndex = 0;
-        _locationCombo.SelectedIndexChanged += (_, _) =>
-        {
-            if (_isLoading || _locationCombo.SelectedIndex <= 0) return;
-            var preset = LocationPresets[_locationCombo.SelectedIndex];
-            _isLoading = true;
-            try
-            {
-                _longitudeSlider.Value = Math.Clamp((int)preset.Lon, -180, 180);
-                _longitudeValue.Text = preset.Lon.ToString("F0") + "\u00b0";
-                _latitudeSlider.Value = Math.Clamp((int)preset.Lat, -60, 60);
-                _latitudeValue.Text = preset.Lat.ToString("F0") + "\u00b0";
-            }
-            finally
-            {
-                _isLoading = false;
-            }
-            SchedulePreview();
-        };
-        panel.Controls.Add(_locationCombo);
-        gy += 28;
-
-        // Spherical panel (lon + lat)
-        _sphericalPanel = new Panel
-        {
-            Location = new Point(0, gy),
-            Size = new Size(530, (LabelHeight + SliderRowHeight + RowGap) * 2),
-        };
-        int sy = 0;
-
-        _sphericalPanel.Controls.Add(MakeLabel("Longitude:", LeftMargin, sy));
-        _longitudeValue = MakeLabel("-100\u00b0", RightValueX, sy);
-        _sphericalPanel.Controls.Add(_longitudeValue);
-        sy += LabelHeight;
-        _longitudeSlider = MakeSlider(LeftMargin, sy, -180, 180, -100);
-        _longitudeSlider.Scroll += (_, _) =>
-        {
-            _longitudeValue.Text = _longitudeSlider.Value + "\u00b0";
-            _locationCombo.SelectedIndex = 0;
-            SchedulePreview();
-        };
-        _sphericalPanel.Controls.Add(_longitudeSlider);
-        sy += SliderRowHeight + RowGap;
-
-        _sphericalPanel.Controls.Add(MakeLabel("Latitude:", LeftMargin, sy));
-        _latitudeValue = MakeLabel("42\u00b0", RightValueX, sy);
-        _sphericalPanel.Controls.Add(_latitudeValue);
-        sy += LabelHeight;
-        _latitudeSlider = MakeSlider(LeftMargin, sy, -60, 60, 42);
-        _latitudeSlider.Scroll += (_, _) =>
-        {
-            _latitudeValue.Text = _latitudeSlider.Value + "\u00b0";
-            _locationCombo.SelectedIndex = 0;
-            SchedulePreview();
-        };
-        _sphericalPanel.Controls.Add(_latitudeSlider);
-
-        panel.Controls.Add(_sphericalPanel);
-        gy += _sphericalPanel.Height;
-
-        // Zoom
-        gy = AddSliderRow(panel, "Zoom:", "100", LeftMargin, gy, 1, 100, 100, SliderWidth,
-            out _zoomSlider, out _zoomValue, (s, v) => v.Text = s.Value.ToString());
-
-        // Offsets
-        gy = AddSliderRow(panel, "Horizontal offset:", "0", LeftMargin, gy, -25, 25, 0, SliderWidth,
-            out _offsetXSlider, out _offsetXValue, (s, v) => v.Text = s.Value.ToString());
-
-        gy = AddSliderRow(panel, "Vertical offset:", "-15", LeftMargin, gy, -25, 25, -15, SliderWidth,
-            out _offsetYSlider, out _offsetYValue, (s, v) => v.Text = s.Value.ToString());
-
-        // Night lights
-        _nightLightsCheck = new CheckBox
-        {
-            Text = "City lights at night",
-            AutoSize = true,
-            Location = new Point(LeftMargin, gy)
-        };
-        _nightLightsCheck.CheckedChanged += (_, _) =>
-        {
-            _nightBrightnessSlider.Enabled = _nightLightsCheck.Checked;
-            SchedulePreview();
-        };
-        panel.Controls.Add(_nightLightsCheck);
-        gy += 22;
-
-        gy = AddSliderRow(panel, "Brightness:", "1.5", IndentMargin, gy, 1, 30, 15, IndentSliderWidth,
-            out _nightBrightnessSlider, out _nightBrightnessValue,
-            (s, v) => v.Text = (s.Value / 10f).ToString("F1"));
-
-        // Daytime light
-        gy = AddSliderRow(panel, "Daytime light:", "0.40", LeftMargin, gy, 0, 50, 40, SliderWidth,
-            out _ambientSlider, out _ambientValue,
-            (s, v) => v.Text = (s.Value / 100f).ToString("F2"));
-
-        // Earth image style (inline, no GroupBox)
-        panel.Controls.Add(MakeLabel("Earth image style:", LeftMargin, gy + 2));
-        _topoRadio = new RadioButton
-        {
-            Text = "Topo",
-            AutoSize = true,
-            Location = new Point(160, gy)
-        };
-        _topoRadio.CheckedChanged += (_, _) => SchedulePreview();
-
-        _topoBathyRadio = new RadioButton
-        {
-            Text = "Topo + Bathymetry",
-            AutoSize = true,
-            Location = new Point(230, gy)
-        };
-        _topoBathyRadio.CheckedChanged += (_, _) => SchedulePreview();
-
-        panel.Controls.AddRange([_topoRadio, _topoBathyRadio]);
-        gy += 28;
-
-        panel.Size = new Size(530, gy);
-        return panel;
-    }
-
-    // -- COMBINED STILL IMAGE PANEL --
-    // Contains a source sub-dropdown and sub-panels for each source
-
-    private Panel CreateStillImagePanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 430), Visible = false };
-
-        // Source and quality filter are now in the accent panel above.
-        // Sub-panels start at the top of this panel.
-        int subPanelY = 0;
-
-        _epicSubPanel = CreateEpicSubPanel(subPanelY);
-        panel.Controls.Add(_epicSubPanel);
-
-        _apodSubPanel = CreateApodSubPanel(subPanelY);
-        panel.Controls.Add(_apodSubPanel);
-
-        _npsSubPanel = CreateNpsSubPanel(subPanelY);
-        panel.Controls.Add(_npsSubPanel);
-
-        _smithsonianSubPanel = CreateSmithsonianSubPanel(subPanelY);
-        panel.Controls.Add(_smithsonianSubPanel);
-
-        _userImagesSubPanel = CreateUserImagesSubPanel(subPanelY);
-        panel.Controls.Add(_userImagesSubPanel);
-
-        _nasaGallerySubPanel = CreateNasaGallerySubPanel(subPanelY);
-        panel.Controls.Add(_nasaGallerySubPanel);
-
-        return panel;
-    }
-
-    private Panel CreateEpicSubPanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = true };
-        int ey = 0;
-
-        panel.Controls.Add(MakeLabel("Image type:", LeftMargin, ey + 3));
-        _epicTypeCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(120, ey),
-            Width = 150
-        };
-        _epicTypeCombo.Items.AddRange(["Natural Color", "Enhanced Color"]);
-        _epicTypeCombo.SelectedIndex = 0;
-        _epicTypeCombo.SelectedIndexChanged += (_, _) =>
-        {
-            if (!_isLoading) RefreshEpicImages();
-            SchedulePreview();
-        };
-        panel.Controls.Add(_epicTypeCombo);
-        ey += 30;
-
-        _epicLatestRadio = new RadioButton
-        {
-            Text = "Show latest image", AutoSize = true,
-            Location = new Point(LeftMargin, ey), Checked = true
-        };
-        _epicLatestRadio.CheckedChanged += (_, _) =>
-        {
-            _epicDatePicker.Enabled = !_epicLatestRadio.Checked;
-            if (!_isLoading && _epicLatestRadio.Checked) RefreshEpicImages();
-            SchedulePreview();
-        };
-        panel.Controls.Add(_epicLatestRadio);
-        ey += 22;
-
-        _epicDateRadio = new RadioButton
-        {
-            Text = "Choose date:", AutoSize = true,
-            Location = new Point(LeftMargin, ey)
-        };
-        _epicDateRadio.CheckedChanged += (_, _) =>
-        {
-            _epicDatePicker.Enabled = _epicDateRadio.Checked;
-            if (!_isLoading && _epicDateRadio.Checked) RefreshEpicImages();
-            SchedulePreview();
-        };
-        panel.Controls.Add(_epicDateRadio);
-
-        _epicDatePicker = new DateTimePicker
-        {
-            Location = new Point(140, ey - 2), Width = 170,
-            Format = DateTimePickerFormat.Short,
-            Value = DateTime.Now.AddDays(-1),
-            MaxDate = DateTime.Now,
-            MinDate = new DateTime(2015, 6, 13),
-            Enabled = false
-        };
-        _epicDatePicker.ValueChanged += (_, _) =>
-        {
-            if (!_isLoading && _epicDateRadio.Checked) RefreshEpicImages();
-            SchedulePreview();
-        };
-        panel.Controls.Add(_epicDatePicker);
-
-        _epicLatestDateLabel = new Label
-        {
-            Text = "Checking latest available date...",
-            Location = new Point(320, ey + 1),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8f),
-            ForeColor = Theme.DetailText
-        };
-        panel.Controls.Add(_epicLatestDateLabel);
-        ey += 30;
-
-        // Fetch the latest available EPIC date in the background
-        FetchEpicLatestDate();
-
-        _epicGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, ey),
-            Size = new Size(490, 250)
-        };
-        _epicGrid.ImageSelected += (_, img) =>
-        {
-            if (!_isLoading) SchedulePreview();
-        };
-        _epicGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
-        panel.Controls.Add(_epicGrid);
-        ey += 255;
-
-        _epicStatusLabel = new Label
-        {
-            Text = "Select NASA EPIC source to load satellite images.",
-            Location = new Point(LeftMargin, ey),
-            Size = new Size(490, 20),
-            Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Theme.SecondaryText
-        };
-        panel.Controls.Add(_epicStatusLabel);
-        ey += 22;
-
-        _epicRefreshButton = new Button
-        {
-            Text = "Refresh", Location = new Point(LeftMargin, ey), Width = 100, Height = 28
-        };
-        _epicRefreshButton.Click += (_, _) =>
-        {
-            if ((DateTime.Now - _lastEpicRefresh).TotalSeconds < 5)
-            {
-                _epicStatusLabel.Text = "Please wait a few seconds before refreshing.";
-                _epicStatusLabel.ForeColor = Theme.SecondaryText;
-                return;
-            }
-            RefreshEpicImages();
-        };
-        panel.Controls.Add(_epicRefreshButton);
-
-        return panel;
-    }
-
-    private Panel CreateApodSubPanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
-        int py = 0;
-
-        _apodLatestRadio = new RadioButton
-        {
-            Text = "Show recent:", AutoSize = true,
-            Location = new Point(LeftMargin, py), Checked = true
-        };
-        _apodLatestRadio.CheckedChanged += (_, _) =>
-        {
-            _apodDatePicker.Enabled = !_apodLatestRadio.Checked;
-            _apodRecentDaysCombo.Enabled = _apodLatestRadio.Checked;
-            if (!_isLoading && _apodLatestRadio.Checked) RefreshApodImages();
-            SchedulePreview();
-        };
-        panel.Controls.Add(_apodLatestRadio);
-
-        _apodRecentDaysCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(140, py - 2),
-            Width = 90
-        };
-        _apodRecentDaysCombo.Items.AddRange(["7 days", "14 days", "30 days", "60 days", "90 days"]);
-        _apodRecentDaysCombo.SelectedIndex = 1; // 14 days default
-        _apodRecentDaysCombo.SelectedIndexChanged += (_, _) =>
-        {
-            if (!_isLoading && _apodLatestRadio.Checked) RefreshApodImages();
-            SchedulePreview();
-        };
-        panel.Controls.Add(_apodRecentDaysCombo);
-        py += 26;
-
-        _apodDateRadio = new RadioButton
-        {
-            Text = "Choose date:", AutoSize = true,
-            Location = new Point(LeftMargin, py)
-        };
-        _apodDateRadio.CheckedChanged += (_, _) =>
-        {
-            _apodDatePicker.Enabled = _apodDateRadio.Checked;
-            if (!_isLoading && _apodDateRadio.Checked) RefreshApodImages();
-            SchedulePreview();
-        };
-        panel.Controls.Add(_apodDateRadio);
-
-        _apodDatePicker = new DateTimePicker
-        {
-            Location = new Point(140, py - 2), Width = 170,
-            Format = DateTimePickerFormat.Short,
-            Value = DateTime.Now.AddDays(-1),
-            MaxDate = DateTime.Now,
-            MinDate = new DateTime(1995, 6, 16),
-            Enabled = false
-        };
-        _apodDatePicker.ValueChanged += (_, _) =>
-        {
-            if (!_isLoading && _apodDateRadio.Checked) RefreshApodImages();
-            SchedulePreview();
-        };
-        panel.Controls.Add(_apodDatePicker);
-        py += 30;
-
-        _apodGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 280)
-        };
-        _apodGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
-        _apodGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
-        panel.Controls.Add(_apodGrid);
-        py += 285;
-
-        _apodStatusLabel = new Label
-        {
-            Text = "Select NASA APOD source to load images.",
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 20),
-            Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Theme.SecondaryText
-        };
-        panel.Controls.Add(_apodStatusLabel);
-        py += 22;
-
-        _apodRefreshButton = new Button
-        {
-            Text = "Refresh", Location = new Point(LeftMargin, py), Width = 100, Height = 28
-        };
-        _apodRefreshButton.Click += (_, _) =>
-        {
-            if ((DateTime.Now - _lastApodRefresh).TotalSeconds < 5)
-            {
-                _apodStatusLabel.Text = "Please wait a few seconds before refreshing.";
-                _apodStatusLabel.ForeColor = Theme.SecondaryText;
-                return;
-            }
-            RefreshApodImages();
-        };
-        panel.Controls.Add(_apodRefreshButton);
-
-        return panel;
-    }
-
-    private Panel CreateNpsSubPanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
-        int py = 0;
-
-        panel.Controls.Add(MakeLabel("Search parks:", LeftMargin, py + 3));
-        _npsSearchBox = new TextBox
-        {
-            Location = new Point(120, py), Width = 280,
-            Text = "Yellowstone"
-        };
-        _npsSearchBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) RefreshNpsImages(); };
-        panel.Controls.Add(_npsSearchBox);
-
-        _npsSearchButton = new Button
-        {
-            Text = "Search", Location = new Point(410, py), Width = 80, Height = 24
-        };
-        _npsSearchButton.Click += (_, _) => RefreshNpsImages();
-        panel.Controls.Add(_npsSearchButton);
-        py += 28;
-
-        // Chip hint label
-        panel.Controls.Add(new Label
-        {
-            Text = "Use a suggested park or search your own.",
-            Location = new Point(LeftMargin, py),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText
-        });
-        py += 16;
-
-        // Suggestion chips (wrapping, scrollable, uses exact park codes)
-        _npsChipsPanel = new FlowLayoutPanel
-        {
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 78),
-            WrapContents = true,
-            AutoScroll = true
-        };
-        _npsChipsPanel.HorizontalScroll.Enabled = false;
-        _npsChipsPanel.HorizontalScroll.Visible = false;
-        foreach (var parkName in NpsApiClient.ParkCodes.Keys.OrderBy(k => k))
-        {
-            var chipName = parkName; // capture for closure
-            var btn = new Button
-            {
-                Text = chipName,
-                AutoSize = true,
-                Height = 24,
-                Padding = new Padding(2, 0, 2, 0),
-                Margin = new Padding(0, 0, 4, 2),
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 7.5f),
-                BackColor = Theme.BlueChipBackground,
-                ForeColor = Theme.BlueChipText,
-                Cursor = Cursors.Hand
-            };
-            btn.FlatAppearance.BorderColor = Theme.BlueChipBorder;
-            btn.FlatAppearance.BorderSize = 1;
-            btn.Click += (_, _) =>
-            {
-                _npsSearchBox.Text = chipName;
-                RefreshNpsImages();
-            };
-            _npsChipsPanel.Controls.Add(btn);
-        }
-        panel.Controls.Add(_npsChipsPanel);
-        py += 82;
-
-        _npsGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 234)
-        };
-        _npsGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
-        _npsGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
-        panel.Controls.Add(_npsGrid);
-        py += 239;
-
-        _npsStatusLabel = new Label
-        {
-            Text = "Enter a park name or click a suggestion. Requires an API key (System tab).",
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 35),
-            Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Theme.SecondaryText
-        };
-        panel.Controls.Add(_npsStatusLabel);
-
-        return panel;
-    }
-
-    private Panel CreateSmithsonianSubPanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
-        int py = 0;
-
-        panel.Controls.Add(MakeLabel("Search:", LeftMargin, py + 3));
-        _smithsonianSearchBox = new TextBox
-        {
-            Location = new Point(80, py), Width = 320,
-            Text = "landscape painting"
-        };
-        _smithsonianSearchBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) RefreshSmithsonianImages(); };
-        panel.Controls.Add(_smithsonianSearchBox);
-
-        _smithsonianSearchButton = new Button
-        {
-            Text = "Search", Location = new Point(410, py), Width = 80, Height = 24
-        };
-        _smithsonianSearchButton.Click += (_, _) => RefreshSmithsonianImages();
-        panel.Controls.Add(_smithsonianSearchButton);
-        py += 28;
-
-        // Chip hint label
-        panel.Controls.Add(new Label
-        {
-            Text = "Use a suggested term or search your own.",
-            Location = new Point(LeftMargin, py),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText
-        });
-        py += 16;
-
-        // Suggestion chips (curated for art_design category)
-        _smithsonianChipsPanel = new FlowLayoutPanel
-        {
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 78),
-            WrapContents = true,
-            AutoScroll = true
-        };
-        _smithsonianChipsPanel.HorizontalScroll.Enabled = false;
-        _smithsonianChipsPanel.HorizontalScroll.Visible = false;
-        string[] smithChips = ["Landscape Painting", "Sunset", "Mountain", "Ocean", "Forest",
-            "Butterfly", "Architecture", "Waterfall", "Desert", "Volcano",
-            "Glacier", "Photography", "Parthenon", "Night Sky"];
-        foreach (var chip in smithChips)
-        {
-            var chipText = chip; // capture for closure
-            var btn = new Button
-            {
-                Text = chipText,
-                AutoSize = true,
-                Height = 24,
-                Padding = new Padding(2, 0, 2, 0),
-                Margin = new Padding(0, 0, 4, 2),
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 7.5f),
-                BackColor = Theme.TanChipBackground,
-                ForeColor = Theme.TanChipText,
-                Cursor = Cursors.Hand
-            };
-            btn.FlatAppearance.BorderColor = Theme.TanChipBorder;
-            btn.FlatAppearance.BorderSize = 1;
-            btn.Click += (_, _) =>
-            {
-                _smithsonianSearchBox.Text = chipText;
-                RefreshSmithsonianImages();
-            };
-            _smithsonianChipsPanel.Controls.Add(btn);
-        }
-        panel.Controls.Add(_smithsonianChipsPanel);
-        py += 82;
-
-        _smithsonianGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 234)
-        };
-        _smithsonianGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
-        _smithsonianGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
-        panel.Controls.Add(_smithsonianGrid);
-        py += 239;
-
-        _smithsonianStatusLabel = new Label
-        {
-            Text = "Search the Smithsonian collection. Requires an API key (System tab).",
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 35),
-            Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Theme.SecondaryText
-        };
-        panel.Controls.Add(_smithsonianStatusLabel);
-
-        return panel;
-    }
-
-    private TabPage CreateSystemTab()
-    {
-        var tab = new TabPage("System") { BackColor = Theme.TabBackground };
-        int y = 10;
-
-        tab.Controls.Add(MakeLabel("Update every:", LeftMargin, y + 3));
-        _updateIntervalCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(180, y),
-            Width = 270
-        };
-        _updateIntervalCombo.Items.AddRange([
-            "1 minute", "2 minutes", "5 minutes", "10 minutes",
-            "15 minutes", "30 minutes", "1 hour", "6 hours",
-            "12 hours", "Daily", "Weekly", "Bi-weekly", "Monthly",
-            "Every 100 years"
-        ]);
-        _updateIntervalCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
-        tab.Controls.Add(_updateIntervalCombo);
-        y += 35;
-
-        _runOnStartupCheck = new CheckBox
-        {
-            Text = "Run Blue Marble Desktop when Windows starts",
-            AutoSize = true,
-            Location = new Point(LeftMargin, y)
-        };
-        _runOnStartupCheck.CheckedChanged += (_, _) => SchedulePreview();
-        tab.Controls.Add(_runOnStartupCheck);
-        y += 35;
-
-        tab.Controls.Add(MakeLabel("Render resolution:", LeftMargin, y + 3));
-        _renderResCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(180, y),
-            Width = 270
-        };
-        _renderResCombo.Items.AddRange([
-            "Auto (match display)", "1920 x 1080", "2560 x 1440", "3840 x 2160", "5120 x 2880"
-        ]);
-        _renderResCombo.SelectedIndexChanged += (_, _) => SchedulePreview();
-        tab.Controls.Add(_renderResCombo);
-        y += 40;
-
-        // HD Textures section
-        var hdGroup = new GroupBox
-        {
-            Text = "HD Textures (Globe + Flat Map only)",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 105)
-        };
-
-        bool hdAvailable = HiResTextureManager.AreHiResTexturesAvailable();
-        var hdDescLabel = new Label
-        {
-            Text = "HD textures enhance Globe and Flat Map views with ultra-high resolution\n" +
-                   "(21600x10800). They do not affect Still Image or Moon views.",
-            Location = new Point(15, 20),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8f),
-            ForeColor = Theme.DescriptionText
-        };
-        hdGroup.Controls.Add(hdDescLabel);
-
-        var hdStatusLabel = new Label
-        {
-            Text = hdAvailable
-                ? "\u2713 HD textures installed \u2014 Globe and Flat Map using ultra-high resolution."
-                : $"Standard textures in use. Download ~{HiResTextureManager.GetEstimatedDownloadSizeMB()} MB for HD.",
-            AutoSize = true,
-            Location = new Point(15, 52),
-            Font = new Font("Segoe UI", 8.5f)
-        };
-        hdGroup.Controls.Add(hdStatusLabel);
-
-        var hdProgressLabel = new Label
-        {
-            Text = "", AutoSize = true, Location = new Point(15, 52),
-            Font = new Font("Segoe UI", 8.5f), Visible = false
-        };
-        hdGroup.Controls.Add(hdProgressLabel);
-
-        var hdButton = new Button
-        {
-            Text = hdAvailable ? "Re-download HD Textures" : "Download HD Textures",
-            Location = new Point(15, 72), Width = 200, Height = 26
-        };
-
-        var hdProgressBar = new ProgressBar
-        {
-            Location = new Point(220, 74),
-            Size = new Size(255, 22),
-            Minimum = 0, Maximum = 100,
-            Style = ProgressBarStyle.Continuous,
-            Visible = false
-        };
-
-        // Shared app-level manager: the download keeps running if this form is
-        // closed or recreated; handlers are unsubscribed in Dispose and guarded
-        // against the form being disposed mid-download
-        var hdManager = _hdTextureManager;
-        _hdProgressHandler = (progress, message) =>
-        {
-            if (IsDisposed) return;
-            void UpdateProgress()
-            {
-                hdProgressLabel.Text = message;
-                hdProgressLabel.Visible = true;
-                hdProgressBar.Visible = true;
-                if (progress >= 0)
-                    hdProgressBar.Value = Math.Clamp((int)(progress * 100), 0, 100);
-            }
-            try
-            {
-                if (hdProgressLabel.InvokeRequired)
-                    hdProgressLabel.Invoke(UpdateProgress);
-                else
-                    UpdateProgress();
-            }
-            catch (ObjectDisposedException) { }
-            catch (InvalidOperationException) { }
-        };
-        hdManager.ProgressChanged += _hdProgressHandler;
-
-        _hdCompletedHandler = (success, message) =>
-        {
-            if (IsDisposed) return;
-            void UpdateUI()
-            {
-                hdProgressLabel.Text = message;
-                hdProgressBar.Visible = false;
-                hdProgressBar.Value = 0;
-                hdButton.Enabled = true;
-                hdButton.Text = success ? "Re-download HD Textures" : "Retry Download";
-                if (success)
-                {
-                    hdStatusLabel.Text = "\u2713 HD textures installed \u2014 Globe and Flat Map using ultra-high resolution.";
-                    _renderScheduler.TriggerUpdate();
-                }
-            }
-            try
-            {
-                if (hdButton.InvokeRequired) hdButton.Invoke(UpdateUI); else UpdateUI();
-            }
-            catch (ObjectDisposedException) { }
-            catch (InvalidOperationException) { }
-        };
-        hdManager.DownloadCompleted += _hdCompletedHandler;
-
-        // Reflect an in-flight download when the form is (re)opened mid-download
-        if (hdManager.IsDownloading)
-        {
-            hdButton.Text = "Cancel Download";
-            hdProgressLabel.Text = "Downloading HD textures...";
-            hdProgressLabel.Visible = true;
-            hdProgressBar.Visible = true;
-        }
-        hdButton.Click += (_, _) =>
-        {
-            if (hdManager.IsDownloading)
-            {
-                hdManager.CancelDownload();
-                hdButton.Text = "Download HD Textures";
-                hdProgressLabel.Visible = false;
-                hdProgressBar.Visible = false;
-                hdProgressBar.Value = 0;
-            }
+            CommitNow();
+            if (ViewSettings.DisplayMode == DisplayMode.StillImage && ViewSettings.RandomRotationEnabled)
+                _renderScheduler.TriggerNextImage(CurrentImageKey);
             else
-            {
-                hdManager.StartDownload();
-                hdButton.Text = "Cancel Download";
-                hdButton.Enabled = true;
-            }
+                _renderScheduler.TriggerShowSelection(CurrentImageKey);
+            SetStatusOverride("Updating…", Theme.Accent);
         };
-        hdGroup.Controls.Add(hdButton);
-        hdGroup.Controls.Add(hdProgressBar);
-        tab.Controls.Add(hdGroup);
-        y += 115;
+        status.Controls.AddRange([_statusDot, _statusTitle, _statusSub, _updateNowButton]);
 
-        // Cache Settings section
-        var cacheGroup = new GroupBox
-        {
-            Text = "Cache Settings",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 120)
-        };
-
-        var cacheDescLabel = new Label
-        {
-            Text = "Controls how long downloaded images are kept. Favorites are never deleted.",
-            Location = new Point(15, 20),
-            Size = new Size(460, 18),
-            Font = new Font("Segoe UI", 8f),
-            ForeColor = Theme.DescriptionText
-        };
-        cacheGroup.Controls.Add(cacheDescLabel);
-
-        cacheGroup.Controls.Add(new Label
-        {
-            Text = "Keep images for:", AutoSize = true,
-            Location = new Point(15, 44),
-            Font = new Font("Segoe UI", 9f)
-        });
-
-        var cacheDurationCombo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(130, 41),
-            Width = 150
-        };
-        cacheDurationCombo.Items.AddRange(["7 days", "14 days", "30 days (default)", "90 days", "Keep forever"]);
-        cacheDurationCombo.SelectedIndex = _settings.CacheDurationDays switch
-        {
-            7 => 0, 14 => 1, 90 => 3, 0 => 4, _ => 2
-        };
-        cacheDurationCombo.SelectedIndexChanged += (_, _) =>
-        {
-            int days = cacheDurationCombo.SelectedIndex switch
-            {
-                0 => 7, 1 => 14, 3 => 90, 4 => 0, _ => 30
-            };
-            _settingsManager.ApplyAndSave(s =>
-            {
-                s.CacheDurationDays = days;
-                // EPIC images arrive daily and age out fast — cap at 14 days
-                // (0 = keep forever)
-                s.EpicCacheDurationDays = days == 0 ? 0 : Math.Min(days, 14);
-            });
-        };
-        cacheGroup.Controls.Add(cacheDurationCombo);
-
-        // Show cache size
-        var cacheSizeLabel = new Label
-        {
-            Text = "Calculating cache size...",
-            Location = new Point(290, 44),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8f),
-            ForeColor = Theme.SecondaryText
-        };
-        cacheGroup.Controls.Add(cacheSizeLabel);
-        _cacheSizeLabel = cacheSizeLabel;
-        UpdateCacheSizeLabelAsync(cacheSizeLabel);
-
-        // Periodically refresh cache size while the settings form is open
-        _cacheSizeTimer = new System.Windows.Forms.Timer
-        {
-            Interval = Math.Max(60000, _settings.UpdateIntervalSeconds * 1000)
-        };
-        _cacheSizeTimer.Tick += (_, _) =>
-        {
-            if (_cacheSizeLabel != null && !IsDisposed)
-                UpdateCacheSizeLabelAsync(_cacheSizeLabel);
-        };
-        _cacheSizeTimer.Start();
-
-        var clearCacheButton = new Button
-        {
-            Text = "Clear Cache Now",
-            Location = new Point(15, 70),
-            Width = 130, Height = 28
-        };
-        clearCacheButton.Click += (_, _) =>
-        {
-            var result = MessageBox.Show(
-                "This will delete all cached images (except favorites and user images).\n\n" +
-                "Images will be re-downloaded as needed. Continue?",
-                "Clear Cache", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (result != DialogResult.Yes) return;
-            try
-            {
-                HashSet<string> protectedIds;
-                lock (_settings.FavoritesLock)
-                {
-                    protectedIds = new HashSet<string>(
-                        _settings.Favorites.Select(f => ImageCache.SanitizeFileName(f.ImageId)));
-                }
-                // Use 1 day = effectively delete everything except today's files
-                _imageCache.CleanOldCache(protectedIds, maxDays: 1);
-
-                // EPIC cache: same sweep, protecting favorited images — the dialog
-                // promises favorites survive
-                new EpicImageCache().CleanOldCache(maxDays: 1, protectedIds: protectedIds);
-
-                cacheSizeLabel.Text = "Cache cleared";
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error clearing cache: {ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        };
-
-        var clearCacheNote = new Label
-        {
-            Text = "Favorites and user images are not affected.",
-            Location = new Point(155, 75),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8f),
-            ForeColor = Theme.SecondaryText
-        };
-        cacheGroup.Controls.Add(clearCacheNote);
-        cacheGroup.Controls.Add(clearCacheButton);
-        tab.Controls.Add(cacheGroup);
-        y += 130;
-
-        // === STORAGE LOCATIONS SECTION ===
-        var appDataDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BlueMarbleDesktop");
-
-        var storageGroup = new GroupBox
-        {
-            Text = "Storage Locations",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 105)
-        };
-
-        var storageInfo = new Label
-        {
-            Text = $"Cached images:  {Path.Combine(appDataDir, "image_cache")}\n" +
-                   $"User images:    {Path.Combine(appDataDir, "user_images")}\n" +
-                   $"Settings:       {Path.Combine(appDataDir, "settings.json")}",
-            Location = new Point(15, 20),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText
-        };
-        storageGroup.Controls.Add(storageInfo);
-
-        var openFolderButton = new Button
-        {
-            Text = "Open Folder",
-            Location = new Point(15, 73),
-            Width = 100, Height = 24
-        };
-        openFolderButton.Click += (_, _) =>
-        {
-            try { System.Diagnostics.Process.Start("explorer.exe", appDataDir); }
-            catch { }
-        };
-        storageGroup.Controls.Add(openFolderButton);
-
-        var storageDisclaimer = new Label
-        {
-            Text = "Files are stored locally. You can copy or back up\nimages from these folders at any time.",
-            Location = new Point(125, 73),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText
-        };
-        storageGroup.Controls.Add(storageDisclaimer);
-        tab.Controls.Add(storageGroup);
-        y += 115;
-
-        // === API KEY SECTION ===
-        var apiKeyGroup = new GroupBox
-        {
-            Text = "API Key",
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 175)
-        };
-        int ay = 18;
-
-        var apiInfoLabel = new Label
-        {
-            Text = "All image sources (NASA APOD, National Parks, Smithsonian) use a single free\n" +
-                   "api.data.gov API key. The default DEMO_KEY has a 50 requests/day limit.",
-            Location = new Point(15, ay),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8f),
-            ForeColor = Theme.DescriptionText
-        };
-        apiKeyGroup.Controls.Add(apiInfoLabel);
-        ay += 36;
-
-        apiKeyGroup.Controls.Add(new Label
-        {
-            Text = "API Key:", AutoSize = true,
-            Location = new Point(15, ay + 3),
-            Font = new Font("Segoe UI", 9f)
-        });
-        _apiKeyBox = new TextBox { Location = new Point(80, ay), Width = 390 };
-        _apiKeyBox.TextChanged += (_, _) =>
-        {
-            // Auto-trim trailing whitespace
-            var text = _apiKeyBox.Text;
-            if (text != text.TrimEnd())
-            {
-                var pos = _apiKeyBox.SelectionStart;
-                _apiKeyBox.Text = text.TrimEnd();
-                _apiKeyBox.SelectionStart = Math.Min(pos, _apiKeyBox.Text.Length);
-            }
-            // Save API key to disk after debounce (300ms)
-            SchedulePreview();
-        };
-        apiKeyGroup.Controls.Add(_apiKeyBox);
-        ay += 28;
-
-        var apiKeyNote = new Label
-        {
-            Text = "Used for NASA APOD, National Parks (NPS), and Smithsonian Open Access.",
-            Location = new Point(80, ay),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText
-        };
-        apiKeyGroup.Controls.Add(apiKeyNote);
-        ay += 18;
-
-        var apiSignupLink = new LinkLabel
-        {
-            Text = "Get a free API key at: https://api.data.gov/signup/",
-            Location = new Point(80, ay),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8.5f)
-        };
-        apiSignupLink.LinkClicked += (_, _) =>
-        {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                    "https://api.data.gov/signup/") { UseShellExecute = true });
-            }
-            catch { }
-        };
-        apiKeyGroup.Controls.Add(apiSignupLink);
-        ay += 24;
-
-        var apiVerifyButton = new Button
-        {
-            Text = "Verify Key",
-            Location = new Point(80, ay),
-            Width = 100, Height = 26
-        };
-        var apiVerifyStatus = new Label
-        {
-            Text = "", Location = new Point(190, ay + 4),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 8.5f)
-        };
-        apiKeyGroup.Controls.Add(apiVerifyStatus);
-        apiVerifyButton.Click += (_, _) =>
-        {
-            var key = _apiKeyBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(key))
-            {
-                apiVerifyStatus.Text = "Please enter an API key first.";
-                apiVerifyStatus.ForeColor = Theme.ErrorText;
-                return;
-            }
-
-            apiVerifyButton.Enabled = false;
-            apiVerifyStatus.Text = "Verifying...";
-            apiVerifyStatus.ForeColor = Theme.SecondaryText;
-
-            Task.Run(async () =>
-            {
-                try
-                {
-                    var result = await _apodApi.GetByDateAsync(key, DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
-                    if (IsDisposed) return;
-                    try
-                    {
-                        Invoke(() =>
-                        {
-                            apiVerifyButton.Enabled = true;
-                            if (result != null)
-                            {
-                                apiVerifyStatus.Text = "API key is valid!";
-                                apiVerifyStatus.ForeColor = Theme.SuccessText;
-                            }
-                            else
-                            {
-                                apiVerifyStatus.Text = "Key may be invalid or rate-limited.";
-                                apiVerifyStatus.ForeColor = Theme.WarningText;
-                            }
-                        });
-                    }
-                    catch (ObjectDisposedException) { }
-                }
-                catch (Exception ex)
-                {
-                    if (IsDisposed) return;
-                    try
-                    {
-                        Invoke(() =>
-                        {
-                            apiVerifyButton.Enabled = true;
-                            apiVerifyStatus.Text = $"Error: {ex.Message}";
-                            apiVerifyStatus.ForeColor = Theme.ErrorText;
-                        });
-                    }
-                    catch (ObjectDisposedException) { }
-                }
-            });
-        };
-        apiKeyGroup.Controls.Add(apiVerifyButton);
-        tab.Controls.Add(apiKeyGroup);
-        y += 185;
-
-        // Dark mode toggle
-        var darkModeCheck = new CheckBox
-        {
-            Text = "Dark mode",
-            AutoSize = true,
-            Location = new Point(LeftMargin, y),
-            ForeColor = Theme.PrimaryText
-        };
-        darkModeCheck.Checked = _settings.DarkModeEnabled;
-        darkModeCheck.CheckedChanged += (_, _) =>
-        {
-            if (_isLoading) return;
-            _settings.DarkModeEnabled = darkModeCheck.Checked;
-            Theme.IsDarkMode = darkModeCheck.Checked;
-            _settingsManager.Save();
-            RequestReopen?.Invoke();
-        };
-        tab.Controls.Add(darkModeCheck);
-        y += 35;
-
-        // Enable scrolling for the system tab
-        tab.AutoScroll = true;
-        tab.AutoScrollMinSize = new Size(510, y);
-
-        return tab;
+        sidebar.Controls.Add(nav);
+        sidebar.Controls.Add(brand);
+        sidebar.Controls.Add(status);
+        return sidebar;
     }
 
-    private async void UpdateCacheSizeLabelAsync(Label label)
+    private void ShowPage(int index)
     {
-        long totalBytes = await Task.Run(() => GetDirectorySize(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "BlueMarbleDesktop")));
+        if (index < 0 || index >= _pages.Length || index == _page) return;
+        _page = index;
+        for (int i = 0; i < _pages.Length; i++)
+        {
+            _pages[i].Visible = i == index;
+            _navButtons[i].Selected = i == index;
+        }
+        if (index == 1) RefreshCollection();
+        if (index == 2) RefreshSettingsPage();
+    }
+
+    // ─────────────────────────────── Status ───────────────────────────────
+
+    private void OnRenderStatusChanged(string status)
+    {
+        // Raised on the render thread; the form may be closing
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke(() => HandleRenderStatus(status)); }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    private void HandleRenderStatus(string status)
+    {
         if (IsDisposed) return;
-        label.Text = totalBytes switch
-        {
-            < 1024 * 1024 => $"{totalBytes / 1024} KB used",
-            < 1024L * 1024 * 1024 => $"{totalBytes / (1024 * 1024)} MB used",
-            _ => $"{totalBytes / (1024L * 1024 * 1024):F1} GB used"
-        };
+        if (status.StartsWith("Downloading", StringComparison.OrdinalIgnoreCase))
+            SetStatusOverride("Downloading image…", Theme.Accent);
+        else if (status.StartsWith("Rendering", StringComparison.OrdinalIgnoreCase))
+            SetStatusOverride("Updating…", Theme.Accent);
+        else if (status.Contains("offline", StringComparison.OrdinalIgnoreCase))
+            SetStatusOverride("Offline — using a cached image", Theme.Warning);
+        else if (status.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                 status.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+                 status.Contains("No image", StringComparison.OrdinalIgnoreCase) ||
+                 status.Contains("below minimum", StringComparison.OrdinalIgnoreCase))
+            SetStatusOverride(FriendlyError(status), Theme.Warning);
+        else if (status.StartsWith("Wallpaper updated", StringComparison.OrdinalIgnoreCase))
+            SetStatusOverride("", Theme.Success);
     }
 
-    private static long GetDirectorySize(string path)
+    private static string FriendlyError(string status)
     {
-        if (!Directory.Exists(path)) return 0;
-        long total = 0;
-        try
+        if (status.Contains("No images available", StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("No image selected", StringComparison.OrdinalIgnoreCase))
+            return "Couldn't get that image — kept the current wallpaper";
+        if (status.Contains("below minimum", StringComparison.OrdinalIgnoreCase))
+            return "Image is smaller than 1080p — skipped";
+        return "Update failed — will retry";
+    }
+
+    private void SetStatusOverride(string text, Color color)
+    {
+        _statusOverride = text;
+        _statusOverrideColor = color;
+        UpdateStatusCard();
+    }
+
+    private void UpdateStatusCard()
+    {
+        if (IsDisposed) return;
+        string title;
+        Color dot;
+        if (_statusOverride.Length > 0)
         {
-            foreach (var file in new DirectoryInfo(path)
-                         .EnumerateFiles("*", SearchOption.AllDirectories))
-            {
-                try { total += file.Length; }
-                catch { /* skip locked/inaccessible files */ }
-            }
+            title = _statusOverride;
+            dot = _statusOverrideColor;
         }
-        catch { /* directory access error */ }
-        return total;
-    }
-
-
-    // -- MODE VISIBILITY --
-
-    private void UpdateModeVisibility()
-    {
-        int mode = _displayModeCombo.SelectedIndex;
-        bool isStillImage = mode == 3;
-
-        _globeControlsPanel.Visible = mode <= 2;
-        _stillImagePanel.Visible = isStillImage;
-        _resetButton.Visible = !isStillImage;
-
-        // Auto-rotation GroupBox visible for still image mode
-        _autoRotateGroup.Visible = isStillImage;
-        _rotationSourceCombo.Enabled = _randomRotationCheck.Checked;
-        UpdateRotationExclusionVisibility();
-
-        // Source dropdown — always visible, enabled only for Still Image
-        _stillImageSourceCombo.Enabled = isStillImage;
-
-        // Hint label below accent panel — visible only when NOT on Still Image
-        _sourceHintLabel.Visible = !isStillImage;
-
-        // Auto-rotate banner + grid dimming
-        bool showBanner = isStillImage && _randomRotationCheck.Checked;
-        _autoRotateBanner.Visible = showBanner;
-        bool dimGrids = showBanner;
-        _epicGrid.Dimmed = dimGrids;
-        _apodGrid.Dimmed = dimGrids;
-        _npsGrid.Dimmed = dimGrids;
-        _smithsonianGrid.Dimmed = dimGrids;
-        _nasaGalleryGrid.Dimmed = dimGrids;
-        _userImagesGrid.Dimmed = dimGrids;
-
-        // Dynamic panel positioning based on which controls are visible.
-        // Positions derive from the ACTUAL bounds of the controls above (which
-        // are DPI-scaled by the framework) plus Dpi()-scaled gaps — raw pixel
-        // constants here would break at non-100% display scaling.
-        if (isStillImage)
+        else if (_renderScheduler.LastAppliedUtc is DateTime last)
         {
-            if (showBanner)
-                _autoRotateBanner.Top = _autoRotateGroup.Bottom + Dpi(5);
-            int bannerOffset = showBanner ? _autoRotateBanner.Height + Dpi(5) : 0;
-
-            _stillImagePanel.Top = _autoRotateGroup.Bottom + Dpi(5) + bannerOffset;
-            _presetsPanel.Top = _stillImagePanel.Top + _stillImagePanel.Height + Dpi(5);
+            title = $"Updated {last.ToLocalTime():h:mm tt}";
+            dot = Theme.Success;
         }
         else
         {
-            _globeControlsPanel.Top = _sourceHintLabel.Bottom + Dpi(8);
-            _resetButton.Top = _globeControlsPanel.Top + _globeControlsPanel.Height + Dpi(2);
-            _presetsPanel.Top = _resetButton.Bottom + Dpi(10);
+            title = "Wallpaper is set";
+            dot = Theme.Success;
         }
+        _statusTitle.Text = title;
+        _statusDot.ForeColor = dot;
 
-        // Globe-specific logic
-        if (mode <= 2)
+        string next = "";
+        if (_settings.UpdateIntervalSeconds == int.MaxValue)
         {
-            bool isFlatMap = mode == 1;
-            bool isMoon = mode == 2;
-            _sphericalPanel.Enabled = !isFlatMap;
-            _zoomSlider.Enabled = !isFlatMap;
-            _offsetXSlider.Enabled = !isFlatMap;
-            _offsetYSlider.Enabled = !isFlatMap;
-            _locationCombo.Enabled = !isFlatMap && !isMoon;
-
-            // Moon doesn't have city lights or Earth-style daytime lighting
-            _nightLightsCheck.Enabled = !isMoon;
-            _nightBrightnessSlider.Enabled = !isMoon && _nightLightsCheck.Checked;
-            _ambientSlider.Enabled = !isMoon;
+            next = "Automatic updates are off";
         }
-
-        // Auto-load content when switching to still image
-        if (isStillImage)
+        else if (_renderScheduler.NextUpdateUtc is DateTime nextUtc)
         {
-            UpdateStillImageSubPanel();
+            var wait = nextUtc - DateTime.UtcNow;
+            next = wait.TotalSeconds <= 30 ? "Next update in a moment"
+                : wait.TotalMinutes < 60 ? $"Next update in {Math.Ceiling(wait.TotalMinutes):0} min"
+                : wait.TotalHours < 48 ? $"Next update in {wait.TotalHours:0.#} h"
+                : $"Next update {nextUtc.ToLocalTime():MMM d}";
         }
+        _statusSub.Text = next;
+
+        bool rotating = ViewSettings.DisplayMode == DisplayMode.StillImage && ViewSettings.RandomRotationEnabled;
+        _updateNowButton.Text = rotating ? "Next image" : "Update now";
+        _updateNowButton.IconGlyph = rotating ? Glyph.Next : Glyph.Refresh;
     }
 
-    private void UpdateRotationExclusionVisibility()
+    private void OnWallpaperApplied()
     {
-        bool showExclusion = _autoRotateGroup.Visible
-            && _randomRotationCheck.Checked
-            && _rotationSourceCombo.SelectedIndex == 7; // "All Sources"
-
-        foreach (var check in _rotationSourceChecks)
-            check.Visible = showExclusion;
-
-        // Resize GroupBox: 48px compact, 88px with exclusion checkboxes (2 rows
-        // + spacing) — Dpi-scaled because this runs after framework auto-scaling
-        _autoRotateGroup.Height = showExclusion ? Dpi(88) : Dpi(48);
-    }
-
-    private void OnRotationExclusionChanged(object? sender, EventArgs e)
-    {
-        if (_isLoading) return;
-
-        var excluded = new List<RotationSource>();
-        foreach (var check in _rotationSourceChecks)
+        if (IsDisposed || !IsHandleCreated) return;
+        try
         {
-            if (!check.Checked && check.Tag is RotationSource src)
-                excluded.Add(src);
-        }
-        _settings.ExcludedRotationSources = excluded;
-        _settingsManager.Save();
-    }
-
-    private void LoadRotationExclusion(List<RotationSource> excluded)
-    {
-        foreach (var check in _rotationSourceChecks)
-        {
-            if (check.Tag is RotationSource src)
-                check.Checked = !excluded.Contains(src);
-        }
-    }
-
-    private void UpdateStillImageSubPanel()
-    {
-        int source = _stillImageSourceCombo.SelectedIndex;
-
-        _epicSubPanel.Visible = source == 0;
-        _apodSubPanel.Visible = source == 1;
-        _nasaGallerySubPanel.Visible = source == 2;
-        _npsSubPanel.Visible = source == 3;
-        _smithsonianSubPanel.Visible = source == 4;
-        _userImagesSubPanel.Visible = source == 5;
-
-        // Auto-load on first view
-        if (source == 0 && _epicGrid.SelectedImage == null) RefreshEpicImages();
-        if (source == 1 && _apodGrid.SelectedImage == null) RefreshApodImages();
-        if (source == 2 && _nasaGalleryGrid.SelectedImage == null) RefreshNasaGalleryImages();
-        if (source == 5) RefreshUserImages(); // Always refresh (files may change externally)
-    }
-
-    private void UpdatePerDisplayVisibility()
-    {
-        bool perDisplay = _perDisplayRadio.Checked;
-        _monitorSelectLabel.Enabled = perDisplay;
-        _monitorSelectCombo.Enabled = perDisplay;
-
-        // When switching modes, reload the correct settings into the UI
-        if (!_isLoading)
-        {
-            if (perDisplay && !string.IsNullOrEmpty(_selectedMonitorDevice))
-                LoadAppearanceFromDisplayConfig(_selectedMonitorDevice);
-            else if (!perDisplay)
-                LoadAppearanceFromGlobalSettings();
-        }
-    }
-
-    // -- REFRESH METHODS --
-
-    private void FetchEpicLatestDate()
-    {
-        if (_epicLatestAvailableDate != null) return; // Already fetched this session
-
-        var imageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
-        Task.Run(async () =>
-        {
-            try
+            BeginInvoke(() =>
             {
-                var dates = await _epicApi.GetAvailableDatesAsync(imageType);
-                if (dates == null || dates.Count == 0) return;
-
-                // Parse the most recent date (first in the list — API returns newest first)
-                var lastDateStr = dates[0].Date;
-                if (!DateTime.TryParse(lastDateStr, System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.None, out var latestDate)) return;
-
-                _epicLatestAvailableDate = latestDate;
-
                 if (IsDisposed) return;
-                try
-                {
-                    Invoke(() =>
-                    {
-                        _epicLatestDateLabel.Text = $"Latest available: {latestDate:MMM d, yyyy}";
-                        _epicLatestDateLabel.ForeColor = Theme.SuccessText;
-
-                        // Tightening MaxDate can clamp Value and fire ValueChanged;
-                        // mute it so no unrequested save/re-render happens
-                        bool wasLoading = _isLoading;
-                        _isLoading = true;
-                        try { _epicDatePicker.MaxDate = latestDate; }
-                        finally { _isLoading = wasLoading; }
-                    });
-                }
-                catch { }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to fetch EPIC latest date: {ex.Message}");
-                if (IsDisposed) return;
-                try
-                {
-                    Invoke(() =>
-                    {
-                        _epicLatestDateLabel.Text = "Could not check latest date";
-                        _epicLatestDateLabel.ForeColor = Theme.SecondaryText;
-                    });
-                }
-                catch { }
-            }
-        });
-    }
-
-    private void RefreshEpicImages()
-    {
-        _lastEpicRefresh = DateTime.Now;
-        _epicStatusLabel.Text = "Loading images from NASA EPIC...";
-        _epicStatusLabel.ForeColor = Theme.SecondaryText;
-        _epicRefreshButton.Enabled = false;
-
-        var imageType = (EpicImageType)_epicTypeCombo.SelectedIndex;
-        bool useLatest = _epicLatestRadio.Checked;
-        string date = _epicDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-
-        Task.Run(async () =>
-        {
-            List<EpicImageInfo>? images;
-            if (useLatest)
-                images = await _epicApi.GetLatestImagesAsync(imageType);
-            else
-                images = await _epicApi.GetImagesByDateAsync(imageType, date);
-
-            if (IsDisposed) return;
-
-            try
-            {
-                Invoke(() =>
-                {
-                    _epicRefreshButton.Enabled = true;
-
-                    if (images == null || images.Count == 0)
-                    {
-                        _epicStatusLabel.Text = images == null
-                            ? "Could not connect to NASA EPIC. Check your internet connection."
-                            : $"No images available for {(useLatest ? "the latest date" : date)}.";
-                        _epicStatusLabel.ForeColor = Theme.ErrorText;
-                        _epicGrid.SetImages(new List<ImageSourceInfo>());
-                        return;
-                    }
-
-                    // Map EPIC images to ImageSourceInfo for the thumbnail grid
-                    var collection = imageType == EpicImageType.Enhanced ? "enhanced" : "natural";
-                    var sourceInfos = images.Select(img =>
-                    {
-                        DateTime.TryParse(img.Date, System.Globalization.CultureInfo.InvariantCulture,
-                            System.Globalization.DateTimeStyles.None, out var dt);
-                        var yyyy = dt.Year.ToString("D4");
-                        var mm = dt.Month.ToString("D2");
-                        var dd = dt.Day.ToString("D2");
-
-                        return new ImageSourceInfo
-                        {
-                            Source = ImageSource.NasaEpic,
-                            Id = img.Image,
-                            Title = $"{dt:HH:mm UTC} - {dt:MMM dd}",
-                            Date = img.Date,
-                            ThumbnailUrl = $"https://epic.gsfc.nasa.gov/archive/{collection}/{yyyy}/{mm}/{dd}/thumbs/{img.Image}.jpg",
-                            FullImageUrl = $"https://epic.gsfc.nasa.gov/archive/{collection}/{yyyy}/{mm}/{dd}/jpg/{img.Image}.jpg",
-                            HdImageUrl = $"https://epic.gsfc.nasa.gov/archive/{collection}/{yyyy}/{mm}/{dd}/png/{img.Image}.png",
-                            ImageWidth = 2048,
-                            ImageHeight = 2048,
-                            QualityTier = ImageQualityTier.HD,
-                            SourceAttribution = "NASA EPIC / DSCOVR",
-                            IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NasaEpic && f.ImageId == img.Image)
-                        };
-                    }).ToList();
-
-                    _epicGrid.SetImages(sourceInfos);
-                    // Restore previously saved selection
-                    _epicGrid.SelectById(ActiveDisplayConfig?.EpicSelectedImage ?? _settings.EpicSelectedImage);
-                    _epicStatusLabel.Text = $"{sourceInfos.Count} image{(sourceInfos.Count != 1 ? "s" : "")} available.";
-                    _epicStatusLabel.ForeColor = Theme.SuccessText;
-                });
-            }
-            catch (ObjectDisposedException) { }
-        });
-    }
-
-    private void RefreshApodImages()
-    {
-        _lastApodRefresh = DateTime.Now;
-        _apodStatusLabel.Text = "Loading from NASA APOD...";
-        _apodStatusLabel.ForeColor = Theme.SecondaryText;
-        _apodRefreshButton.Enabled = false;
-
-        var apiKey = _settings.ApiDataGovKey;
-        bool useLatest = _apodLatestRadio.Checked;
-        string date = _apodDatePicker.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        int recentDays = GetApodRecentDays();
-
-        Task.Run(async () =>
-        {
-            List<ImageSourceInfo>? images;
-            if (useLatest)
-                images = await _apodApi.GetRecentAsync(apiKey, recentDays);
-            else
-            {
-                var single = await _apodApi.GetByDateAsync(apiKey, date);
-                images = single != null ? new List<ImageSourceInfo> { single } : null;
-            }
-
-            if (IsDisposed) return;
-
-            try
-            {
-                Invoke(() =>
-                {
-                    _apodRefreshButton.Enabled = true;
-
-                    if (images == null || images.Count == 0)
-                    {
-                        _apodStatusLabel.Text = images == null
-                            ? "Could not connect to NASA APOD. Check API key and connection."
-                            : "No images available.";
-                        _apodStatusLabel.ForeColor = Theme.ErrorText;
-                        _apodGrid.SetImages(new List<ImageSourceInfo>());
-                        return;
-                    }
-
-                    // Mark favorites
-                    foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NasaApod && f.ImageId == img.Id);
-
-                    _apodGrid.SetImages(images);
-                    // Restore previously saved selection
-                    _apodGrid.SelectById(ActiveDisplayConfig?.ApodSelectedImageId ?? _settings.ApodSelectedImageId);
-                    _apodStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} loaded.";
-                    _apodStatusLabel.ForeColor = Theme.SuccessText;
-                });
-            }
-            catch (ObjectDisposedException) { }
-        });
-    }
-
-    private void RefreshNpsImages()
-    {
-        var query = _npsSearchBox.Text.Trim();
-        if (string.IsNullOrEmpty(query)) return;
-
-        var apiKey = _settings.ApiDataGovKey;
-        if (string.IsNullOrWhiteSpace(apiKey) || apiKey == "DEMO_KEY")
-        {
-            if (apiKey == "DEMO_KEY")
-            {
-                // DEMO_KEY works but with rate limits — allow it
-            }
-            else
-            {
-                _npsStatusLabel.Text = "API key required. Add it on the System tab.";
-                _npsStatusLabel.ForeColor = Theme.ErrorText;
-                return;
-            }
+                SetStatusOverride("", Theme.Success);
+                RefreshPreviewsAsync();
+                RefreshOnDisplayMarkers();
+            });
         }
-
-        _npsStatusLabel.Text = $"Searching parks for \"{query}\"...";
-        _npsStatusLabel.ForeColor = Theme.SecondaryText;
-        _npsSearchButton.Enabled = false;
-
-        Task.Run(async () =>
-        {
-            // Use park code for exact match if query matches a known park name
-            List<ImageSourceInfo>? images;
-            if (NpsApiClient.ParkCodes.TryGetValue(query, out var parkCode))
-                images = await _npsApi.GetParkImagesAsync(apiKey, parkCode);
-            else
-                images = await _npsApi.SearchParksAsync(apiKey, query);
-
-            if (IsDisposed) return;
-            try
-            {
-                Invoke(() =>
-                {
-                    _npsSearchButton.Enabled = true;
-                    if (images == null || images.Count == 0)
-                    {
-                        _npsStatusLabel.Text = images == null
-                            ? "Could not connect to NPS. Check API key and connection."
-                            : "No park images found. Try a different search.";
-                        _npsStatusLabel.ForeColor = Theme.ErrorText;
-                        _npsGrid.SetImages(new List<ImageSourceInfo>());
-                        return;
-                    }
-
-                    foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.NationalParks && f.ImageId == img.Id);
-
-                    _npsGrid.SetImages(images);
-                    // Restore previously saved selection
-                    _npsGrid.SelectById(ActiveDisplayConfig?.NpsSelectedImageId ?? _settings.NpsSelectedImageId);
-                    _npsStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
-                    _npsStatusLabel.ForeColor = Theme.SuccessText;
-                });
-            }
-            catch (ObjectDisposedException) { }
-        });
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
     }
 
-    private void RefreshSmithsonianImages()
-    {
-        var query = _smithsonianSearchBox.Text.Trim();
-        if (string.IsNullOrEmpty(query)) query = "landscape painting";
+    // ─────────────────────────────── Previews ───────────────────────────────
 
-        var apiKey = _settings.ApiDataGovKey;
-        if (string.IsNullOrWhiteSpace(apiKey))
+    /// <summary>
+    /// Crop the applied wallpaper.bmp into one image per display for the live
+    /// preview and the monitor picker thumbnails (off the UI thread).
+    /// </summary>
+    private async void RefreshPreviewsAsync()
+    {
+        int generation = ++_previewGeneration;
+        var displays = _displays.ToList();
+        var mode = _settings.MultiMonitorMode;
+        string path = AppPaths.WallpaperFile;
+
+        Dictionary<string, Bitmap> crops;
+        try
         {
-            _smithsonianStatusLabel.Text = "API key required. Add it on the System tab.";
-            _smithsonianStatusLabel.ForeColor = Theme.ErrorText;
+            crops = await Task.Run(() => CropWallpaper(path, displays, mode));
+        }
+        catch
+        {
+            return; // No wallpaper yet, or it is being rewritten — the next apply retries
+        }
+        if (IsDisposed || generation != _previewGeneration)
+        {
+            foreach (var c in crops.Values) c.Dispose();
             return;
         }
 
-        _smithsonianStatusLabel.Text = $"Searching Smithsonian for \"{query}\"...";
-        _smithsonianStatusLabel.ForeColor = Theme.SecondaryText;
-        _smithsonianSearchButton.Enabled = false;
-
-        Task.Run(async () =>
+        foreach (var old in _previews.Values) old.Dispose();
+        _previews.Clear();
+        foreach (var (id, bmp) in crops)
         {
-            var images = await _smithsonianApi.SearchImagesAsync(apiKey, query);
-
-            if (IsDisposed) return;
-            try
-            {
-                Invoke(() =>
-                {
-                    _smithsonianSearchButton.Enabled = true;
-                    if (images == null || images.Count == 0)
-                    {
-                        _smithsonianStatusLabel.Text = images == null
-                            ? "Could not connect to Smithsonian. Check API key."
-                            : "No images found. Try a different search or click a suggestion.";
-                        _smithsonianStatusLabel.ForeColor = Theme.ErrorText;
-                        _smithsonianGrid.SetImages(new List<ImageSourceInfo>());
-                        return;
-                    }
-
-                    foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(f => f.Source == ImageSource.Smithsonian && f.ImageId == img.Id);
-
-                    _smithsonianGrid.SetImages(images);
-                    // Restore previously saved selection
-                    _smithsonianGrid.SelectById(ActiveDisplayConfig?.SmithsonianSelectedId ?? _settings.SmithsonianSelectedId);
-                    _smithsonianStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found.";
-                    _smithsonianStatusLabel.ForeColor = Theme.SuccessText;
-                });
-            }
-            catch (ObjectDisposedException) { }
-        });
+            _previews[id] = bmp;
+            _monitorPicker.SetThumbnail(id, new Bitmap(bmp));
+        }
+        ShowPreviewForSelectedDisplay();
     }
 
-    // -- FAVORITES --
-
-    private void ToggleFavorite(ImageSourceInfo img)
+    private static Dictionary<string, Bitmap> CropWallpaper(string path, List<DisplayInfo> displays, MultiMonitorMode mode)
     {
-        // Lock: the render thread iterates Favorites for rotation and pruning
-        lock (_settings.FavoritesLock)
+        var result = new Dictionary<string, Bitmap>();
+        if (!File.Exists(path) || displays.Count == 0) return result;
+
+        using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(ImageDecoding.Options, path);
+        var union = displays.Select(d => d.Bounds).Aggregate(Rectangle.Union);
+        bool spans = mode != MultiMonitorMode.SameForAll && displays.Count > 1;
+
+        foreach (var d in displays)
         {
-            var existing = _settings.Favorites.Find(f => f.Source == img.Source && f.ImageId == img.Id);
-            if (existing != null)
+            SixLabors.ImageSharp.Rectangle crop;
+            if (spans)
             {
-                _settings.Favorites.Remove(existing);
-                img.IsFavorited = false;
+                // The image covers the whole virtual desktop; scale in case the
+                // layout changed since it was rendered
+                float sx = (float)image.Width / union.Width, sy = (float)image.Height / union.Height;
+                crop = new SixLabors.ImageSharp.Rectangle(
+                    (int)((d.Bounds.Left - union.Left) * sx), (int)((d.Bounds.Top - union.Top) * sy),
+                    (int)(d.Bounds.Width * sx), (int)(d.Bounds.Height * sy));
             }
             else
             {
-                var fav = new FavoriteImage
-                {
-                    Source = img.Source,
-                    ImageId = img.Id,
-                    Title = img.Title,
-                    ThumbnailUrl = img.ThumbnailUrl,
-                    FullImageUrl = !string.IsNullOrEmpty(img.HdImageUrl) ? img.HdImageUrl : img.FullImageUrl,
-                };
-                // Record the cached file location so rotation/export can find the
-                // image even for sources with non-standard cache layouts (EPIC)
-                fav.LocalCachePath = _imageCache.GetCachedPathForFavorite(fav) ?? "";
-                fav.QualityTier = img.QualityTier;
-                _settings.Favorites.Add(fav);
-                img.IsFavorited = true;
+                // One image filled onto every display: center-crop to its aspect
+                float aspect = (float)d.Bounds.Width / d.Bounds.Height;
+                int w = image.Width, h = image.Height;
+                if ((float)w / h > aspect) w = (int)(h * aspect); else h = (int)(w / aspect);
+                crop = new SixLabors.ImageSharp.Rectangle((image.Width - w) / 2, (image.Height - h) / 2, w, h);
             }
-        }
-        _settingsManager.Save(); // Persist without re-rendering the wallpaper
-    }
+            crop.Intersect(new SixLabors.ImageSharp.Rectangle(0, 0, image.Width, image.Height));
+            if (crop.Width < 2 || crop.Height < 2) continue;
 
-    // -- HELPERS --
-
-    /// <summary>
-    /// Assign a DateTimePicker value clamped to its Min/MaxDate range.
-    /// MaxDate can be tightened asynchronously (e.g. EPIC's latest available
-    /// date arrives after load), and an out-of-range assignment throws.
-    /// </summary>
-    private static void SetPickerValueClamped(DateTimePicker picker, DateTime value)
-    {
-        if (value < picker.MinDate) value = picker.MinDate;
-        else if (value > picker.MaxDate) value = picker.MaxDate;
-        picker.Value = value;
-    }
-
-    private static int CameraToZoomSlider(float distance)
-    {
-        if (distance <= 1.15f) return 100;
-        if (distance >= 6.0f) return 1;
-        float t = MathF.Log(distance / 6.0f) / MathF.Log(1.15f / 6.0f);
-        return Math.Clamp((int)(t * 99f + 1), 1, 100);
-    }
-
-    private void LoadAppearanceFromDisplayConfig(string deviceName)
-    {
-        var config = _settings.DisplayConfigs.Find(c => c.DeviceName == deviceName);
-        if (config == null)
-        {
-            LoadAppearanceFromGlobalSettings();
-            return;
-        }
-
-        // try/finally so an exception mid-load can never leave _isLoading stuck
-        // true (which would silently disable all saving until the form reopens)
-        _isLoading = true;
-        try
-        {
-            LoadAppearanceFromDisplayConfigCore(config);
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-    }
-
-    private void LoadAppearanceFromDisplayConfigCore(DisplayConfig config)
-    {
-        _displayModeCombo.SelectedIndex = Math.Min((int)config.DisplayMode, _displayModeCombo.Items.Count - 1);
-        _stillImageSourceCombo.SelectedIndex = Math.Min((int)config.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
-        _longitudeSlider.Value = Math.Clamp((int)config.LongitudeOffset, -180, 180);
-        _longitudeValue.Text = config.LongitudeOffset.ToString("F0") + "\u00b0";
-        _latitudeSlider.Value = Math.Clamp((int)config.CameraTilt, -60, 60);
-        _latitudeValue.Text = config.CameraTilt.ToString("F0") + "\u00b0";
-        _zoomSlider.Value = CameraToZoomSlider(config.ZoomLevel);
-        _zoomValue.Text = _zoomSlider.Value.ToString();
-        _offsetXSlider.Value = Math.Clamp((int)config.ImageOffsetX, -25, 25);
-        _offsetXValue.Text = config.ImageOffsetX.ToString("F0");
-        _offsetYSlider.Value = Math.Clamp((int)config.ImageOffsetY, -25, 25);
-        _offsetYValue.Text = config.ImageOffsetY.ToString("F0");
-        _nightLightsCheck.Checked = config.NightLightsEnabled;
-        _nightBrightnessSlider.Value = Math.Clamp((int)(config.NightLightsBrightness * 10), _nightBrightnessSlider.Minimum, _nightBrightnessSlider.Maximum);
-        _nightBrightnessValue.Text = config.NightLightsBrightness.ToString("F1");
-        _nightBrightnessSlider.Enabled = config.NightLightsEnabled;
-        _ambientSlider.Value = Math.Clamp((int)(config.AmbientLight * 100), _ambientSlider.Minimum, _ambientSlider.Maximum);
-        _ambientValue.Text = config.AmbientLight.ToString("F2");
-        if (config.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
-        else _topoRadio.Checked = true;
-
-        // EPIC
-        _epicTypeCombo.SelectedIndex = (int)config.EpicImageType;
-        _epicLatestRadio.Checked = config.EpicUseLatest;
-        _epicDateRadio.Checked = !config.EpicUseLatest;
-        if (!string.IsNullOrEmpty(config.EpicSelectedDate) &&
-            DateTime.TryParse(config.EpicSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.None, out var epicDate))
-            SetPickerValueClamped(_epicDatePicker, epicDate);
-
-        // APOD
-        _apodLatestRadio.Checked = config.ApodUseLatest;
-        _apodDateRadio.Checked = !config.ApodUseLatest;
-        if (!string.IsNullOrEmpty(config.ApodSelectedDate) &&
-            DateTime.TryParse(config.ApodSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.None, out var apodDate))
-            SetPickerValueClamped(_apodDatePicker, apodDate);
-
-        // NPS
-        if (!string.IsNullOrEmpty(config.NpsSearchQuery))
-            _npsSearchBox.Text = config.NpsSearchQuery;
-
-        // Smithsonian
-        if (!string.IsNullOrEmpty(config.SmithsonianSearchQuery))
-            _smithsonianSearchBox.Text = config.SmithsonianSearchQuery;
-
-        // NASA Gallery
-        if (!string.IsNullOrEmpty(config.NasaGallerySearchQuery))
-            _nasaGallerySearchBox.Text = config.NasaGallerySearchQuery;
-
-        // Auto-rotation
-        _randomRotationCheck.Checked = config.RandomRotationEnabled;
-        _rotationSourceCombo.SelectedIndex = Math.Clamp((int)config.RandomRotationSource, 0, _rotationSourceCombo.Items.Count - 1);
-
-        // APOD recent days
-        _apodRecentDaysCombo.SelectedIndex = ApodDaysToIndex(config.ApodRecentDays);
-
-        _locationCombo.SelectedIndex = 0;
-        UpdateModeVisibility();
-    }
-
-    private void ResetToDefaults()
-    {
-        int mode = _displayModeCombo.SelectedIndex;
-        _isLoading = true;
-        try
-        {
-            ResetToDefaultsCore(mode);
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-        SchedulePreview();
-    }
-
-    private void ResetToDefaultsCore(int mode)
-    {
-        switch (mode)
-        {
-            case 0: // Globe
-                _locationCombo.SelectedIndex = 0;
-                _longitudeSlider.Value = 88;
-                _longitudeValue.Text = "88\u00b0";
-                _latitudeSlider.Value = 42;
-                _latitudeValue.Text = "42\u00b0";
-                _zoomSlider.Value = 25;
-                _zoomValue.Text = "25";
-                _offsetXSlider.Value = 0;
-                _offsetXValue.Text = "0";
-                _offsetYSlider.Value = 0;
-                _offsetYValue.Text = "0";
-                _nightLightsCheck.Checked = true;
-                _nightBrightnessSlider.Value = 15;
-                _nightBrightnessValue.Text = "1.5";
-                _nightBrightnessSlider.Enabled = true;
-                _ambientSlider.Value = 40;
-                _ambientValue.Text = "0.40";
-                _topoBathyRadio.Checked = true;
-                break;
-
-            case 1: // Flat Map
-                _nightLightsCheck.Checked = true;
-                _nightBrightnessSlider.Value = 15;
-                _nightBrightnessValue.Text = "1.5";
-                _nightBrightnessSlider.Enabled = true;
-                _ambientSlider.Value = 40;
-                _ambientValue.Text = "0.40";
-                _topoBathyRadio.Checked = true;
-                break;
-
-            case 2: // Moon
-                _longitudeSlider.Value = 88;
-                _longitudeValue.Text = "88\u00b0";
-                _latitudeSlider.Value = 42;
-                _latitudeValue.Text = "42\u00b0";
-                _zoomSlider.Value = 25;
-                _zoomValue.Text = "25";
-                _offsetXSlider.Value = 0;
-                _offsetXValue.Text = "0";
-                _offsetYSlider.Value = 0;
-                _offsetYValue.Text = "0";
-                break;
-        }
-    }
-
-    private void LoadAppearanceFromGlobalSettings()
-    {
-        // try/finally so an exception mid-load can never leave _isLoading stuck
-        // true (which would silently disable all saving until the form reopens)
-        _isLoading = true;
-        try
-        {
-            LoadAppearanceFromGlobalSettingsCore();
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-    }
-
-    private void LoadAppearanceFromGlobalSettingsCore()
-    {
-        _displayModeCombo.SelectedIndex = Math.Min((int)_settings.DisplayMode, _displayModeCombo.Items.Count - 1);
-        _stillImageSourceCombo.SelectedIndex = Math.Min((int)_settings.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
-        _longitudeSlider.Value = Math.Clamp((int)_settings.LongitudeOffset, -180, 180);
-        _longitudeValue.Text = _settings.LongitudeOffset.ToString("F0") + "\u00b0";
-        _latitudeSlider.Value = Math.Clamp((int)_settings.CameraTilt, -60, 60);
-        _latitudeValue.Text = _settings.CameraTilt.ToString("F0") + "\u00b0";
-        _zoomSlider.Value = CameraToZoomSlider(_settings.ZoomLevel);
-        _zoomValue.Text = _zoomSlider.Value.ToString();
-        _offsetXSlider.Value = Math.Clamp((int)_settings.ImageOffsetX, -25, 25);
-        _offsetXValue.Text = _settings.ImageOffsetX.ToString("F0");
-        _offsetYSlider.Value = Math.Clamp((int)_settings.ImageOffsetY, -25, 25);
-        _offsetYValue.Text = _settings.ImageOffsetY.ToString("F0");
-        _nightLightsCheck.Checked = _settings.NightLightsEnabled;
-        _nightBrightnessSlider.Value = Math.Clamp((int)(_settings.NightLightsBrightness * 10), _nightBrightnessSlider.Minimum, _nightBrightnessSlider.Maximum);
-        _nightBrightnessValue.Text = _settings.NightLightsBrightness.ToString("F1");
-        _nightBrightnessSlider.Enabled = _settings.NightLightsEnabled;
-        _ambientSlider.Value = Math.Clamp((int)(_settings.AmbientLight * 100), _ambientSlider.Minimum, _ambientSlider.Maximum);
-        _ambientValue.Text = _settings.AmbientLight.ToString("F2");
-        if (_settings.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
-        else _topoRadio.Checked = true;
-
-        // EPIC
-        _epicTypeCombo.SelectedIndex = (int)_settings.EpicImageType;
-        _epicLatestRadio.Checked = _settings.EpicUseLatest;
-        _epicDateRadio.Checked = !_settings.EpicUseLatest;
-        if (!string.IsNullOrEmpty(_settings.EpicSelectedDate) &&
-            DateTime.TryParse(_settings.EpicSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.None, out var epicDate))
-            SetPickerValueClamped(_epicDatePicker, epicDate);
-
-        // APOD — without this a saved "Choose date" selection is silently
-        // reverted by the next debounced save
-        _apodLatestRadio.Checked = _settings.ApodUseLatest;
-        _apodDateRadio.Checked = !_settings.ApodUseLatest;
-        if (!string.IsNullOrEmpty(_settings.ApodSelectedDate) &&
-            DateTime.TryParse(_settings.ApodSelectedDate, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.None, out var apodDate))
-            SetPickerValueClamped(_apodDatePicker, apodDate);
-
-        // API key
-        _apiKeyBox.Text = _settings.ApiDataGovKey;
-
-        // Auto-rotation
-        _randomRotationCheck.Checked = _settings.RandomRotationEnabled;
-        _rotationSourceCombo.SelectedIndex = Math.Clamp((int)_settings.RandomRotationSource, 0, _rotationSourceCombo.Items.Count - 1);
-
-        // Rotation source exclusion (load which sources are excluded)
-        LoadRotationExclusion(_settings.ExcludedRotationSources);
-
-        // APOD recent days
-        _apodRecentDaysCombo.SelectedIndex = ApodDaysToIndex(_settings.ApodRecentDays);
-
-        // NPS search query
-        if (!string.IsNullOrEmpty(_settings.NpsSearchQuery))
-            _npsSearchBox.Text = _settings.NpsSearchQuery;
-
-        // Smithsonian search query
-        if (!string.IsNullOrEmpty(_settings.SmithsonianSearchQuery))
-            _smithsonianSearchBox.Text = _settings.SmithsonianSearchQuery;
-
-        // NASA Gallery search query
-        if (!string.IsNullOrEmpty(_settings.NasaGallerySearchQuery))
-            _nasaGallerySearchBox.Text = _settings.NasaGallerySearchQuery;
-
-        _locationCombo.SelectedIndex = 0;
-        UpdateModeVisibility();
-    }
-
-    private void LoadCurrentSettings()
-    {
-        LoadAppearanceFromGlobalSettings();
-
-        // try/finally so an exception mid-load can never leave _isLoading stuck
-        // true (which would silently disable all saving until the form reopens)
-        _isLoading = true;
-        try
-        {
-            LoadCurrentSettingsCore();
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-    }
-
-    private void LoadCurrentSettingsCore()
-    {
-        _updateIntervalCombo.SelectedIndex = _settings.UpdateIntervalSeconds switch
-        {
-            60 => 0, 120 => 1, 300 => 2, 600 => 3,
-            900 => 4, 1800 => 5, 3600 => 6, 21600 => 7,
-            43200 => 8, 86400 => 9, 604800 => 10, 1209600 => 11,
-            2592000 => 12, int.MaxValue => 13,
-            _ => FindNearestIntervalIndex(_settings.UpdateIntervalSeconds)
-        };
-
-        _runOnStartupCheck.Checked = StartupManager.IsRunOnStartup();
-
-        switch (_settings.MultiMonitorMode)
-        {
-            case MultiMonitorMode.SpanAcross: _spanAcrossRadio.Checked = true; break;
-            case MultiMonitorMode.PerDisplay: _perDisplayRadio.Checked = true; break;
-            default: _sameForAllRadio.Checked = true; break;
-        }
-
-        _renderResCombo.SelectedIndex = (_settings.RenderWidth, _settings.RenderHeight) switch
-        {
-            (1920, 1080) => 1, (2560, 1440) => 2,
-            (3840, 2160) => 3, (5120, 2880) => 4, _ => 0
-        };
-
-        UpdatePerDisplayVisibility();
-
-        // If per-display mode is active, load the first monitor's config into UI
-        // (LoadAppearanceFromGlobalSettings was called earlier, but those are the wrong values)
-        if (_settings.MultiMonitorMode == MultiMonitorMode.PerDisplay &&
-            !string.IsNullOrEmpty(_selectedMonitorDevice))
-        {
-            LoadAppearanceFromDisplayConfig(_selectedMonitorDevice);
-        }
-    }
-
-    private static int FindNearestIntervalIndex(int seconds)
-    {
-        int[] values = [60, 120, 300, 600, 900, 1800, 3600, 21600, 43200, 86400, 604800, 1209600, 2592000, int.MaxValue];
-        int closest = 3; // Default to 10 minutes
-        long minDiff = long.MaxValue;
-        for (int i = 0; i < values.Length; i++)
-        {
-            long diff = Math.Abs((long)values[i] - seconds);
-            if (diff < minDiff) { minDiff = diff; closest = i; }
-        }
-        return closest;
-    }
-
-    /// <summary>
-    /// Recursively apply Theme styling to all controls in the tree.
-    /// Called once after form construction; handles buttons, combos, textboxes, groupboxes, checkboxes.
-    /// </summary>
-    private static void ThemeAllControls(Control parent)
-    {
-        foreach (Control c in parent.Controls)
-        {
-            switch (c)
+            using var part = image.Clone(x => x.Crop(crop).Resize(new ResizeOptions
             {
-                case Button btn when btn.FlatStyle != FlatStyle.Flat:
-                    // Only style buttons that haven't been explicitly styled (e.g., chip buttons)
-                    Theme.StyleButton(btn);
-                    break;
-                case GroupBox grp:
-                    Theme.StyleGroupBox(grp);
-                    break;
-                case ComboBox cmb:
-                    Theme.StyleComboBox(cmb);
-                    break;
-                case TextBox txt:
-                    Theme.StyleTextBox(txt);
-                    break;
-                case CheckBox chk:
-                    Theme.StyleCheckBox(chk);
-                    break;
-                case RadioButton rb:
-                    Theme.StyleRadioButton(rb);
-                    break;
-                case LinkLabel lnk:
-                    if (Theme.IsDarkMode)
-                    {
-                        lnk.LinkColor = Color.FromArgb(100, 160, 255);
-                        lnk.VisitedLinkColor = Color.FromArgb(140, 130, 220);
-                    }
-                    break;
-                case DateTimePicker dtp:
-                    Theme.StyleDateTimePicker(dtp);
-                    break;
-            }
+                Size = new SixLabors.ImageSharp.Size(960, 0), Mode = ResizeMode.Max
+            }));
+            using var ms = new MemoryStream();
+            part.Save(ms, new SixLabors.ImageSharp.Formats.Bmp.BmpEncoder());
+            ms.Position = 0;
+            using var gdi = System.Drawing.Image.FromStream(ms);
+            result[d.MonitorId] = new Bitmap(gdi);
+        }
+        return result;
+    }
 
-            // Apply dark scrollbars to any scrollable control (FlowLayoutPanels, TabPages, etc.)
-            if (c is ScrollableControl sc && sc.AutoScroll)
-                Theme.StyleScrollableControl(sc);
+    // ─────────────────────────────── Helpers ───────────────────────────────
 
-            // Recurse into child controls (panels, groupboxes, tabpages, etc.)
-            if (c.HasChildren)
-                ThemeAllControls(c);
+    /// <summary>Stack controls top-to-bottom in a panel (Dock.Top adds in reverse).</summary>
+    private static void StackTop(Control parent, params Control[] controls)
+    {
+        for (int i = controls.Length - 1; i >= 0; i--)
+        {
+            controls[i].Dock = DockStyle.Top;
+            parent.Controls.Add(controls[i]);
         }
     }
 
-    private static Label MakeLabel(string text, int x, int y) => new()
+    private static Panel Spacer(int height) =>
+        new() { Height = height, Dock = DockStyle.Top, BackColor = Color.Transparent };
+
+    private static StudioLabel SectionLabel(string text) => new()
     {
-        Text = text,
-        AutoSize = true,
-        Location = new Point(x, y),
-        Font = new Font("Segoe UI", 9)
+        Text = text.ToUpperInvariant(), Font = Theme.Semibold(8f), ForeColor = Theme.TextMuted
     };
 
-    private static Panel CreateAccentPanel(int x, int y, int width, int height)
+    private static void OpenUrl(string url)
     {
-        var panel = new Panel
-        {
-            Location = new Point(x, y),
-            Size = new Size(width, height),
-            BackColor = Theme.AccentPanelBackground
-        };
-        panel.Paint += (_, e) =>
-        {
-            var g = e.Graphics;
-            // Blue accent bar on left edge
-            using var accentBrush = new SolidBrush(Theme.AccentPanelStripe);
-            g.FillRectangle(accentBrush, 0, 0, 3, panel.Height);
-            // Border on top, right, bottom
-            using var borderPen = new Pen(Theme.AccentPanelBorder, 1);
-            g.DrawLine(borderPen, 3, 0, panel.Width - 1, 0);              // top
-            g.DrawLine(borderPen, panel.Width - 1, 0, panel.Width - 1, panel.Height - 1); // right
-            g.DrawLine(borderPen, 3, panel.Height - 1, panel.Width - 1, panel.Height - 1); // bottom
-        };
-        return panel;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { }
     }
 
-    private static TrackBar MakeSlider(int x, int y, int min, int max, int value, int width = SliderWidth) => new()
-    {
-        Location = new Point(x, y),
-        Width = width,
-        Minimum = min,
-        Maximum = max,
-        Value = Math.Clamp(value, min, max),
-        TickStyle = TickStyle.None,
-        AutoSize = false,
-        Height = 25
-    };
-
-    // -- PRESET METHODS --
-
-    private void RefreshPresetCombo()
-    {
-        _presetCombo.Items.Clear();
-        if (_settings.Presets.Count == 0)
-        {
-            _presetCombo.Items.Add("(no presets saved)");
-            _presetCombo.SelectedIndex = 0;
-        }
-        else
-        {
-            foreach (var p in _settings.Presets)
-                _presetCombo.Items.Add(p.Name);
-            _presetCombo.SelectedIndex = 0;
-        }
-    }
-
-    private void SavePreset()
-    {
-        var name = PromptForName("Save Preset", "Enter a name for this preset:");
-        if (string.IsNullOrWhiteSpace(name)) return;
-
-        var preset = new SettingsPreset
-        {
-            Name = name.Trim(),
-            DisplayMode = (DisplayMode)_displayModeCombo.SelectedIndex,
-            StillImageSource = (ImageSource)_stillImageSourceCombo.SelectedIndex,
-            LongitudeOffset = _longitudeSlider.Value,
-            CameraTilt = _latitudeSlider.Value,
-            ImageOffsetX = _offsetXSlider.Value,
-            ImageOffsetY = _offsetYSlider.Value,
-            NightLightsEnabled = _nightLightsCheck.Checked,
-            NightLightsBrightness = _nightBrightnessSlider.Value / 10f,
-            AmbientLight = _ambientSlider.Value / 100f,
-            ImageStyle = _topoBathyRadio.Checked ? ImageStyle.TopoBathy : ImageStyle.Topo,
-            EpicImageType = (EpicImageType)_epicTypeCombo.SelectedIndex
-        };
-
-        var (distance, fov) = ZoomSliderToCamera(_zoomSlider.Value);
-        preset.ZoomLevel = distance;
-        preset.FieldOfView = fov;
-
-        _settings.Presets.Add(preset);
-        _settingsManager.Save();
-        RefreshPresetCombo();
-        _presetCombo.SelectedIndex = _settings.Presets.Count - 1;
-    }
-
-    private void LoadPreset()
-    {
-        int idx = _presetCombo.SelectedIndex;
-        if (idx < 0 || idx >= _settings.Presets.Count) return;
-
-        var preset = _settings.Presets[idx];
-
-        // try/finally so an exception mid-load can never leave _isLoading stuck
-        // true (which would silently disable all saving until the form reopens)
-        _isLoading = true;
-        try
-        {
-            LoadPresetCore(preset);
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-        UpdateModeVisibility();
-        SchedulePreview();
-    }
-
-    private void LoadPresetCore(SettingsPreset preset)
-    {
-        _displayModeCombo.SelectedIndex = Math.Min((int)preset.DisplayMode, _displayModeCombo.Items.Count - 1);
-        _stillImageSourceCombo.SelectedIndex = Math.Min((int)preset.StillImageSource, _stillImageSourceCombo.Items.Count - 1);
-        _longitudeSlider.Value = Math.Clamp((int)preset.LongitudeOffset, -180, 180);
-        _longitudeValue.Text = preset.LongitudeOffset.ToString("F0") + "\u00b0";
-        _latitudeSlider.Value = Math.Clamp((int)preset.CameraTilt, -60, 60);
-        _latitudeValue.Text = preset.CameraTilt.ToString("F0") + "\u00b0";
-        _zoomSlider.Value = CameraToZoomSlider(preset.ZoomLevel);
-        _zoomValue.Text = _zoomSlider.Value.ToString();
-        _offsetXSlider.Value = Math.Clamp((int)preset.ImageOffsetX, -25, 25);
-        _offsetXValue.Text = preset.ImageOffsetX.ToString("F0");
-        _offsetYSlider.Value = Math.Clamp((int)preset.ImageOffsetY, -25, 25);
-        _offsetYValue.Text = preset.ImageOffsetY.ToString("F0");
-        _nightLightsCheck.Checked = preset.NightLightsEnabled;
-        _nightBrightnessSlider.Value = Math.Clamp((int)(preset.NightLightsBrightness * 10),
-            _nightBrightnessSlider.Minimum, _nightBrightnessSlider.Maximum);
-        _nightBrightnessValue.Text = preset.NightLightsBrightness.ToString("F1");
-        _ambientSlider.Value = Math.Clamp((int)(preset.AmbientLight * 100),
-            _ambientSlider.Minimum, _ambientSlider.Maximum);
-        _ambientValue.Text = preset.AmbientLight.ToString("F2");
-        if (preset.ImageStyle == ImageStyle.TopoBathy) _topoBathyRadio.Checked = true;
-        else _topoRadio.Checked = true;
-        _epicTypeCombo.SelectedIndex = (int)preset.EpicImageType;
-    }
-
-    private void DeletePreset()
-    {
-        int idx = _presetCombo.SelectedIndex;
-        if (idx < 0 || idx >= _settings.Presets.Count) return;
-
-        var name = _settings.Presets[idx].Name;
-        if (MessageBox.Show($"Delete preset \"{name}\"?", "Delete Preset",
-            MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-
-        _settings.Presets.RemoveAt(idx);
-        _settingsManager.Save();
-        RefreshPresetCombo();
-    }
-
-    private static string? PromptForName(string title, string prompt)
+    private static string? PromptForName(IWin32Window owner, string title, string prompt, string initial = "")
     {
         using var dialog = new Form
         {
             Text = title,
             AutoScaleDimensions = new SizeF(96F, 96F),
             AutoScaleMode = AutoScaleMode.Dpi,
-            Width = 350,
-            Height = 150,
+            ClientSize = new Size(380, 150),
             FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = FormStartPosition.CenterParent,
-            MaximizeBox = false,
-            MinimizeBox = false,
-            BackColor = Theme.FormBackground,
-            ForeColor = Theme.PrimaryText
+            MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false,
+            BackColor = Theme.Ground, ForeColor = Theme.Text, Font = Theme.UiFont()
         };
-
-        var label = new Label { Text = prompt, Left = 15, Top = 15, AutoSize = true };
-        var textBox = new TextBox { Left = 15, Top = 40, Width = 300 };
+        var label = new StudioLabel { Text = prompt, Location = new Point(20, 18) };
+        var textBox = new TextBox { Location = new Point(20, 46), Width = 340, Text = initial };
         Theme.StyleTextBox(textBox);
-        var okButton = new Button
-        {
-            Text = "OK",
-            DialogResult = DialogResult.OK,
-            Left = 155, Top = 75, Width = 75
-        };
-        Theme.StyleButton(okButton);
-        var cancelButton = new Button
-        {
-            Text = "Cancel",
-            DialogResult = DialogResult.Cancel,
-            Left = 240, Top = 75, Width = 75
-        };
-        Theme.StyleButton(cancelButton);
-
-        dialog.Controls.AddRange([label, textBox, okButton, cancelButton]);
-        dialog.AcceptButton = okButton;
-        dialog.CancelButton = cancelButton;
-        Theme.ApplyDarkMode(dialog);
-
-        return dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(textBox.Text)
+        var ok = new StudioButton { Text = "Save", Variant = ButtonVariant.Primary, DialogResult = DialogResult.OK, Location = new Point(176, 98), Size = new Size(88, 34) };
+        var cancel = new StudioButton { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(272, 98), Size = new Size(88, 34) };
+        dialog.Controls.AddRange([label, textBox, ok, cancel]);
+        dialog.AcceptButton = ok;
+        dialog.CancelButton = cancel;
+        dialog.HandleCreated += (_, _) => Theme.ApplyDarkMode(dialog);
+        return dialog.ShowDialog(owner) == DialogResult.OK && !string.IsNullOrWhiteSpace(textBox.Text)
             ? textBox.Text.Trim() : null;
-    }
-
-    // -- NASA GALLERY SUB-PANEL (6th source in Still Image dropdown) --
-
-    private Panel CreateNasaGallerySubPanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 420), Visible = false };
-        int py = 0;
-
-        panel.Controls.Add(MakeLabel("Search:", LeftMargin, py + 3));
-        _nasaGallerySearchBox = new TextBox
-        {
-            Location = new Point(80, py), Width = 320,
-            Text = "nebula"
-        };
-        _nasaGallerySearchBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; RefreshNasaGalleryImages(); } };
-        panel.Controls.Add(_nasaGallerySearchBox);
-
-        _nasaGallerySearchButton = new Button
-        {
-            Text = "Search", Location = new Point(410, py), Width = 80, Height = 24
-        };
-        _nasaGallerySearchButton.Click += (_, _) => RefreshNasaGalleryImages();
-        panel.Controls.Add(_nasaGallerySearchButton);
-        py += 28;
-
-        // Chip hint label
-        panel.Controls.Add(new Label
-        {
-            Text = "Use a suggested term or search your own.",
-            Location = new Point(LeftMargin, py),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText
-        });
-        py += 16;
-
-        // Suggestion chips (space/astronomy themed)
-        _nasaGalleryChipsPanel = new FlowLayoutPanel
-        {
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 78),
-            WrapContents = true,
-            AutoScroll = true
-        };
-        _nasaGalleryChipsPanel.HorizontalScroll.Enabled = false;
-        _nasaGalleryChipsPanel.HorizontalScroll.Visible = false;
-        foreach (var chip in NasaGalleryApiClient.SuggestedQueries)
-        {
-            var chipText = chip;
-            var btn = new Button
-            {
-                Text = chipText,
-                AutoSize = true,
-                Height = 24,
-                Padding = new Padding(2, 0, 2, 0),
-                Margin = new Padding(0, 0, 4, 2),
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 7.5f),
-                BackColor = Theme.GalleryChipBackground,
-                ForeColor = Theme.GalleryChipText,
-                Cursor = Cursors.Hand
-            };
-            btn.FlatAppearance.BorderColor = Theme.GalleryChipBorder;
-            btn.FlatAppearance.BorderSize = 1;
-            btn.Click += (_, _) =>
-            {
-                _nasaGallerySearchBox.Text = chipText;
-                RefreshNasaGalleryImages();
-            };
-            _nasaGalleryChipsPanel.Controls.Add(btn);
-        }
-        panel.Controls.Add(_nasaGalleryChipsPanel);
-        py += 82;
-
-        _nasaGalleryGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 234)
-        };
-        _nasaGalleryGrid.ImageSelected += (_, img) => { if (!_isLoading) SchedulePreview(); };
-        _nasaGalleryGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
-        panel.Controls.Add(_nasaGalleryGrid);
-        py += 239;
-
-        panel.Controls.Add(new Label
-        {
-            Text = "NASA Gallery images are high-resolution and may take a moment to download.",
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 18),
-            Font = new Font("Segoe UI", 7.5f),
-            ForeColor = Theme.SecondaryText
-        });
-        py += 18;
-
-        _nasaGalleryStatusLabel = new Label
-        {
-            Text = "Search NASA's image library. Free, no API key needed.",
-            Location = new Point(LeftMargin, py),
-            Size = new Size(490, 35),
-            Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Theme.SecondaryText
-        };
-        panel.Controls.Add(_nasaGalleryStatusLabel);
-
-        return panel;
-    }
-
-    private void RefreshNasaGalleryImages()
-    {
-        var query = _nasaGallerySearchBox.Text.Trim();
-        if (string.IsNullOrEmpty(query)) return;
-
-        _nasaGalleryStatusLabel.Text = $"Searching NASA for \"{query}\"...";
-        _nasaGalleryStatusLabel.ForeColor = Theme.SecondaryText;
-        _nasaGallerySearchButton.Enabled = false;
-
-        Task.Run(async () =>
-        {
-            var images = await _nasaGalleryApi.SearchImagesAsync(query);
-            if (IsDisposed) return;
-            try
-            {
-                Invoke(() =>
-                {
-                    _nasaGallerySearchButton.Enabled = true;
-                    if (images == null || images.Count == 0)
-                    {
-                        _nasaGalleryStatusLabel.Text = images == null
-                            ? "Could not connect to NASA Gallery. Check your connection."
-                            : $"No images found for \"{query}\". Try a different search.";
-                        _nasaGalleryStatusLabel.ForeColor = Theme.ErrorText;
-                        _nasaGalleryGrid.SetImages(new List<ImageSourceInfo>());
-                        return;
-                    }
-
-                    foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(
-                            f => f.Source == ImageSource.NasaGallery && f.ImageId == img.Id);
-
-                    _nasaGalleryGrid.SetImages(images);
-                    _nasaGalleryGrid.SelectById(ActiveDisplayConfig?.NasaGallerySelectedId ?? _settings.NasaGallerySelectedId);
-                    _nasaGalleryStatusLabel.Text = $"{images.Count} image{(images.Count != 1 ? "s" : "")} found. No API key needed.";
-                    _nasaGalleryStatusLabel.ForeColor = Theme.SuccessText;
-                });
-            }
-            catch (ObjectDisposedException) { }
-        });
-    }
-
-    // -- USER IMAGES SUB-PANEL (5th source in Still Image dropdown) --
-
-    private Panel CreateUserImagesSubPanel(int y)
-    {
-        var panel = new Panel { Location = new Point(0, y), Size = new Size(530, 400), Visible = false };
-        int uy = 0;
-
-        // Add images button
-        var addButton = new Button
-        {
-            Text = "Add Images...",
-            Location = new Point(LeftMargin, uy),
-            Width = 110,
-            Height = 28
-        };
-        addButton.Click += async (_, _) =>
-        {
-            try
-            {
-                // Run file dialog on a dedicated STA thread to avoid UI thread blocking
-                var tcs = new TaskCompletionSource<string[]?>();
-                var dialogThread = new Thread(() =>
-                {
-                    try
-                    {
-                        using var dialog = new OpenFileDialog
-                        {
-                            Title = "Select Images to Import",
-                            Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files|*.*",
-                            Multiselect = true
-                        };
-                        tcs.SetResult(dialog.ShowDialog() == DialogResult.OK
-                            ? dialog.FileNames : null);
-                    }
-                    catch (Exception ex) { tcs.SetException(ex); }
-                });
-                dialogThread.SetApartmentState(ApartmentState.STA);
-                dialogThread.Start();
-
-                var filePaths = await tcs.Task;
-                if (filePaths == null || filePaths.Length == 0) return;
-
-                addButton.Enabled = false;
-                addButton.Text = "Importing...";
-
-                try
-                {
-                    int count = await Task.Run(() => _userImageManager.ImportImages(filePaths));
-                    if (IsDisposed) return;
-                    _userImagesStatusLabel.Text = $"Added {count} image{(count != 1 ? "s" : "")}";
-
-                    var images = await Task.Run(() => _userImageManager.GetAllImages());
-                    if (IsDisposed) return;
-
-                    foreach (var img in images)
-                        img.IsFavorited = _settings.Favorites.Any(f =>
-                            f.Source == ImageSource.UserImages && f.ImageId == img.Id);
-                    _userImagesGrid.SetImages(images);
-                }
-                finally
-                {
-                    if (!IsDisposed)
-                    {
-                        addButton.Enabled = true;
-                        addButton.Text = "Add Images...";
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to import images: {ex.Message}",
-                    "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        };
-        panel.Controls.Add(addButton);
-
-        _userImagesStatusLabel = MakeLabel("", 140, uy + 5);
-        _userImagesStatusLabel.ForeColor = Theme.SecondaryText;
-        panel.Controls.Add(_userImagesStatusLabel);
-        uy += 35;
-
-        // Thumbnail grid
-        _userImagesGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, uy),
-            Size = new Size(490, 360)
-        };
-        _userImagesGrid.ImageSelected += (_, img) =>
-        {
-            // Set this user image as the selected wallpaper
-            SchedulePreview();
-        };
-        _userImagesGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
-        panel.Controls.Add(_userImagesGrid);
-
-        return panel;
-    }
-
-    private async void RefreshUserImages()
-    {
-        var images = await Task.Run(() => _userImageManager.GetAllImages());
-        if (IsDisposed) return;
-
-        foreach (var img in images)
-            img.IsFavorited = _settings.Favorites.Any(f =>
-                f.Source == ImageSource.UserImages && f.ImageId == img.Id);
-        _userImagesGrid.SetImages(images);
-
-        // Restore previously saved selection
-        _userImagesGrid.SelectById(ActiveDisplayConfig?.UserImageSelectedId ?? _settings.UserImageSelectedId);
-
-        int count = images.Count;
-        _userImagesStatusLabel.Text = $"{count} user image{(count != 1 ? "s" : "")}";
-    }
-
-    // -- MY COLLECTION TAB (4th tab) --
-
-    private TabPage CreateMyCollectionTab()
-    {
-        var tab = new TabPage("My Collection") { BackColor = Theme.TabBackground };
-        tab.AutoScroll = true;
-        int y = 10;
-
-        // === FAVORITES SECTION ===
-        _favoritesCountLabel = new Label
-        {
-            Text = "Favorites (0)",
-            Location = new Point(LeftMargin, y),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 10, FontStyle.Bold)
-        };
-        tab.Controls.Add(_favoritesCountLabel);
-        y += 28;
-
-        _favoritesGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 280),
-            ShowSourceBadge = true
-        };
-        _favoritesGrid.ImageSelected += (_, img) => SetFavoriteAsWallpaper(img);
-        _favoritesGrid.FavoriteToggled += (_, img) =>
-        {
-            ToggleFavoriteFromCollection(img);
-            RefreshMyCollectionTab();
-        };
-        tab.Controls.Add(_favoritesGrid);
-        y += 285;
-
-        // Export / Clear buttons
-        var exportFavButton = new Button
-        {
-            Text = "Export Favorites",
-            Location = new Point(LeftMargin, y),
-            Width = 130, Height = 28
-        };
-        exportFavButton.Click += (_, _) => ExportFavorites();
-        tab.Controls.Add(exportFavButton);
-
-        var clearFavButton = new Button
-        {
-            Text = "Clear All Favorites",
-            Location = new Point(LeftMargin + 140, y),
-            Width = 150, Height = 28
-        };
-        clearFavButton.Click += (_, _) => ClearAllFavorites();
-        tab.Controls.Add(clearFavButton);
-        y += 40;
-
-        // === USER IMAGES SECTION ===
-        _userImagesCountLabel = new Label
-        {
-            Text = "User Images (0)",
-            Location = new Point(LeftMargin, y),
-            AutoSize = true,
-            Font = new Font("Segoe UI", 10, FontStyle.Bold)
-        };
-        tab.Controls.Add(_userImagesCountLabel);
-        y += 28;
-
-        _userImagesCollectionGrid = new ThumbnailGridPanel(_imageCache)
-        {
-            Location = new Point(LeftMargin, y),
-            Size = new Size(490, 280)
-        };
-        _userImagesCollectionGrid.ImageSelected += (_, img) => SetUserImageAsWallpaper(img);
-        _userImagesCollectionGrid.FavoriteToggled += (_, img) => ToggleFavorite(img);
-        tab.Controls.Add(_userImagesCollectionGrid);
-        y += 285;
-
-        // Add / Clear buttons for user images
-        var addImagesButton = new Button
-        {
-            Text = "Add Images...",
-            Location = new Point(LeftMargin, y),
-            Width = 110, Height = 28
-        };
-        addImagesButton.Click += async (_, _) =>
-        {
-            try
-            {
-                // Run file dialog on a dedicated STA thread to avoid UI thread blocking
-                var tcs = new TaskCompletionSource<string[]?>();
-                var dialogThread = new Thread(() =>
-                {
-                    try
-                    {
-                        using var dialog = new OpenFileDialog
-                        {
-                            Title = "Select Images to Import",
-                            Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files|*.*",
-                            Multiselect = true
-                        };
-                        tcs.SetResult(dialog.ShowDialog() == DialogResult.OK
-                            ? dialog.FileNames : null);
-                    }
-                    catch (Exception ex) { tcs.SetException(ex); }
-                });
-                dialogThread.SetApartmentState(ApartmentState.STA);
-                dialogThread.Start();
-
-                var filePaths = await tcs.Task;
-                if (filePaths == null || filePaths.Length == 0) return;
-
-                addImagesButton.Enabled = false;
-                addImagesButton.Text = "Importing...";
-
-                try
-                {
-                    int count = await Task.Run(() => _userImageManager.ImportImages(filePaths));
-
-                    // Refresh with images loaded on background thread
-                    var userImages = await Task.Run(() => _userImageManager.GetAllImages());
-                    if (IsDisposed) return;
-
-                    foreach (var img in userImages)
-                        img.IsFavorited = _settings.Favorites.Any(f =>
-                            f.Source == ImageSource.UserImages && f.ImageId == img.Id);
-
-                    if (_favoritesGrid != null && _userImagesCollectionGrid != null)
-                    {
-                        var favImages = _settings.Favorites.Select(fav => new ImageSourceInfo
-                        {
-                            Source = fav.Source,
-                            Id = fav.ImageId,
-                            Title = !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId,
-                            ThumbnailUrl = fav.ThumbnailUrl,
-                            FullImageUrl = fav.FullImageUrl,
-                            QualityTier = fav.QualityTier,
-                            IsFavorited = true
-                        }).ToList();
-
-                        _favoritesGrid.SetImages(favImages);
-                        _favoritesCountLabel!.Text = $"Favorites ({favImages.Count})";
-                        _userImagesCollectionGrid.SetImages(userImages);
-                        _userImagesCountLabel!.Text = $"User Images ({userImages.Count})";
-                    }
-                }
-                finally
-                {
-                    if (!IsDisposed)
-                    {
-                        addImagesButton.Enabled = true;
-                        addImagesButton.Text = "Add Images...";
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to import images: {ex.Message}",
-                    "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        };
-        tab.Controls.Add(addImagesButton);
-
-        var clearUserButton = new Button
-        {
-            Text = "Clear All",
-            Location = new Point(LeftMargin + 120, y),
-            Width = 90, Height = 28
-        };
-        clearUserButton.Click += (_, _) => ClearAllUserImages();
-        tab.Controls.Add(clearUserButton);
-        y += 40;
-
-        return tab;
-    }
-
-    private async void RefreshMyCollectionTab()
-    {
-        if (_favoritesGrid == null || _userImagesCollectionGrid == null) return;
-
-        // Favorites section (lightweight, no I/O)
-        var favImages = _settings.Favorites.Select(fav => new ImageSourceInfo
-        {
-            Source = fav.Source,
-            Id = fav.ImageId,
-            Title = !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId,
-            ThumbnailUrl = fav.ThumbnailUrl,
-            FullImageUrl = fav.FullImageUrl,
-            QualityTier = fav.QualityTier,
-            IsFavorited = true
-        }).ToList();
-
-        _favoritesGrid.SetImages(favImages);
-        _favoritesCountLabel!.Text = $"Favorites ({favImages.Count})";
-
-        // User images section (heavy I/O: Image.Identify + EnsureThumbnail for each file)
-        var userImages = await Task.Run(() => _userImageManager.GetAllImages());
-        if (IsDisposed) return;
-
-        foreach (var img in userImages)
-            img.IsFavorited = _settings.Favorites.Any(f =>
-                f.Source == ImageSource.UserImages && f.ImageId == img.Id);
-
-        _userImagesCollectionGrid.SetImages(userImages);
-        _userImagesCountLabel!.Text = $"User Images ({userImages.Count})";
-    }
-
-    private void SetFavoriteAsWallpaper(ImageSourceInfo img)
-    {
-        _settingsManager.ApplyAndSave(s =>
-        {
-            s.DisplayMode = DisplayMode.StillImage;
-            s.StillImageSource = img.Source;
-            switch (img.Source)
-            {
-                case ImageSource.NasaEpic:
-                    // The image ID embeds type and capture date (epic_1b_yyyyMMddHHmmss)
-                    s.EpicUseLatest = false;
-                    s.EpicSelectedImage = img.Id;
-                    s.EpicImageType = img.Id.StartsWith("epic_RGB", StringComparison.OrdinalIgnoreCase)
-                        ? EpicImageType.Enhanced : EpicImageType.Natural;
-                    var epicDate = ParseEpicDateFromId(img.Id);
-                    if (epicDate != null) s.EpicSelectedDate = epicDate;
-                    break;
-                case ImageSource.NasaApod:
-                    s.ApodSelectedImageId = img.Id;
-                    s.ApodSelectedImageUrl = img.FullImageUrl;
-                    break;
-                case ImageSource.NasaGallery:
-                    s.NasaGallerySelectedId = img.Id;
-                    s.NasaGallerySelectedImageUrl = img.FullImageUrl;
-                    break;
-                case ImageSource.NationalParks:
-                    s.NpsSelectedImageId = img.Id;
-                    s.NpsSelectedImageUrl = img.FullImageUrl;
-                    break;
-                case ImageSource.Smithsonian:
-                    s.SmithsonianSelectedId = img.Id;
-                    s.SmithsonianSelectedImageUrl = img.FullImageUrl;
-                    break;
-                case ImageSource.UserImages:
-                    s.UserImageSelectedId = img.Id;
-                    s.UserImageSelectedPath = _userImageManager.GetImagePath(img.Id) ?? "";
-                    break;
-            }
-        });
-        _renderScheduler.TriggerUpdate();
-    }
-
-    /// <summary>
-    /// Extract the capture date from an EPIC image ID (e.g. epic_1b_20260218001751
-    /// -> "2026-02-18"). Returns null if the ID doesn't match the expected shape.
-    /// </summary>
-    private static string? ParseEpicDateFromId(string imageId)
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(imageId, @"(\d{8})\d{6}$");
-        if (!match.Success) return null;
-        return DateTime.TryParseExact(match.Groups[1].Value, "yyyyMMdd",
-                System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.None, out var date)
-            ? date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
-            : null;
-    }
-
-    private void SetUserImageAsWallpaper(ImageSourceInfo img)
-    {
-        var path = _userImageManager.GetImagePath(img.Id);
-        if (path == null) return;
-
-        _settingsManager.ApplyAndSave(s =>
-        {
-            s.DisplayMode = DisplayMode.StillImage;
-            s.StillImageSource = ImageSource.UserImages;
-            s.UserImageSelectedId = img.Id;
-            s.UserImageSelectedPath = path;
-        });
-        _renderScheduler.TriggerUpdate();
-    }
-
-    private void ToggleFavoriteFromCollection(ImageSourceInfo img)
-    {
-        // In the favorites grid, clicking star always unfavorites
-        bool removed;
-        lock (_settings.FavoritesLock)
-        {
-            var existing = _settings.Favorites.Find(f =>
-                f.Source == img.Source && f.ImageId == img.Id);
-            removed = existing != null && _settings.Favorites.Remove(existing);
-        }
-        if (removed)
-            _settingsManager.Save();
-    }
-
-    private async void ExportFavorites()
-    {
-        List<FavoriteImage> favorites;
-        lock (_settings.FavoritesLock)
-        {
-            favorites = _settings.Favorites.ToList();
-        }
-
-        if (favorites.Count == 0)
-        {
-            MessageBox.Show("No favorites to export.", "Export Favorites",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = "Choose a folder to export favorites to",
-            UseDescriptionForTitle = true
-        };
-        if (dialog.ShowDialog() != DialogResult.OK) return;
-        string destDir = dialog.SelectedPath;
-
-        // Copy off the UI thread — dozens of file copies would freeze the window
-        int exported = 0, skipped = 0;
-        await Task.Run(() =>
-        {
-            foreach (var fav in favorites)
-            {
-                // For user images, find in user_images directory
-                string? cachedPath = fav.Source == ImageSource.UserImages
-                    ? _userImageManager.GetImagePath(fav.ImageId)
-                    : _imageCache.GetCachedPathForFavorite(fav);
-
-                if (cachedPath == null || !File.Exists(cachedPath))
-                {
-                    skipped++;
-                    continue;
-                }
-
-                var safeName = ImageCache.SanitizeFileName(
-                    !string.IsNullOrEmpty(fav.Title) ? fav.Title : fav.ImageId);
-                var destPath = Path.Combine(destDir, safeName + Path.GetExtension(cachedPath));
-
-                // Avoid overwriting
-                int counter = 1;
-                while (File.Exists(destPath))
-                {
-                    destPath = Path.Combine(destDir,
-                        $"{safeName}_{counter}{Path.GetExtension(cachedPath)}");
-                    counter++;
-                }
-
-                try { File.Copy(cachedPath, destPath); exported++; }
-                catch { skipped++; }
-            }
-        });
-        if (IsDisposed) return;
-
-        MessageBox.Show(skipped == 0
-                ? $"Exported {exported} favorite{(exported != 1 ? "s" : "")}."
-                : $"Exported {exported} of {favorites.Count} favorites.\n" +
-                  $"{skipped} could not be exported (image not in the local cache).",
-            "Export Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    }
-
-    private void ClearAllFavorites()
-    {
-        if (_settings.Favorites.Count == 0) return;
-
-        if (MessageBox.Show(
-            $"Remove all {_settings.Favorites.Count} favorites?\n\nThis does not delete cached image files.",
-            "Clear Favorites", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-            return;
-
-        lock (_settings.FavoritesLock)
-        {
-            _settings.Favorites.Clear();
-        }
-        _settingsManager.Save();
-        RefreshMyCollectionTab();
-    }
-
-    private async void ClearAllUserImages()
-    {
-        var imagePaths = _userImageManager.GetAllImagePaths();
-        if (imagePaths.Count == 0) return;
-
-        if (MessageBox.Show(
-            $"Delete all {imagePaths.Count} user images?\n\nThis permanently removes the files.",
-            "Clear User Images", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-            return;
-
-        // Also remove any user image favorites
-        lock (_settings.FavoritesLock)
-        {
-            _settings.Favorites.RemoveAll(f => f.Source == ImageSource.UserImages);
-        }
-
-        await Task.Run(() => _userImageManager.DeleteAllImages());
-        if (IsDisposed) return;
-
-        // Clear the dangling selection so rendering doesn't chase deleted files
-        _settings.UserImageSelectedId = "";
-        _settings.UserImageSelectedPath = "";
-
-        _settingsManager.Save();
-        RefreshMyCollectionTab();
-    }
-
-    private void OnRenderStatusChanged(string status)
-    {
-        // Raised on the render thread. Invoke throws InvalidOperationException
-        // (not just ObjectDisposedException) when the handle isn't created yet or
-        // is being destroyed — both races are harmless, so swallow them.
-        if (IsDisposed || !IsHandleCreated) return;
-        try { BeginInvoke(() => UpdateDownloadStatus(status)); }
-        catch (ObjectDisposedException) { }
-        catch (InvalidOperationException) { }
-    }
-
-    private void UpdateDownloadStatus(string status)
-    {
-        if (IsDisposed) return;
-
-        // Route status messages to the active source's status label
-        var label = GetActiveStatusLabel();
-        if (label == null) return;
-
-        if (status.Contains("Downloading", StringComparison.OrdinalIgnoreCase))
-        {
-            label.Text = "Downloading image...";
-            label.ForeColor = Theme.SecondaryText;
-        }
-        else if (status.Contains("Wallpaper updated", StringComparison.OrdinalIgnoreCase))
-        {
-            label.Text = "Wallpaper set!";
-            label.ForeColor = Theme.SuccessText;
-        }
-        else if (status.Contains("offline", StringComparison.OrdinalIgnoreCase))
-        {
-            label.Text = "Offline — showing a cached image.";
-            label.ForeColor = Theme.WarningText;
-        }
-        else if (status.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-                 status.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
-                 status.Contains("No images available", StringComparison.OrdinalIgnoreCase))
-        {
-            // Without this branch the label sticks on "Downloading image..."
-            // forever when a download or render fails
-            label.Text = status;
-            label.ForeColor = Theme.ErrorText;
-        }
-    }
-
-    private Label? GetActiveStatusLabel()
-    {
-        if (_settings.DisplayMode != DisplayMode.StillImage) return null;
-        return _settings.StillImageSource switch
-        {
-            ImageSource.NasaEpic => _epicStatusLabel,
-            ImageSource.NasaApod => _apodStatusLabel,
-            ImageSource.NationalParks => _npsStatusLabel,
-            ImageSource.Smithsonian => _smithsonianStatusLabel,
-            ImageSource.NasaGallery => _nasaGalleryStatusLabel,
-            _ => null
-        };
     }
 
     protected override void Dispose(bool disposing)
@@ -3847,12 +547,15 @@ public class SettingsForm : Form
         if (disposing)
         {
             _renderScheduler.StatusChanged -= OnRenderStatusChanged;
+            _renderScheduler.WallpaperApplied -= OnWallpaperApplied;
             if (_hdProgressHandler != null) _hdTextureManager.ProgressChanged -= _hdProgressHandler;
             if (_hdCompletedHandler != null) _hdTextureManager.DownloadCompleted -= _hdCompletedHandler;
-            _debounceTimer.Stop();
-            _debounceTimer.Dispose();
-            _cacheSizeTimer?.Stop();
-            _cacheSizeTimer?.Dispose();
+            _commitTimer.Stop();
+            _commitTimer.Dispose();
+            _statusTimer.Stop();
+            _statusTimer.Dispose();
+            foreach (var p in _previews.Values) p.Dispose();
+            _previews.Clear();
         }
         base.Dispose(disposing);
     }
