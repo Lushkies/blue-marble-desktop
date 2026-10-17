@@ -160,15 +160,11 @@ public class MoonRenderer : IDisposable
 
         float fov = _settings.FieldOfView * MathF.PI / 180.0f;
         float aspect = (float)width / height;
-        var projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, 0.1f, 100.0f);
+        var projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, 0.1f, 100.0f) *
+                         EarthRenderer.ScreenShift(_settings);
 
-        // Image offset (same approach as EarthRenderer)
-        float viewHeight = 2.0f * _settings.ZoomLevel * MathF.Tan(fov * 0.5f);
-        float offsetX = (_settings.ImageOffsetX / 100.0f) * viewHeight * aspect;
-        float offsetY = (_settings.ImageOffsetY / 100.0f) * viewHeight;
-        var cameraPos = new Vector3(offsetX, offsetY, _settings.ZoomLevel);
-        var cameraTarget = new Vector3(offsetX, offsetY, 0.0f);
-        var view = Matrix4x4.CreateLookAt(cameraPos, cameraTarget, Vector3.UnitY);
+        var cameraPos = new Vector3(0.0f, 0.0f, _settings.ZoomLevel);
+        var view = Matrix4x4.CreateLookAt(cameraPos, Vector3.Zero, Vector3.UnitY);
 
         var now = DateTime.UtcNow;
         var sunDir = SunPosition.GetSunDirection(now);
@@ -224,11 +220,10 @@ public class MoonRenderer : IDisposable
         }
 
         // --- Draw Moon ---
-        // Apply both latitude (tilt) and longitude rotation so the slider works
-        float latitudeRad = _settings.CameraTilt * MathF.PI / 180.0f;
-        float lonOffsetRad = (-_settings.LongitudeOffset - 90.0f) * MathF.PI / 180.0f;
-        var model = Matrix4x4.CreateRotationX(-latitudeRad) *
-                    Matrix4x4.CreateRotationY(lonOffsetRad);
+        // The Moon is tidally locked: we always see the same face, so it is
+        // drawn centred on lunar 0°/0° (the near side). It used to borrow the
+        // Earth view's latitude/longitude, which turned it to arbitrary faces.
+        var model = Matrix4x4.CreateRotationY(-90.0f * MathF.PI / 180.0f);
 
         _shader.Use();
         _shader.SetUniform("uModel", model);

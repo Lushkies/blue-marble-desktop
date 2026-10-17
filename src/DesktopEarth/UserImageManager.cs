@@ -12,14 +12,10 @@ namespace DesktopEarth;
 /// </summary>
 public class UserImageManager
 {
-    private static readonly string UserImagesDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BlueMarbleDesktop", "user_images");
+    private static readonly string UserImagesDir = AppPaths.UserImagesDir;
 
     // Thumbnails go into ImageCache's thumbnail directory for seamless grid loading
-    private static readonly string ThumbDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BlueMarbleDesktop", "image_cache", "thumbnails", "userimages");
+    private static readonly string ThumbDir = Path.Combine(AppPaths.ImageCacheDir, "thumbnails", "userimages");
 
     private static readonly string[] SupportedExtensions =
         [".jpg", ".jpeg", ".png", ".bmp", ".webp"];
@@ -102,7 +98,7 @@ public class UserImageManager
                     var qualityTier = ImageQualityTier.Unknown;
                     try
                     {
-                        var info = SixLabors.ImageSharp.Image.Identify(filePath);
+                        var info = SixLabors.ImageSharp.Image.Identify(ImageDecoding.Options, filePath);
                         if (info != null)
                         {
                             width = info.Width;
@@ -276,7 +272,7 @@ public class UserImageManager
 
             Directory.CreateDirectory(ThumbDir);
 
-            using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(imagePath);
+            using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(ImageDecoding.Options, imagePath);
 
             // Scale down to max 200px on longest side
             int maxDim = Math.Max(image.Width, image.Height);

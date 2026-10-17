@@ -8,9 +8,7 @@ namespace DesktopEarth;
 /// </summary>
 public class ImageCache
 {
-    private static readonly string CacheDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BlueMarbleDesktop", "image_cache");
+    private static readonly string CacheDir = AppPaths.ImageCacheDir;
 
     private static readonly string ThumbCacheDir = Path.Combine(CacheDir, "thumbnails");
 
@@ -134,7 +132,7 @@ public class ImageCache
             // before they can poison the cache
             try
             {
-                SixLabors.ImageSharp.Image.Identify(tempPath);
+                SixLabors.ImageSharp.Image.Identify(ImageDecoding.Options, tempPath);
             }
             catch
             {

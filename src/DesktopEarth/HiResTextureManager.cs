@@ -8,9 +8,7 @@ namespace DesktopEarth;
 /// </summary>
 public class HiResTextureManager
 {
-    private static readonly string HdTextureDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BlueMarbleDesktop", "textures_hd");
+    private static readonly string HdTextureDir = AppPaths.HdTexturesDir;
 
     // Month names for URL paths (lowercase)
     private static readonly string[] MonthNames =

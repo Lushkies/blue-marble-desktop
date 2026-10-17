@@ -646,7 +646,7 @@ public class SettingsForm : Form
         };
 
         var screens = MonitorManager.GetAllScreens();
-        var friendlyNames = MonitorNameHelper.GetMonitorFriendlyNames();
+        var friendlyNames = MonitorNameHelper.GetMonitorTargets().ToDictionary(kv => kv.Key, kv => kv.Value.FriendlyName);
         for (int i = 0; i < screens.Length; i++)
         {
             var s = screens[i];

@@ -63,9 +63,7 @@ Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
 // Global exception handlers for diagnostics
 Application.ThreadException += (_, args) =>
 {
-    var logPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BlueMarbleDesktop", "crash.log");
+    var logPath = AppPaths.CrashLog;
     try
     {
         Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
@@ -79,9 +77,7 @@ Application.ThreadException += (_, args) =>
 };
 AppDomain.CurrentDomain.UnhandledException += (_, args) =>
 {
-    var logPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BlueMarbleDesktop", "crash.log");
+    var logPath = AppPaths.CrashLog;
     try
     {
         Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);

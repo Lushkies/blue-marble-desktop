@@ -112,7 +112,7 @@ public class AssetLocator
         if (!File.Exists(path)) return false;
         try
         {
-            SixLabors.ImageSharp.Image.Identify(path);
+            SixLabors.ImageSharp.Image.Identify(ImageDecoding.Options, path);
             return true;
         }
         catch

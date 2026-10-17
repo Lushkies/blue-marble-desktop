@@ -3,8 +3,12 @@ using System.Text.Json.Serialization;
 
 namespace DesktopEarth;
 
-public class AppSettings
+public class AppSettings : IDisplaySettings
 {
+    // Schema version for one-time migrations (0 = written before versioning).
+    // See SettingsManager.CurrentSettingsVersion.
+    public int SettingsVersion { get; set; }
+
     // Update frequency in seconds
     public int UpdateIntervalSeconds { get; set; } = 600; // 10 minutes
 
@@ -128,6 +132,43 @@ public class AppSettings
     [JsonIgnore]
     public readonly object DisplayConfigsLock = new();
 
+    /// <summary>
+    /// The saved per-display config for a monitor, or null when it has none
+    /// (it then shows the global settings). A config saved before monitors had
+    /// stable ids is adopted the first time its old \\.\DISPLAYn name matches.
+    /// </summary>
+    public DisplayConfig? FindDisplayConfig(DisplayInfo display)
+    {
+        lock (DisplayConfigsLock)
+        {
+            var config = DisplayConfigs.Find(c => c.MonitorId.Length > 0 && c.MonitorId == display.MonitorId);
+            config ??= DisplayConfigs.Find(c => c.MonitorId.Length == 0 && c.DeviceName == display.DeviceName);
+            if (config != null)
+            {
+                config.MonitorId = display.MonitorId;
+                config.DeviceName = display.DeviceName;
+            }
+            return config;
+        }
+    }
+
+    /// <summary>
+    /// The display's config, creating it on first edit as a copy of the global
+    /// settings — so the monitor keeps looking exactly as it did.
+    /// </summary>
+    public DisplayConfig GetOrCreateDisplayConfig(DisplayInfo display)
+    {
+        lock (DisplayConfigsLock)
+        {
+            var existing = FindDisplayConfig(display);
+            if (existing != null) return existing;
+            var config = new DisplayConfig { MonitorId = display.MonitorId, DeviceName = display.DeviceName };
+            DisplaySettingsCopier.Copy(this, config);
+            DisplayConfigs.Add(config);
+            return config;
+        }
+    }
+
     // Captures unknown JSON properties during deserialization (used for backward compat migration)
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
@@ -136,8 +177,14 @@ public class AppSettings
 /// <summary>
 /// Per-display configuration. Each monitor can have its own independent settings.
 /// </summary>
-public class DisplayConfig
+public class DisplayConfig : IDisplaySettings
 {
+    // Stable monitor identity (device path) — the lookup key. Empty on configs
+    // saved before v2.2, which are adopted by DeviceName on first match.
+    public string MonitorId { get; set; } = "";
+
+    // Last-known GDI name (\\.\DISPLAYn). Windows renumbers these on reboots and
+    // docking, so it is only used to adopt configs saved before MonitorId existed.
     public string DeviceName { get; set; } = "";
     public DisplayMode DisplayMode { get; set; } = DisplayMode.Spherical;
     public ImageSource StillImageSource { get; set; } = ImageSource.NasaEpic;

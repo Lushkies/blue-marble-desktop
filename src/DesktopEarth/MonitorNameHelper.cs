@@ -125,12 +125,15 @@ public static class MonitorNameHelper
         ref DISPLAYCONFIG_SOURCE_DEVICE_NAME requestPacket);
 
     /// <summary>
-    /// Returns a dictionary mapping GDI device name (e.g. "\\.\DISPLAY1")
-    /// to the monitor's friendly name (e.g. "LG ULTRAGEAR").
+    /// Returns, per GDI device name (e.g. "\.\DISPLAY1"), the monitor's friendly
+    /// name (e.g. "LG ULTRAGEAR") and its device path. The device path
+    /// (\?\DISPLAY#GSM5B7F#...) identifies the physical monitor on its connector
+    /// and, unlike the GDI name, survives reboots, docking and driver reinstalls.
+    /// Either value may be empty when Windows doesn't report it.
     /// </summary>
-    public static Dictionary<string, string> GetMonitorFriendlyNames()
+    public static Dictionary<string, (string FriendlyName, string DevicePath)> GetMonitorTargets()
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
 
         int err = GetDisplayConfigBufferSizes(
             QDC_ONLY_ACTIVE_PATHS, out int pathCount, out int modeCount);
@@ -162,10 +165,6 @@ public static class MonitorNameHelper
             if (err != ERROR_SUCCESS)
                 continue;
 
-            string friendlyName = targetName.monitorFriendlyDeviceName;
-            if (string.IsNullOrEmpty(friendlyName))
-                continue;
-
             var sourceName = new DISPLAYCONFIG_SOURCE_DEVICE_NAME();
             sourceName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
             sourceName.header.size = Marshal.SizeOf<DISPLAYCONFIG_SOURCE_DEVICE_NAME>();
@@ -178,22 +177,10 @@ public static class MonitorNameHelper
 
             string gdiName = sourceName.viewGdiDeviceName;
             if (!string.IsNullOrEmpty(gdiName))
-                result[gdiName] = friendlyName;
+                result[gdiName] = (targetName.monitorFriendlyDeviceName ?? "",
+                                   targetName.monitorDevicePath ?? "");
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Gets the friendly name for a specific Screen, falling back to device name.
-    /// </summary>
-    public static string GetFriendlyName(System.Windows.Forms.Screen screen)
-    {
-        var names = GetMonitorFriendlyNames();
-        string deviceName = screen.DeviceName.TrimEnd('\0');
-
-        return names.TryGetValue(deviceName, out string? friendly)
-            ? friendly
-            : deviceName;
     }
 }

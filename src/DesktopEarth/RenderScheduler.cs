@@ -36,17 +36,33 @@ public class RenderScheduler : IDisposable
     private int _poolBuildCycleCount;
     private bool _isTimerTick; // Distinguishes timer ticks from user-triggered renders
 
+    // Set by "Next image" / turning auto-rotate on: the next render advances
+    // rotation even though it is user-triggered, not a timer tick
+    private volatile bool _advanceRotationRequested;
+
     // Gate: prevents all rendering until user explicitly triggers an update.
     // Defaults to true (first-ever run renders immediately).
     // Set to false on subsequent launches so the existing wallpaper is preserved.
     private volatile bool _userHasTriggered = true;
 
-    // Track currently displayed image for "Favorite Current Wallpaper" feature
-    public ImageSource? CurrentImageSource { get; private set; }
-    public string? CurrentImageId { get; private set; }
-    public string? CurrentImageUrl { get; private set; }
-    public string? CurrentImagePath { get; private set; }
-    public string? CurrentImageTitle { get; private set; }
+    /// <summary>A still image currently on screen.</summary>
+    public sealed record CurrentImageInfo(ImageSource Source, string Id, string? Url, string? Path, string? Title);
+
+    /// <summary>Key for the single image shown in Same-for-all / Span modes.</summary>
+    public const string AllDisplaysKey = "*";
+
+    // What each display is showing, keyed by DisplayInfo.MonitorId (or
+    // AllDisplaysKey) — drives "Favorite Current Wallpaper" and the window's
+    // "on display" markers. Written on the render thread, read on the UI thread.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CurrentImageInfo> _currentImages = new();
+    private string _currentDisplayKey = AllDisplaysKey;
+
+    /// <summary>When the wallpaper was last applied, and when the next scheduled update is due (UTC).</summary>
+    public DateTime? LastAppliedUtc { get; private set; }
+    public DateTime? NextUpdateUtc { get; private set; }
+
+    /// <summary>Raised on the render thread after a new wallpaper has been applied.</summary>
+    public event Action? WallpaperApplied;
 
     // Reusable BMP save buffer (avoids LOH churn from creating Image<Rgba32> every cycle)
     private SixLabors.ImageSharp.Image<Rgba32>? _bmpBuffer;
@@ -88,9 +104,7 @@ public class RenderScheduler : IDisposable
     {
         _settingsManager = settingsManager;
         _assets = assets;
-        _wallpaperPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BlueMarbleDesktop", "wallpaper.bmp");
+        _wallpaperPath = AppPaths.WallpaperFile;
 
         // On subsequent launches, preserve the existing wallpaper by holding off
         // scheduled renders — but only when showing a static still image. Live
@@ -111,16 +125,10 @@ public class RenderScheduler : IDisposable
     {
         if (settings.MultiMonitorMode == MultiMonitorMode.PerDisplay)
         {
-            foreach (var screen in MonitorManager.GetAllScreens())
+            foreach (var display in MonitorManager.GetDisplays())
             {
-                DisplayConfig? config;
-                lock (settings.DisplayConfigsLock)
-                {
-                    config = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
-                }
-                var mode = config?.DisplayMode ?? settings.DisplayMode;
-                var rotate = config?.RandomRotationEnabled ?? settings.RandomRotationEnabled;
-                if (mode != DisplayMode.StillImage || rotate)
+                IDisplaySettings effective = (IDisplaySettings?)settings.FindDisplayConfig(display) ?? settings;
+                if (effective.DisplayMode != DisplayMode.StillImage || effective.RandomRotationEnabled)
                     return false;
             }
             return true;
@@ -178,40 +186,55 @@ public class RenderScheduler : IDisposable
     }
 
     /// <summary>
-    /// Build a FavoriteImage from the currently displayed wallpaper, or null if not a still image.
+    /// Re-render now and move auto-rotate on to its next image (a plain user
+    /// trigger re-renders the current image instead).
+    /// </summary>
+    public void TriggerNextImage()
+    {
+        _advanceRotationRequested = true;
+        TriggerUserUpdate();
+    }
+
+    /// <summary>
+    /// The still image a display is showing (pass <see cref="AllDisplaysKey"/>
+    /// outside Per-display mode), or null for globe/map/moon or nothing yet.
+    /// </summary>
+    public CurrentImageInfo? GetCurrentImage(string displayKey) =>
+        _currentImages.TryGetValue(displayKey, out var info) ? info : null;
+
+    /// <summary>
+    /// Build a FavoriteImage from the currently displayed wallpaper, or null if
+    /// not a still image. With several displays, the main display's image wins.
     /// </summary>
     public FavoriteImage? GetCurrentAsFavorite()
     {
-        if (CurrentImageSource == null || string.IsNullOrEmpty(CurrentImageId))
+        CurrentImageInfo? current = GetCurrentImage(AllDisplaysKey);
+        if (_settingsManager.Settings.MultiMonitorMode == MultiMonitorMode.PerDisplay)
+        {
+            var displays = MonitorManager.GetDisplays();
+            current = displays.Where(d => d.Primary).Concat(displays)
+                .Select(d => GetCurrentImage(d.MonitorId)).FirstOrDefault(c => c != null);
+        }
+        if (current == null || string.IsNullOrEmpty(current.Id))
             return null;
 
         return new FavoriteImage
         {
-            Source = CurrentImageSource.Value,
-            ImageId = CurrentImageId,
-            Title = CurrentImageTitle ?? CurrentImageId,
-            FullImageUrl = CurrentImageUrl ?? "",
-            LocalCachePath = CurrentImagePath ?? ""
+            Source = current.Source,
+            ImageId = current.Id,
+            Title = current.Title ?? current.Id,
+            FullImageUrl = current.Url ?? "",
+            LocalCachePath = current.Path ?? ""
         };
     }
 
     private void SetCurrentImage(ImageSource source, string? id, string? url, string? path, string? title = null)
     {
-        CurrentImageSource = source;
-        CurrentImageId = id;
-        CurrentImageUrl = url;
-        CurrentImagePath = path;
-        CurrentImageTitle = title;
+        if (string.IsNullOrEmpty(id)) { ClearCurrentImage(); return; }
+        _currentImages[_currentDisplayKey] = new CurrentImageInfo(source, id, url, path, title);
     }
 
-    private void ClearCurrentImage()
-    {
-        CurrentImageSource = null;
-        CurrentImageId = null;
-        CurrentImageUrl = null;
-        CurrentImagePath = null;
-        CurrentImageTitle = null;
-    }
+    private void ClearCurrentImage() => _currentImages.TryRemove(_currentDisplayKey, out _);
 
     private void RenderLoop()
     {
@@ -307,7 +330,10 @@ public class RenderScheduler : IDisposable
             }
 
             _renderNowSignal.Reset();
-            _isTimerTick = !signaled; // Timer tick (not user-triggered) — safe to advance rotation
+            // Timer ticks advance auto-rotate; user-triggered renders re-render the
+            // current image unless "Next image" explicitly asked to advance
+            _isTimerTick = !signaled || _advanceRotationRequested;
+            _advanceRotationRequested = false;
             firstRender = false;
 
             try
@@ -343,6 +369,9 @@ public class RenderScheduler : IDisposable
                     }
 
                     // Standard rendering: single image for all monitors
+                    _currentDisplayKey = AllDisplaysKey;
+                    foreach (var key in _currentImages.Keys.Where(k => k != AllDisplaysKey).ToList())
+                        _currentImages.TryRemove(key, out CurrentImageInfo? _discarded);
                     (renderWidth, renderHeight) = MonitorManager.GetRenderResolution(settings);
 
                     // Re-initialize renderers if display mode or image style changed.
@@ -420,7 +449,12 @@ public class RenderScheduler : IDisposable
                 // retry on the next interval rather than in a tight loop.
                 lastUpdate = DateTime.UtcNow;
                 if (applied)
+                {
+                    LastAppliedUtc = DateTime.UtcNow;
                     ReportStatus($"Wallpaper updated at {DateTime.Now:HH:mm:ss}");
+                    try { WallpaperApplied?.Invoke(); } catch { /* UI subscriber racing disposal */ }
+                }
+                NextUpdateUtc = lastUpdate.AddSeconds(settings.UpdateIntervalSeconds);
             }
             catch (Exception ex)
             {
@@ -429,6 +463,7 @@ public class RenderScheduler : IDisposable
                 // a persistent failure would otherwise spin the loop hot. User
                 // triggers (signal) bypass the interval check and retry at once.
                 lastUpdate = DateTime.UtcNow.AddSeconds(-Math.Max(0, settings.UpdateIntervalSeconds - 60));
+                NextUpdateUtc = DateTime.UtcNow.AddSeconds(60);
             }
         };
 
@@ -469,19 +504,20 @@ public class RenderScheduler : IDisposable
 
     private bool RenderPerDisplay(GL gl, AppSettings settings)
     {
-        var screens = MonitorManager.GetAllScreens();
-        if (screens.Length == 0) return false;
+        var displays = MonitorManager.GetDisplays();
+        if (displays.Count == 0) return false;
 
         // Get virtual desktop bounds for composite
         var (vdWidth, vdHeight) = MonitorManager.GetVirtualDesktopSize();
         int vdLeft = int.MaxValue, vdTop = int.MaxValue;
-        foreach (var screen in screens)
+        foreach (var display in displays)
         {
-            if (screen.Bounds.Left < vdLeft) vdLeft = screen.Bounds.Left;
-            if (screen.Bounds.Top < vdTop) vdTop = screen.Bounds.Top;
+            if (display.Bounds.Left < vdLeft) vdLeft = display.Bounds.Left;
+            if (display.Bounds.Top < vdTop) vdTop = display.Bounds.Top;
         }
 
-        ReportStatus($"Rendering per-display ({screens.Length} monitors)...");
+        ReportStatus($"Rendering per-display ({displays.Count} monitors)...");
+        _currentImages.TryRemove(AllDisplaysKey, out _);
 
         // Create composite image, seeded from the previous wallpaper when the
         // layout matches — a display that fails to render this cycle keeps its
@@ -491,7 +527,7 @@ public class RenderScheduler : IDisposable
         {
             if (File.Exists(_wallpaperPath))
             {
-                using var previous = SixLabors.ImageSharp.Image.Load<Rgba32>(_wallpaperPath);
+                using var previous = SixLabors.ImageSharp.Image.Load<Rgba32>(ImageDecoding.Options, _wallpaperPath);
                 if (previous.Width == vdWidth && previous.Height == vdHeight)
                     composite.Mutate(x => x.DrawImage(previous, new SixLabors.ImageSharp.Point(0, 0), 1f));
             }
@@ -500,25 +536,24 @@ public class RenderScheduler : IDisposable
 
         bool anyRendered = false;
 
-        foreach (var screen in screens)
+        foreach (var display in displays)
         {
-            int sw = screen.Bounds.Width;
-            int sh = screen.Bounds.Height;
+            int sw = display.Bounds.Width;
+            int sh = display.Bounds.Height;
 
-            // Find per-display config or use global defaults (locked: the UI
-            // thread adds configs while this thread enumerates)
-            DisplayConfig? displayConfig;
-            lock (settings.DisplayConfigsLock)
-            {
-                displayConfig = settings.DisplayConfigs.Find(c => c.DeviceName == screen.DeviceName);
-            }
+            // This display's own config, or null to use the global settings.
+            // Keyed by the stable monitor id, not the \\.\DISPLAYn name Windows
+            // renumbers after reboots and docking.
+            DisplayConfig? displayConfig = settings.FindDisplayConfig(display);
 
-            var deviceName = screen.DeviceName;
-            bool isNew = !_perDisplayRenderers.TryGetValue(deviceName, out var displayState);
+            var key = display.MonitorId;
+            _currentDisplayKey = key;
+            _randomImageOverride = null; // A rotation pick never leaks to another display
+            bool isNew = !_perDisplayRenderers.TryGetValue(key, out var displayState);
             if (isNew)
             {
                 displayState = new PerDisplayState();
-                _perDisplayRenderers[deviceName] = displayState;
+                _perDisplayRenderers[key] = displayState;
             }
 
             // Refresh this display's persistent settings snapshot in place so the
@@ -577,6 +612,7 @@ public class RenderScheduler : IDisposable
                     DisplayMode.Moon when displayState.Moon != null => displayState.Moon.Render(sw, sh),
                     _ => displayState.Earth!.Render(sw, sh),
                 };
+                ClearCurrentImage(); // Globe/Flat Map/Moon are not favoritable
             }
 
             // Nothing to show for this display — keep its previous content
@@ -585,8 +621,8 @@ public class RenderScheduler : IDisposable
             anyRendered = true;
 
             // Place rendered pixels into composite at the correct position
-            int offsetX = screen.Bounds.Left - vdLeft;
-            int offsetY = screen.Bounds.Top - vdTop;
+            int offsetX = display.Bounds.Left - vdLeft;
+            int offsetY = display.Bounds.Top - vdTop;
 
             composite.ProcessPixelRows(accessor =>
             {
@@ -611,7 +647,7 @@ public class RenderScheduler : IDisposable
         }
 
         // Clean up renderers for disconnected monitors
-        var connectedNames = new HashSet<string>(screens.Select(s => s.DeviceName));
+        var connectedNames = new HashSet<string>(displays.Select(d => d.MonitorId));
         var staleKeys = _perDisplayRenderers.Keys.Where(k => !connectedNames.Contains(k)).ToList();
         foreach (var key in staleKeys)
         {
@@ -635,54 +671,13 @@ public class RenderScheduler : IDisposable
     /// </summary>
     private static void CopyDisplaySettings(AppSettings target, AppSettings settings, DisplayConfig? displayConfig)
     {
-        target.DisplayMode = displayConfig?.DisplayMode ?? settings.DisplayMode;
-        target.StillImageSource = displayConfig?.StillImageSource ?? settings.StillImageSource;
-        target.ZoomLevel = displayConfig?.ZoomLevel ?? settings.ZoomLevel;
-        target.FieldOfView = displayConfig?.FieldOfView ?? settings.FieldOfView;
-        target.CameraTilt = displayConfig?.CameraTilt ?? settings.CameraTilt;
-        target.LongitudeOffset = displayConfig?.LongitudeOffset ?? settings.LongitudeOffset;
-        target.ImageOffsetX = displayConfig?.ImageOffsetX ?? settings.ImageOffsetX;
-        target.ImageOffsetY = displayConfig?.ImageOffsetY ?? settings.ImageOffsetY;
-        target.NightLightsEnabled = displayConfig?.NightLightsEnabled ?? settings.NightLightsEnabled;
-        target.NightLightsBrightness = displayConfig?.NightLightsBrightness ?? settings.NightLightsBrightness;
-        target.AmbientLight = displayConfig?.AmbientLight ?? settings.AmbientLight;
-        target.ImageStyle = displayConfig?.ImageStyle ?? settings.ImageStyle;
-        target.EpicImageType = displayConfig?.EpicImageType ?? settings.EpicImageType;
-        target.EpicUseLatest = displayConfig?.EpicUseLatest ?? settings.EpicUseLatest;
-        target.EpicSelectedDate = displayConfig?.EpicSelectedDate ?? settings.EpicSelectedDate;
-        target.EpicSelectedImage = displayConfig?.EpicSelectedImage ?? settings.EpicSelectedImage;
-        // NASA APOD per-display
-        target.ApodRecentDays = displayConfig?.ApodRecentDays ?? settings.ApodRecentDays;
-        target.ApodUseLatest = displayConfig?.ApodUseLatest ?? settings.ApodUseLatest;
-        target.ApodSelectedDate = displayConfig?.ApodSelectedDate ?? settings.ApodSelectedDate;
-        target.ApodSelectedImageId = displayConfig?.ApodSelectedImageId ?? settings.ApodSelectedImageId;
-        target.ApodSelectedImageUrl = displayConfig?.ApodSelectedImageUrl ?? settings.ApodSelectedImageUrl;
-        // NPS per-display
-        target.NpsSearchQuery = displayConfig?.NpsSearchQuery ?? settings.NpsSearchQuery;
-        target.NpsSelectedParkCode = displayConfig?.NpsSelectedParkCode ?? settings.NpsSelectedParkCode;
-        target.NpsSelectedImageId = displayConfig?.NpsSelectedImageId ?? settings.NpsSelectedImageId;
-        target.NpsSelectedImageUrl = displayConfig?.NpsSelectedImageUrl ?? settings.NpsSelectedImageUrl;
-        // Smithsonian per-display
-        target.SmithsonianSearchQuery = displayConfig?.SmithsonianSearchQuery ?? settings.SmithsonianSearchQuery;
-        target.SmithsonianSelectedId = displayConfig?.SmithsonianSelectedId ?? settings.SmithsonianSelectedId;
-        target.SmithsonianSelectedImageUrl = displayConfig?.SmithsonianSelectedImageUrl ?? settings.SmithsonianSelectedImageUrl;
-        // NASA Gallery per-display
-        target.NasaGallerySearchQuery = displayConfig?.NasaGallerySearchQuery ?? settings.NasaGallerySearchQuery;
-        target.NasaGallerySelectedId = displayConfig?.NasaGallerySelectedId ?? settings.NasaGallerySelectedId;
-        target.NasaGallerySelectedImageUrl = displayConfig?.NasaGallerySelectedImageUrl ?? settings.NasaGallerySelectedImageUrl;
-        // API key (always from global settings)
+        DisplaySettingsCopier.Copy((IDisplaySettings?)displayConfig ?? settings, target);
+
+        // Global-only settings, shared so per-display rendering honors them too
         target.ApiDataGovKey = settings.ApiDataGovKey;
-        // Auto-rotation per-display
-        target.RandomRotationEnabled = displayConfig?.RandomRotationEnabled ?? settings.RandomRotationEnabled;
-        target.RandomRotationSource = displayConfig?.RandomRotationSource ?? settings.RandomRotationSource;
-        target.Favorites = settings.Favorites; // Favorites are always global
-        // Rotation exclusions and the ID blacklist are global-only settings —
-        // share them so per-display rotation honors them too
+        target.Favorites = settings.Favorites;
         target.ExcludedRotationSources = settings.ExcludedRotationSources;
         target.BlacklistedIdPrefixes = settings.BlacklistedIdPrefixes;
-        // User images per-display
-        target.UserImageSelectedId = displayConfig?.UserImageSelectedId ?? settings.UserImageSelectedId;
-        target.UserImageSelectedPath = displayConfig?.UserImageSelectedPath ?? settings.UserImageSelectedPath;
     }
 
     private void InitializeRenderers(GL gl, AppSettings settings,

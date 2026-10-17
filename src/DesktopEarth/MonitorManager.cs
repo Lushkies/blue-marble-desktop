@@ -58,6 +58,57 @@ public static class MonitorManager
     }
 
     /// <summary>
+    /// All connected monitors with a stable identity and human labels, ordered
+    /// left to right (then top to bottom) the way they are physically arranged.
+    /// </summary>
+    public static List<DisplayInfo> GetDisplays()
+    {
+        var screens = System.Windows.Forms.Screen.AllScreens;
+        Dictionary<string, (string FriendlyName, string DevicePath)> targets;
+        try { targets = MonitorNameHelper.GetMonitorTargets(); }
+        catch { targets = new(StringComparer.OrdinalIgnoreCase); }
+
+        var ordered = screens
+            .OrderBy(s => s.Bounds.Left + s.Bounds.Width / 2)
+            .ThenBy(s => s.Bounds.Top)
+            .ToList();
+
+        string[] positions = ordered.Count switch
+        {
+            1 => ["Only"],
+            2 when IsStackedVertically(ordered[0], ordered[1]) => ["Top", "Bottom"],
+            2 => ["Left", "Right"],
+            3 => ["Left", "Center", "Right"],
+            _ => ordered.Select((_, i) => $"#{i + 1}").ToArray()
+        };
+        if (positions.Length == 2 && positions[0] == "Top" && ordered[0].Bounds.Top > ordered[1].Bounds.Top)
+            (ordered[0], ordered[1]) = (ordered[1], ordered[0]);
+
+        var result = new List<DisplayInfo>();
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            var s = ordered[i];
+            string device = s.DeviceName.TrimEnd('\0');
+            targets.TryGetValue(device, out var target);
+            string friendly = target.FriendlyName ?? "";
+            // Fall back to the GDI name when Windows reports no device path, so
+            // every display still has a (less stable) key
+            string id = string.IsNullOrEmpty(target.DevicePath) ? device : target.DevicePath;
+            result.Add(new DisplayInfo(device, id, friendly, positions[i], s.Bounds, s.Primary));
+        }
+
+        // Two identical monitors share a friendly name — qualify it with position
+        foreach (var dup in result.Where(d => d.FriendlyName.Length > 0)
+                     .GroupBy(d => d.FriendlyName).Where(g => g.Count() > 1).SelectMany(g => g))
+            dup.QualifyName = true;
+
+        return result;
+    }
+
+    private static bool IsStackedVertically(System.Windows.Forms.Screen a, System.Windows.Forms.Screen b) =>
+        a.Bounds.Right > b.Bounds.Left && b.Bounds.Right > a.Bounds.Left;
+
+    /// <summary>
     /// Determines the render resolution based on settings and multi-monitor mode.
     /// For SameForAll mode, uses the highest monitor resolution to avoid
     /// black bars or blurriness on higher-res displays in mixed setups.

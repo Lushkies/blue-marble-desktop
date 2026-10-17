@@ -181,16 +181,11 @@ public class EarthRenderer : IDisposable
         // Camera setup
         float fov = _settings.FieldOfView * MathF.PI / 180.0f;
         float aspect = (float)width / height;
-        var projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, 0.1f, 100.0f);
+        var projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, 0.1f, 100.0f) *
+                         ScreenShift(_settings);
 
-        // Image offset: shift camera laterally to slide the image on screen.
-        // OffsetX/Y are -25..+25 (percentage). Convert to world units based on view size.
-        float viewHeight = 2.0f * _settings.ZoomLevel * MathF.Tan(fov * 0.5f);
-        float offsetX = (_settings.ImageOffsetX / 100.0f) * viewHeight * aspect;
-        float offsetY = (_settings.ImageOffsetY / 100.0f) * viewHeight;
-        var cameraPos = new Vector3(offsetX, offsetY, _settings.ZoomLevel);
-        var cameraTarget = new Vector3(offsetX, offsetY, 0.0f);
-        var view = Matrix4x4.CreateLookAt(cameraPos, cameraTarget, Vector3.UnitY);
+        var cameraPos = new Vector3(0.0f, 0.0f, _settings.ZoomLevel);
+        var view = Matrix4x4.CreateLookAt(cameraPos, Vector3.Zero, Vector3.UnitY);
 
         // Draw Earth
         _earthShader.Use();
@@ -254,6 +249,18 @@ public class EarthRenderer : IDisposable
 
         return _pixelBuffer;
     }
+
+    /// <summary>
+    /// Slides the finished picture across the screen: ImageOffsetX/Y are a
+    /// percentage of the screen width/height, positive = right/up. Applied in
+    /// clip space (after projection), so it moves the image without changing
+    /// the viewpoint — the old approach moved the camera, which also changed
+    /// which part of the globe faced you. Shared with MoonRenderer.
+    /// </summary>
+    internal static Matrix4x4 ScreenShift(AppSettings settings) =>
+        // NDC spans 2 units, so a shift of p% of the screen is 2p/100.
+        // Row-vector convention: the translation row adds dx*w to clip x.
+        Matrix4x4.CreateTranslation(settings.ImageOffsetX / 50.0f, settings.ImageOffsetY / 50.0f, 0.0f);
 
     public void Dispose()
     {

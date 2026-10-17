@@ -100,7 +100,7 @@ public class StillImageRenderer : IDisposable
         // Get image dimensions before loading as texture
         try
         {
-            var imageInfo = SixLabors.ImageSharp.Image.Identify(imagePath);
+            var imageInfo = SixLabors.ImageSharp.Image.Identify(ImageDecoding.Options, imagePath);
             if (imageInfo != null)
             {
                 _imageWidth = imageInfo.Width;

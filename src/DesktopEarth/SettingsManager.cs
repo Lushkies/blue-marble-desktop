@@ -7,7 +7,7 @@ namespace DesktopEarth;
 public class SettingsManager
 {
     private static readonly string SettingsDir =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BlueMarbleDesktop");
+        AppPaths.DataDir;
     private static readonly string SettingsPath = Path.Combine(SettingsDir, "settings.json");
     private static readonly string SettingsTempPath = Path.Combine(SettingsDir, "settings.json.tmp");
     private static readonly string SettingsBackupPath = Path.Combine(SettingsDir, "settings.json.bak");
@@ -17,6 +17,9 @@ public class SettingsManager
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter() }
     };
+
+    /// <summary>Bumped when a settings change needs a one-time migration.</summary>
+    public const int CurrentSettingsVersion = 2;
 
     public AppSettings Settings { get; private set; } = new();
 
@@ -75,7 +78,7 @@ public class SettingsManager
                 SettingsWereReset = true;
             }
 
-            Settings = new AppSettings();
+            Settings = new AppSettings { SettingsVersion = CurrentSettingsVersion };
             Settings.HasLaunchedBefore = true;
             Settings.DarkModeEnabled = IsWindowsDarkTheme();
             Save();
@@ -136,8 +139,21 @@ public class SettingsManager
 
             // Both migrations read ExtensionData, so nothing may save (and clear
             // it) until both have run
+            // Keep the untouched pre-upgrade file once, so a migration problem
+            // can always be recovered from by hand
+            if (Settings.SettingsVersion < CurrentSettingsVersion)
+            {
+                try
+                {
+                    string preUpgrade = Path.Combine(SettingsDir, $"settings.pre-v{CurrentSettingsVersion}.json");
+                    if (!File.Exists(preUpgrade)) File.Copy(path, preUpgrade);
+                }
+                catch { /* Best effort — never block startup on the safety copy */ }
+            }
+
             bool migrated = MigrateApiKeys();
             migrated |= MigrateRotationSettings();
+            migrated |= MigrateSchemaVersion();
 
             // Clear extension data so old properties don't get re-serialized
             Settings.ExtensionData = null;
@@ -230,6 +246,38 @@ public class SettingsManager
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Version-gated migrations, each run exactly once per settings file.
+    /// Returns true if anything changed.
+    /// </summary>
+    private bool MigrateSchemaVersion()
+    {
+        if (Settings.SettingsVersion >= CurrentSettingsVersion) return false;
+
+        if (Settings.SettingsVersion < 2)
+        {
+            // v2.2: image offsets became a true screen-space shift where positive
+            // means right/up. The old camera shift moved the picture the
+            // opposite way, so flip saved values to keep existing views in place.
+            static float Flip(float v) => v == 0 ? 0 : -v;
+            Settings.ImageOffsetX = Flip(Settings.ImageOffsetX);
+            Settings.ImageOffsetY = Flip(Settings.ImageOffsetY);
+            foreach (var config in Settings.DisplayConfigs)
+            {
+                config.ImageOffsetX = Flip(config.ImageOffsetX);
+                config.ImageOffsetY = Flip(config.ImageOffsetY);
+            }
+            foreach (var preset in Settings.Presets)
+            {
+                preset.ImageOffsetX = Flip(preset.ImageOffsetX);
+                preset.ImageOffsetY = Flip(preset.ImageOffsetY);
+            }
+        }
+
+        Settings.SettingsVersion = CurrentSettingsVersion;
+        return true;
     }
 
     /// <summary>

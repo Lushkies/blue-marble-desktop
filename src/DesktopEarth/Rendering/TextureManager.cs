@@ -45,10 +45,7 @@ public class TextureManager : IDisposable
         // DCT coefficients — it never allocates the full-resolution pixel buffer.
         // For a 21600x10800 HD texture capped to ~5120, this reduces peak memory
         // from ~933 MB to ~100 MB. Images already below the cap pass through unchanged.
-        var decoderOptions = new DecoderOptions
-        {
-            TargetSize = new SixLabors.ImageSharp.Size(_maxTextureDimension, _maxTextureDimension)
-        };
+        var decoderOptions = ImageDecoding.WithTargetSize(_maxTextureDimension, _maxTextureDimension);
 
         using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(decoderOptions, path);
         image.Mutate(x => x.Flip(FlipMode.Vertical));

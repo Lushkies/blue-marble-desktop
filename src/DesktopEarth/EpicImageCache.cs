@@ -10,9 +10,7 @@ namespace DesktopEarth;
 /// </summary>
 public class EpicImageCache
 {
-    private static readonly string CacheDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BlueMarbleDesktop", "epic_images");
+    private static readonly string CacheDir = AppPaths.EpicCacheDir;
 
     private const int MaxCachedDays = 14;
 

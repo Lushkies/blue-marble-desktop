@@ -150,7 +150,7 @@ public class EpicApiClient
             // Reject non-image payloads before they can poison the cache
             try
             {
-                SixLabors.ImageSharp.Image.Identify(tempPath);
+                SixLabors.ImageSharp.Image.Identify(ImageDecoding.Options, tempPath);
             }
             catch
             {

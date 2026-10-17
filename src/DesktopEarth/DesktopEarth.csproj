@@ -26,6 +26,26 @@
     </Content>
   </ItemGroup>
 
+  <!--
+    WORKAROUND (2026-10): ImageSharp 3.1.12 has advisories fixed only in 4.1.2+, and
+    4.x Release builds require a Six Labors license key (free for open source:
+    https://sixlabors.com/pricing/). Until the project has one, stay on 3.1.12 and
+    suppress ONLY these advisories, each reviewed against how this app uses ImageSharp:
+      gwg2 (ICC CLUT parsing)      - mitigated: every decode sets SkipMetadata (ImageDecoding.cs)
+      wmxv (BigTIFF IFD loop)      - accepted: TIFFs only arrive from NASA APOD; a crafted
+                                     file could hang the render thread, not run code
+      j3p4 (HistogramEqualization) - not reachable: the app never calls it
+      j9gm / jjfr (TIFF CCITT T4/T6 encoders) - not reachable: the app never encodes TIFF
+    Proper fix: upgrade to SixLabors.ImageSharp 4.1.3 with a license key, then delete this block.
+  -->
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-gwg2-r3hj-4w44" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-wmxv-xphr-5c9g" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j3p4-wp97-rph4" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j9gm-c75j-xc9q" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-jjfr-hcj7-qf5w" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
     <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
