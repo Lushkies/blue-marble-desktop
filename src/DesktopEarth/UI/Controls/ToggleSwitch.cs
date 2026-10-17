@@ -40,12 +40,16 @@ public class ToggleSwitch : StudioControl
         Toggled?.Invoke(this, EventArgs.Empty);
     }
 
-    // Mouse-up inside the switch, not OnClick: Click isn't raised reliably for
-    // custom-painted controls
+    // Flip on mouse-up inside the switch, not OnClick (Click isn't raised reliably
+    // for custom-painted controls). The second press of a double-click reports
+    // Clicks == 2; ignoring its release keeps a double-click from flipping twice.
+    private int _downClicks;
+    protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); _downClicks = e.Clicks; }
+
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
-        if (e.Button != MouseButtons.Left || !ClientRectangle.Contains(e.Location)) return;
+        if (e.Button != MouseButtons.Left || !ClientRectangle.Contains(e.Location) || _downClicks > 1) return;
         Focus();
         Flip();
     }

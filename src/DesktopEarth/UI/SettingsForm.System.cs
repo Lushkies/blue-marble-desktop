@@ -207,7 +207,9 @@ public partial class SettingsForm
             _resolutionCombo.SelectedIndex = Math.Max(0, Array.FindIndex(Resolutions,
                 r => r.W == _settings.RenderWidth && r.H == _settings.RenderHeight));
             _cacheCombo.SelectedIndex = Math.Max(0, Array.FindIndex(CacheDurations, c => c.Days == _settings.CacheDurationDays) is int c and >= 0 ? c : 2);
-            if (_apiKeyBox.Text != _settings.ApiDataGovKey) _apiKeyBox.Text = _settings.ApiDataGovKey;
+            // DEMO_KEY shows as the placeholder, so an empty box reads as "using the demo key"
+            string shownKey = _settings.ApiDataGovKey == "DEMO_KEY" ? "" : _settings.ApiDataGovKey;
+            if (_apiKeyBox.Text != shownKey) _apiKeyBox.Text = shownKey;
             _themeSegment.SelectedIndex = _settings.DarkModeEnabled ? 0 : 1;
         }
         finally { _loading = false; }
@@ -261,7 +263,7 @@ public partial class SettingsForm
     private async Task VerifyApiKeyAsync(StudioButton button)
     {
         string key = _apiKeyBox.Text.Trim();
-        if (key.Length == 0) { _apiStatus.Text = "Enter a key first."; _apiStatus.ForeColor = Theme.Error; return; }
+        if (key.Length == 0) key = "DEMO_KEY";
         button.Enabled = false;
         _apiStatus.Text = "Checking…";
         _apiStatus.ForeColor = Theme.TextMuted;

@@ -60,6 +60,9 @@ Application.EnableVisualStyles();
 Application.SetCompatibleTextRenderingDefault(false);
 Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
 
+// Needs the DPI mode set first (it reads monitor bounds, which WinForms caches)
+settingsManager.AdoptLegacyDisplayConfigs();
+
 // Global exception handlers for diagnostics
 Application.ThreadException += (_, args) =>
 {

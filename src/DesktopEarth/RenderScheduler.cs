@@ -229,14 +229,16 @@ public class RenderScheduler : IDisposable
         DisplayRequest? request = _activeRequests.TryGetValue(key, out var r) ? r
             : _activeRequests.TryGetValue(AllDisplaysKey, out var all) ? all : null;
 
+        // "Set" wins even on a timer tick: a Set re-queued after a failed render
+        // is retried by the 60 s backoff tick and must not turn into an advance
+        if (request == DisplayRequest.ShowSelection)
+            return;
         if (_isTimerTick || request == DisplayRequest.Advance)
         {
             PickNextImage(displaySettings, displaySettings.RandomRotationSource);
             if (_isTimerTick) MaybeProactiveFetch(displaySettings);
             return;
         }
-        if (request == DisplayRequest.ShowSelection)
-            return;
 
         // Unrelated re-render: keep showing the image already on screen
         var current = GetCurrentImage(key);
@@ -492,6 +494,8 @@ public class RenderScheduler : IDisposable
                     // missing selection) — keep the existing wallpaper instead of
                     // applying a black frame over it.
                     applied = pixels != null;
+                    if (pixels == null)
+                        ReportStatus("Wallpaper unchanged"); // Ends the UI's "Updating…" state
                     if (pixels != null)
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(_wallpaperPath)!);

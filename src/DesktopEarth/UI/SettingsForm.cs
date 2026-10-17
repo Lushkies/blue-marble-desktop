@@ -327,12 +327,17 @@ public partial class SettingsForm : Form
                  status.Contains("No image", StringComparison.OrdinalIgnoreCase) ||
                  status.Contains("below minimum", StringComparison.OrdinalIgnoreCase))
             ShowWarning(FriendlyError(status));
+        else if (status.StartsWith("Rendering", StringComparison.OrdinalIgnoreCase))
+        {
+            // A new render cycle: an old warning no longer describes the wallpaper
+            // (warnings raised during this cycle arrive after this and stick again)
+            _statusWarningSticky = false;
+            SetStatusOverride("Updating…", Theme.Accent);
+        }
         else if (_statusWarningSticky)
             return;
         else if (status.StartsWith("Downloading", StringComparison.OrdinalIgnoreCase))
             SetStatusOverride("Downloading image…", Theme.Accent);
-        else if (status.StartsWith("Rendering", StringComparison.OrdinalIgnoreCase))
-            SetStatusOverride("Updating…", Theme.Accent);
         else if (status.StartsWith("Wallpaper unchanged", StringComparison.OrdinalIgnoreCase))
         {
             SetStatusOverride("", Theme.Success);

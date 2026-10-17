@@ -86,8 +86,6 @@ public class SettingsManager
             return;
         }
 
-        AdoptLegacyDisplayConfigs();
-
         // Subsequent launch: skip the first render to preserve existing wallpaper
         if (Settings.HasLaunchedBefore)
         {
@@ -254,8 +252,11 @@ public class SettingsManager
     /// Give per-display configs saved before v2.2 (keyed only by \\.\DISPLAYn)
     /// their stable monitor id now, and save it — so a later renumbering by
     /// Windows can't attach them to a different monitor.
+    /// Call AFTER Application.SetHighDpiMode: it reads Screen.AllScreens, which
+    /// WinForms caches for the process — read while DPI-unaware, all later
+    /// monitor bounds would be the scaled-down ones.
     /// </summary>
-    private void AdoptLegacyDisplayConfigs()
+    public void AdoptLegacyDisplayConfigs()
     {
         bool hasLegacy;
         lock (Settings.DisplayConfigsLock)

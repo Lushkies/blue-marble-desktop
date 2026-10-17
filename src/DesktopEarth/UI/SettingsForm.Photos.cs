@@ -441,6 +441,8 @@ public partial class SettingsForm
             case ImageSource.NasaEpic:
                 t.EpicUseLatest = false;
                 t.EpicSelectedImage = c.Id;
+                t.EpicImageType = c.Id.StartsWith("epic_RGB", StringComparison.OrdinalIgnoreCase)
+                    ? EpicImageType.Enhanced : EpicImageType.Natural;
                 if (ParseEpicDate(c.Id) is string date) t.EpicSelectedDate = date;
                 break;
             case ImageSource.NasaApod: t.ApodSelectedImageId = c.Id; t.ApodSelectedImageUrl = url; break;
