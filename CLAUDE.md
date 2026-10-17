@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 2.1.5
+**Current version:** 2.2.0
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -60,8 +60,8 @@ When `DisplayMode == StillImage`, the `StillImageSource` property selects which 
 
 ### Key Data Flow
 
-1. **SettingsForm** (UI) writes to `AppSettings` via `SettingsManager.ApplyAndSave()`
-2. **RenderScheduler** reads settings, routes to the correct renderer
+1. **SettingsForm** (UI) changes ONE setting per control via `Edit(t => ...)` on `EditTarget` -- the selected display's `DisplayConfig` in Per-display mode, else the global `AppSettings` -- then a debounced `CommitNow()` saves and re-renders. Never snapshot the whole form back into settings (that was the source of the "wrong picture" bugs before 2.2). Browsing/selecting photos never commits; only "Set" (`ApplyImage`) does.
+2. **RenderScheduler** reads settings, routes to the correct renderer. Per-display configs are found with `AppSettings.FindDisplayConfig(DisplayInfo)`, keyed by the monitor's stable device path (`DisplayConfig.MonitorId`); legacy configs are adopted by `\\.\DISPLAYn` once. Auto-rotating displays only change on a timer tick or a targeted `TriggerNextImage(key)` / `TriggerShowSelection(key)` -- any other re-render keeps their current image.
 3. For still images: RenderScheduler checks `StillImageSource` to pick EPIC/APOD/NPS/Smithsonian/UserImages/NasaGallery
 4. Rendered output saved as BMP, then **WallpaperSetter** applies it via Windows API
 
@@ -119,12 +119,23 @@ src/DesktopEarth/
     TextureManager.cs       # ImageSharp -> OpenGL texture loading
     SunPosition.cs          # Astronomical sun position calculation
     GraphicsCapabilityDetector.cs  # ARM64/Mesa3D detection
+  AppPaths.cs               # Data directory (%AppData%\BlueMarbleDesktop, BLUEMARBLE_DATA_DIR override)
+  DisplayInfo.cs            # A monitor: stable MonitorId, friendly name, position label, bounds
+  DisplaySettings.cs        # IDisplaySettings + DisplaySettingsCopier (the one per-display copy list)
+  ViewMath.cs               # Zoom slider <-> camera (uniform apparent-size curve)
+  ImageDecoding.cs          # Safe ImageSharp decoder options (SkipMetadata) for every decode
   UI/
-    Theme.cs                   # Centralized dark/light mode color definitions + P/Invoke
-    DarkTabControl.cs          # Custom TabControl with dark mode tab painting
+    Theme.cs                   # "Studio" design tokens (dark + light), fonts, DWM title bar
+    Controls/                  # Custom-painted controls: StudioButton, ModernSlider, ToggleSwitch,
+                               #   SegmentedControl, Card, ModernComboBox, TextField, MonitorPicker,
+                               #   WorldMapPicker, PreviewPanel, SelectionFooter, StudioMenuRenderer
     TrayApplicationContext.cs  # System tray icon + context menu
-    SettingsForm.cs            # Tabbed settings dialog (3 tabs)
-    ThumbnailGridPanel.cs      # Reusable image grid with selection + favorites
+    SettingsForm.cs            # Studio window shell: sidebar, edit model, status card, previews
+    SettingsForm.Wallpaper.cs  # Display picker, view switch, globe Location/Framing/Light cards, presets
+    SettingsForm.Photos.cs     # Photo sources, auto-rotate, grids, "Set" (ApplyImage)
+    SettingsForm.Collection.cs # Favorites + My images
+    SettingsForm.System.cs     # Settings page
+    ThumbnailGridPanel.cs      # Image grid: lazy thumbnails, favorites, "on display" tag, select vs activate
     AboutForm.cs               # Version/credits dialog
   Resources/
     bluemarbledesktop.ico      # Multi-size app icon
@@ -145,7 +156,7 @@ lib/
 
 - **.NET 8** (net8.0-windows) with WinForms
 - **Silk.NET** 2.23.0 -- OpenGL 3.3 Core, GLFW windowing
-- **SixLabors.ImageSharp** 3.1.12 -- texture loading, BMP export
+- **SixLabors.ImageSharp** 3.1.12 -- texture loading, BMP export (WORKAROUND: kept on 3.1.12 with per-advisory audit suppressions in the csproj; 4.x Release builds need a Six Labors license key -- see csproj comment)
 - **GLSL 3.3** shaders
 - **Inno Setup 6** -- Windows installers
 - **GitHub Releases** -- distribution (`gh` CLI available and authenticated since 2026-07)
@@ -169,8 +180,8 @@ lib/
 ### Code Style
 - C# namespace: `DesktopEarth` (internal, never changed)
 - User-facing name: "Blue Marble Desktop" everywhere
-- Settings JSON lives in `%AppData%/BlueMarbleDesktop/`
-- When adding new settings: add to both `AppSettings` AND `DisplayConfig` (for per-monitor support)
+- Settings JSON lives in `%AppData%/BlueMarbleDesktop/` (all paths via `AppPaths`; set `BLUEMARBLE_DATA_DIR` to run against a scratch folder for testing)
+- When adding a per-display setting: add it to `IDisplaySettings`, `AppSettings`, `DisplayConfig` AND `DisplaySettingsCopier.Copy` (the one copy list)
 - New enum values should be added at the end to preserve JSON serialization backward compatibility
 - When removing features: migrate old settings gracefully in `SettingsManager.Load()`
 
@@ -181,6 +192,7 @@ lib/
 *Prior development versions (internal) covered: basic 3D globe renderer, system tray UI, flat map + moon views, multi-monitor support, ARM64 + Mesa3D fallback, Inno Setup installers, NASA EPIC satellite imagery, HD textures (21600x10800), zoom slider, multiple image sources (APOD, NPS, Smithsonian), thumbnail grids, favorites, search chips, quality badges, My Collection tab, user-imported images, settings presets, auto-rotate wallpaper system, configurable APOD date range.*
 
 - **v2.1.0** - First public release. 3D Earth globe with real-time day/night illumination, flat map, moon, and still images from 6 sources (NASA EPIC, NASA APOD, NASA Gallery, National Parks, Smithsonian, user images). Auto-rotate wallpaper, favorites, per-display settings, HD textures, dark mode, download status feedback, x64 + ARM64 support.
+- **v2.2.0** - "Studio" redesign of the settings window (sidebar, to-scale monitor picker, live preview, click-the-map location, custom dark/light controls). Pick-then-Set for photos; per-display edits never leak to other displays; stable monitor ids; screen-space offsets; uniform zoom; moon near side; also ships the July 2026 audit fixes that were never released.
 
 ---
 
@@ -190,7 +202,11 @@ lib/
 - NPS photos often include people (park rangers, visitors, buildings) rather than nature landscapes -- no API-level filter exists for this
 - Smithsonian search results depend on the art_design category -- some terms work better than others
 - EPIC images are sometimes delayed 24-48 hours from NASA
-- The SettingsForm is one large file (~3800 lines) -- could benefit from being split into partial classes or user controls if it grows further
+- Anchors (Top|Right) are measured against a parent's size at construction, before docking gives it its real size -- right-align children in a Layout handler instead (see SettingsForm.Wallpaper header).
+- Custom controls must not rely on Control.Click (not raised reliably for UserPaint controls) -- use mouse-up.
+- Overrides like OnLayout/OnBackColorChanged run during base construction; guard fields that are not created yet.
+- The Studio UI was verified at 100% scaling only; 125-150% should be eyeballed.
+- NASA APOD API (2026-10): returns a "NASA Science" logo placeholder for every date; ApodApiClient filters these out, so the APOD grid is empty until NASA fixes the feed.
 - The UI scales with monitor DPI via `AutoScaleMode.Dpi` (added 2026-07). Any RUNTIME layout math (assigning .Top/.Height after construction) must use the form's `Dpi()` helper or neighboring-control bounds -- never raw pixel constants, which only apply at 100% scaling.
 
 ### Potential Future Features
