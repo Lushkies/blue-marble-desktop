@@ -23,8 +23,8 @@ public partial class SettingsForm
 
     private ModernComboBox _intervalCombo = null!, _resolutionCombo = null!, _cacheCombo = null!;
     private ToggleSwitch _startupSwitch = null!;
-    private StudioLabel _cacheSub = null!, _hdSub = null!, _apiStatus = null!;
-    private StudioButton _hdButton = null!;
+    private StudioLabel _cacheSub = null!, _hdSub = null!, _apiStatus = null!, _hiddenSub = null!;
+    private StudioButton _hdButton = null!, _restoreHiddenButton = null!;
     private Panel _hdProgress = null!;
     private float _hdProgressValue = -1;
     private TextField _apiKeyBox = null!;
@@ -103,6 +103,11 @@ public partial class SettingsForm
         openFolder.Click += (_, _) => { try { System.Diagnostics.Process.Start("explorer.exe", AppPaths.DataDir); } catch { } };
         var storage = SettingRow("Storage", AppPaths.DataDir, openFolder);
 
+        _restoreHiddenButton = new StudioButton { Text = "Restore all", Width = 120 };
+        _restoreHiddenButton.Click += (_, _) => RestoreHiddenImages();
+        _hiddenSub = new StudioLabel();
+        var hidden = SettingRow("Hidden pictures", "", _restoreHiddenButton, _hiddenSub);
+
         // API key
         _apiKeyBox = new TextField { Width = 300, ShowSearchIcon = false, PlaceholderText = "DEMO_KEY", AccessibleName = "api.data.gov API key" };
         _apiKeyBox.TextChanged += (_, _) =>
@@ -147,7 +152,7 @@ public partial class SettingsForm
 
         StackTop(page, title,
             SectionLabel("Schedule"), Spacer(8), interval, Spacer(8), startup, Spacer(8), resolution, Spacer(22),
-            SectionLabel("Images"), Spacer(8), hd, Spacer(8), cache, Spacer(8), storage, Spacer(8), api, Spacer(22),
+            SectionLabel("Images"), Spacer(8), hd, Spacer(8), cache, Spacer(8), storage, Spacer(8), hidden, Spacer(8), api, Spacer(22),
             SectionLabel("Appearance"), Spacer(8), theme, Spacer(8), about);
 
         // Cap the content width so rows don't stretch across a maximized window
@@ -214,6 +219,32 @@ public partial class SettingsForm
         }
         finally { _loading = false; }
         UpdateCacheSize();
+        UpdateHiddenRow();
+    }
+
+    private void UpdateHiddenRow()
+    {
+        int count;
+        lock (_settings.FavoritesLock) count = _settings.HiddenImages.Count;
+        _hiddenSub.Text = count == 0
+            ? "None · use \"Never show this picture\" to keep one out of auto-rotate"
+            : $"{count} picture{(count == 1 ? "" : "s")} kept out of auto-rotate";
+        _restoreHiddenButton.Enabled = count > 0;
+    }
+
+    private void RestoreHiddenImages()
+    {
+        int count;
+        lock (_settings.FavoritesLock) count = _settings.HiddenImages.Count;
+        if (count == 0) return;
+        if (MessageBox.Show(this, (count == 1 ? "Let auto-rotate show the hidden picture again?" : $"Let auto-rotate show all {count} hidden pictures again?") + "\n\n" +
+                "Pictures that were favorites before you hid them are not re-added to Favorites.",
+                "Restore hidden pictures", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+        // Clear in place: per-display render snapshots share this list instance
+        lock (_settings.FavoritesLock) _settings.HiddenImages.Clear();
+        _settingsManager.Save();
+        UpdateHiddenRow();
     }
 
     private async void UpdateCacheSize()

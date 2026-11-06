@@ -37,7 +37,10 @@ public class StillImageRenderer : IDisposable
     /// Callers should skip rendering and try a different image when this is true.
     /// </summary>
     public bool IsBelowMinimumQuality => _imageWidth > 0 && _imageHeight > 0 &&
-        Math.Max(_imageWidth, _imageHeight) < 1080;
+        Math.Max(_imageWidth, _imageHeight) < MinimumDimension;
+
+    /// <summary>The 1080p floor: an image's longest side must be at least this many pixels.</summary>
+    public const int MinimumDimension = 1080;
 
     public void Initialize(GL gl)
     {
@@ -120,7 +123,7 @@ public class StillImageRenderer : IDisposable
 
         // Enforce minimum 1080p quality -- warn but still load (caller decides whether to skip)
         int maxDim = Math.Max(_imageWidth, _imageHeight);
-        if (maxDim > 0 && maxDim < 1080)
+        if (maxDim > 0 && maxDim < MinimumDimension)
         {
             Console.WriteLine($"StillImageRenderer: WARNING - {Path.GetFileName(imagePath)} " +
                 $"is below minimum quality ({_imageWidth}x{_imageHeight}, max dimension {maxDim}px < 1080px)");

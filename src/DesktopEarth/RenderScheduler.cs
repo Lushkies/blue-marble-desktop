@@ -33,6 +33,7 @@ public class RenderScheduler : IDisposable
     private int _rotationIndex;
     private string? _randomImageOverride;
     private ImageSource? _randomImageSource;
+    private bool _rotationHasNothing; // This render's rotation step found nothing showable
     private int _poolBuildCycleCount;
     private bool _isTimerTick; // Distinguishes timer ticks from user-triggered renders
 
@@ -226,6 +227,7 @@ public class RenderScheduler : IDisposable
     {
         skip = false;
         _keptCurrent = null;
+        _rotationHasNothing = false;
         DisplayRequest? request = _activeRequests.TryGetValue(key, out var r) ? r
             : _activeRequests.TryGetValue(AllDisplaysKey, out var all) ? all : null;
 
@@ -634,6 +636,7 @@ public class RenderScheduler : IDisposable
             var key = display.MonitorId;
             _currentDisplayKey = key;
             _randomImageOverride = null; // A rotation pick never leaks to another display
+            _rotationHasNothing = false;
             bool isNew = !_perDisplayRenderers.TryGetValue(key, out var displayState);
             if (isNew)
             {
@@ -768,6 +771,7 @@ public class RenderScheduler : IDisposable
         // Global-only settings, shared so per-display rendering honors them too
         target.ApiDataGovKey = settings.ApiDataGovKey;
         target.Favorites = settings.Favorites;
+        target.HiddenImages = settings.HiddenImages;
         target.ExcludedRotationSources = settings.ExcludedRotationSources;
         target.BlacklistedIdPrefixes = settings.BlacklistedIdPrefixes;
     }
@@ -825,6 +829,13 @@ public class RenderScheduler : IDisposable
             renderer.Initialize(gl);
         }
 
+        if (_rotationHasNothing)
+        {
+            _rotationHasNothing = false;
+            ReportStatus("Rotation: Nothing to show");
+            return null;
+        }
+
         // If random rotation picked an image, use it (may be from a different source in "All" mode)
         if (_randomImageOverride != null)
         {
@@ -843,8 +854,15 @@ public class RenderScheduler : IDisposable
                     return renderer.Render(width, height);
                 }
 
-                Console.WriteLine($"RenderScheduler: Random image below 1080p minimum, skipping");
+                ReportStatus($"{effectiveSource}: Image below minimum 1080p quality");
+                return null;
             }
+
+            // The rotation pick vanished or won't decode. Keep the current
+            // wallpaper — falling through would show the display's old saved
+            // pick, a picture from outside the rotation
+            ReportStatus($"{effectiveSource}: No image available (rotation pick unreadable)");
+            return null;
         }
 
         // User images are local files — no download needed (and never deleted on
@@ -995,17 +1013,45 @@ public class RenderScheduler : IDisposable
         try
         {
             var pool = BuildRotationPool(settings, rotationSource);
-            if (pool.Count > 0)
+            // Step past pictures that can't be shown (unreadable, or under the
+            // 1080p floor) so the display lands on a real rotation picture.
+            // Bounded: a pool of mostly small images must not stall the render.
+            int tries = Math.Min(pool.Count, 50);
+            for (int i = 0; i < tries; i++)
             {
-                var picked = pool[_rotationIndex % pool.Count];
-                _randomImageOverride = picked;
-                _randomImageSource = DetectSourceFromPath(picked);
+                var candidate = pool[_rotationIndex % pool.Count];
                 _rotationIndex++;
+                if (!IsShowable(candidate)) continue;
+                _randomImageOverride = candidate;
+                _randomImageSource = DetectSourceFromPath(candidate);
+                return;
             }
+            // Nothing in this rotation can be shown. The render keeps the current
+            // wallpaper: falling back to the display's saved pick could bring back
+            // a picture the user hid, or one from outside the rotation
+            _rotationHasNothing = true;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Image rotation error ({rotationSource}): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Whether a rotation candidate can be shown: it exists, decodes, and meets
+    /// the 1080p floor. Reads only the image header.
+    /// </summary>
+    private static bool IsShowable(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return false;
+            var info = SixLabors.ImageSharp.Image.Identify(ImageDecoding.Options, path);
+            return info != null && Math.Max(info.Width, info.Height) >= StillImageRenderer.MinimumDimension;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -1036,7 +1082,64 @@ public class RenderScheduler : IDisposable
                 Path.GetFileNameWithoutExtension(path), blacklist));
         }
 
+        // Filter out pictures the user said never to show (global list)
+        List<HiddenImage> hidden;
+        lock (_settingsManager.Settings.FavoritesLock)
+            hidden = settings.HiddenImages.ToList();
+        if (hidden.Count > 0)
+        {
+            // Keyed by sanitized, lower-cased id (cache files are named that way)
+            static string Key(string id) => ImageCache.SanitizeFileName(id).ToLowerInvariant();
+            var hiddenBySource = hidden.Select(h => (h.Source, Key(h.ImageId))).ToHashSet();
+            var hiddenIds = hidden.Select(h => Key(h.ImageId)).ToHashSet();
+            pool.RemoveAll(path =>
+            {
+                var source = DetectSourceFromPath(path);
+                var name = Key(Path.GetFileNameWithoutExtension(path));
+                // Unknown folder: hide on the id alone (errs toward hiding)
+                return source is ImageSource s ? hiddenBySource.Contains((s, name)) : hiddenIds.Contains(name);
+            });
+        }
+
         return pool;
+    }
+
+    /// <summary>
+    /// Whether two ids name the same picture. Cache files are named by the
+    /// sanitized id, so a raw id and a file name must compare equal.
+    /// </summary>
+    private static bool SameImageId(string a, string b) =>
+        string.Equals(ImageCache.SanitizeFileName(a), ImageCache.SanitizeFileName(b), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Never show this picture again: add it to the hidden list, drop it from
+    /// favorites (it would otherwise keep a "never show" picture in the pool),
+    /// and move every rotating display that is showing it on to its next image.
+    /// </summary>
+    public void HideImage(CurrentImageInfo image)
+    {
+        var settings = _settingsManager.Settings;
+        lock (settings.FavoritesLock)
+        {
+            bool Matches(ImageSource source, string id) => source == image.Source && SameImageId(id, image.Id);
+
+            // A rotation pick carries no title (it is named by its file); a favorite does
+            string title = !string.IsNullOrEmpty(image.Title) ? image.Title
+                : settings.Favorites.FirstOrDefault(f => Matches(f.Source, f.ImageId) && f.Title.Length > 0)?.Title
+                  ?? image.Id;
+            if (!settings.HiddenImages.Any(h => Matches(h.Source, h.ImageId)))
+                settings.HiddenImages.Add(new HiddenImage { Source = image.Source, ImageId = image.Id, Title = title });
+            settings.Favorites.RemoveAll(f => Matches(f.Source, f.ImageId));
+        }
+        _settingsManager.Save();
+
+        // Only rotating displays act on Advance (see PrepareRotation); a display
+        // the user pinned to this picture keeps it. TryAdd: a "Set" still waiting
+        // to render already replaces the picture and must not be dropped.
+        foreach (var (key, shown) in _currentImages)
+            if (shown.Source == image.Source && SameImageId(shown.Id, image.Id))
+                _displayRequests.TryAdd(key, DisplayRequest.Advance);
+        TriggerUserUpdate();
     }
 
     /// <summary>
@@ -1353,6 +1456,13 @@ public class RenderScheduler : IDisposable
             renderer.Initialize(gl);
         }
 
+        if (_rotationHasNothing)
+        {
+            _rotationHasNothing = false;
+            ReportStatus("Rotation: Nothing to show");
+            return null;
+        }
+
         // If random rotation picked an image, use it (may be from any source in "All" mode)
         if (_randomImageOverride != null)
         {
@@ -1371,9 +1481,14 @@ public class RenderScheduler : IDisposable
                     return renderer.Render(width, height);
                 }
 
-                Console.WriteLine($"RenderScheduler: Random image below 1080p minimum, skipping");
+                _randomImageSource = null;
+                ReportStatus("Rotation: Image below minimum 1080p quality");
+                return null;
             }
+            // Keep the current wallpaper rather than falling back to the saved EPIC pick
             _randomImageSource = null;
+            ReportStatus("Rotation: No image available (rotation pick unreadable)");
+            return null;
         }
 
         string? imagePath = ResolveEpicImage(settings);

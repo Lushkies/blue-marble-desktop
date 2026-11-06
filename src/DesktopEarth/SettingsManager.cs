@@ -137,6 +137,10 @@ public class SettingsManager
 
             Settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
 
+            // A hand-edited "null" would crash every reader of these lists
+            Settings.Favorites ??= new();
+            Settings.HiddenImages ??= new();
+
             // Both migrations read ExtensionData, so nothing may save (and clear
             // it) until both have run
             // Keep the untouched pre-upgrade file once, so a migration problem

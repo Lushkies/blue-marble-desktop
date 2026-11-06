@@ -97,9 +97,12 @@ public class AppSettings : IDisplaySettings
     // Favorites
     public List<FavoriteImage> Favorites { get; set; } = new();
 
-    /// <summary>Lock object for thread-safe access to the Favorites list.</summary>
+    /// <summary>Lock object for thread-safe access to the Favorites and HiddenImages lists.</summary>
     [JsonIgnore]
     public readonly object FavoritesLock = new();
+
+    // Pictures the user said "never show" — auto-rotate skips them (guarded by FavoritesLock)
+    public List<HiddenImage> HiddenImages { get; set; } = new();
 
     // Settings presets (appearance-only saved configurations)
     public List<SettingsPreset> Presets { get; set; } = new();
@@ -249,6 +252,14 @@ public class FavoriteImage
     public string FullImageUrl { get; set; } = "";
     public string LocalCachePath { get; set; } = "";
     public ImageQualityTier QualityTier { get; set; } = ImageQualityTier.Unknown;
+}
+
+/// <summary>A picture auto-rotate must never pick again.</summary>
+public class HiddenImage
+{
+    public ImageSource Source { get; set; }
+    public string ImageId { get; set; } = "";
+    public string Title { get; set; } = "";
 }
 
 /// <summary>

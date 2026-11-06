@@ -46,7 +46,7 @@ public partial class SettingsForm : Form
     private StudioLabel _statusTitle = null!;
     private StudioLabel _statusSub = null!;
     private StatusDot _statusDot = null!;
-    private StudioButton _updateNowButton = null!;
+    private StudioButton _updateNowButton = null!, _hideImageButton = null!;
     private readonly System.Windows.Forms.Timer _statusTimer;
     private string _statusOverride = "";
     private Color _statusOverrideColor;
@@ -257,7 +257,7 @@ public partial class SettingsForm : Form
             nav.Controls.Add(btn);
         }
 
-        var status = new Card { Dock = DockStyle.Bottom, Height = 124, Padding = new Padding(14, 12, 14, 12) };
+        var status = new Card { Dock = DockStyle.Bottom, Height = 150, Padding = new Padding(14, 12, 14, 12) };
         _statusDot = new StatusDot { Location = new Point(14, 19), ForeColor = Theme.Success };
         _statusTitle = new StudioLabel
         {
@@ -283,7 +283,23 @@ public partial class SettingsForm : Form
                 _renderScheduler.TriggerShowSelection(CurrentImageKey);
             BeginUpdateStatus();
         };
-        status.Controls.AddRange([_statusDot, _statusTitle, _statusSub, _updateNowButton]);
+        // "No to this picture": auto-rotate skips it from now on (Settings page restores)
+        _hideImageButton = new StudioButton
+        {
+            Text = "Never show this picture", Variant = ButtonVariant.Link,
+            Location = new Point(14, 114), Size = new Size(164, 24), Font = Theme.UiFont(8.75f)
+        };
+        _hideImageButton.Click += (_, _) =>
+        {
+            var current = _renderScheduler.GetCurrentImage(CurrentImageKey);
+            if (current == null || !_hideImageButton.Enabled) return;
+            CommitNow();
+            _renderScheduler.HideImage(current);
+            BeginUpdateStatus();
+            if (_page == 1) RefreshCollection(); // It may have just left Favorites
+            if (_page == 2) UpdateHiddenRow();
+        };
+        status.Controls.AddRange([_statusDot, _statusTitle, _statusSub, _updateNowButton, _hideImageButton]);
 
         sidebar.Controls.Add(nav);
         sidebar.Controls.Add(brand);
@@ -325,6 +341,7 @@ public partial class SettingsForm : Form
         else if (status.Contains("error", StringComparison.OrdinalIgnoreCase) ||
                  status.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
                  status.Contains("No image", StringComparison.OrdinalIgnoreCase) ||
+                 status.Contains("Nothing to show", StringComparison.OrdinalIgnoreCase) ||
                  status.Contains("below minimum", StringComparison.OrdinalIgnoreCase))
             ShowWarning(FriendlyError(status));
         else if (status.StartsWith("Rendering", StringComparison.OrdinalIgnoreCase))
@@ -370,6 +387,8 @@ public partial class SettingsForm : Form
 
     private static (string Title, string Detail) FriendlyError(string status)
     {
+        if (status.Contains("Nothing to show", StringComparison.OrdinalIgnoreCase))
+            return ("Nothing to rotate", "Kept your wallpaper. Add more pictures.");
         if (status.Contains("No image", StringComparison.OrdinalIgnoreCase))
             return ("Couldn't get that picture", "Kept your wallpaper. Check your connection.");
         if (status.Contains("below minimum", StringComparison.OrdinalIgnoreCase))
@@ -425,6 +444,8 @@ public partial class SettingsForm : Form
         bool rotating = ViewSettings.DisplayMode == DisplayMode.StillImage && ViewSettings.RandomRotationEnabled;
         _updateNowButton.Text = rotating ? "Next image" : "Update now";
         _updateNowButton.IconGlyph = rotating ? Glyph.Next : Glyph.Refresh;
+        // Hiding only means something to auto-rotate, and needs a picture on screen
+        _hideImageButton.Visible = rotating && _renderScheduler.GetCurrentImage(CurrentImageKey) != null;
     }
 
     private void OnWallpaperApplied()

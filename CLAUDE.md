@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 2.2.0
+**Current version:** 2.2.1
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -123,7 +123,7 @@ src/DesktopEarth/
   DisplayInfo.cs            # A monitor: stable MonitorId, friendly name, position label, bounds
   DisplaySettings.cs        # IDisplaySettings + DisplaySettingsCopier (the one per-display copy list)
   ViewMath.cs               # Zoom slider <-> camera (uniform apparent-size curve)
-  ImageDecoding.cs          # Safe ImageSharp decoder options (SkipMetadata) for every decode
+  ImageDecoding.cs          # Safe ImageSharp decoder options for every decode (SkipMetadata; JPEG/PNG/GIF/BMP/WebP only, no TIFF)
   UI/
     Theme.cs                   # "Studio" design tokens (dark + light), fonts, DWM title bar
     Controls/                  # Custom-painted controls: StudioButton, ModernSlider, ToggleSwitch,
@@ -156,7 +156,7 @@ lib/
 
 - **.NET 8** (net8.0-windows) with WinForms
 - **Silk.NET** 2.23.0 -- OpenGL 3.3 Core, GLFW windowing
-- **SixLabors.ImageSharp** 3.1.12 -- texture loading, BMP export (WORKAROUND: kept on 3.1.12 with per-advisory audit suppressions in the csproj; 4.x Release builds need a Six Labors license key -- see csproj comment)
+- **SixLabors.ImageSharp** 3.1.12 -- texture loading, BMP export (WORKAROUND: kept on 3.1.12 with per-advisory audit suppressions in the csproj; 3.2.0+ and 4.x Release builds need a Six Labors license key -- see csproj comment. Every decode must use `ImageDecoding` options, which register no TIFF decoder -- the suppressions depend on it)
 - **GLSL 3.3** shaders
 - **Inno Setup 6** -- Windows installers
 - **GitHub Releases** -- distribution (`gh` CLI available and authenticated since 2026-07)
@@ -193,12 +193,14 @@ lib/
 
 - **v2.1.0** - First public release. 3D Earth globe with real-time day/night illumination, flat map, moon, and still images from 6 sources (NASA EPIC, NASA APOD, NASA Gallery, National Parks, Smithsonian, user images). Auto-rotate wallpaper, favorites, per-display settings, HD textures, dark mode, download status feedback, x64 + ARM64 support.
 - **v2.2.0** - "Studio" redesign of the settings window (sidebar, to-scale monitor picker, live preview, click-the-map location, custom dark/light controls). Pick-then-Set for photos; per-display edits never leak to other displays; stable monitor ids; screen-space offsets; uniform zoom; moon near side; also ships the July 2026 audit fixes that were never released.
+- **v2.2.1** - "Never show this picture" (sidebar link while auto-rotating; `AppSettings.HiddenImages`, filtered from every rotation pool, removed from Favorites; Settings > Hidden pictures > Restore all). Auto-rotate skips unreadable and sub-1080p pictures instead of falling back to the display's old saved pick, and keeps the wallpaper ("Nothing to rotate") when nothing is showable. TIFF decoding disabled (ImageSharp advisory GHSA-v76p).
 
 ---
 
 ## Known Issues and Future Work
 
 ### Known Issues
+- Auto-rotate "Favorites" is included by "All sources" whatever the other Include chips say -- a favorite from an excluded source (e.g. a Parks photo with Parks off) still rotates. Intended, but it surprised Alex once (2026-11).
 - NPS photos often include people (park rangers, visitors, buildings) rather than nature landscapes -- no API-level filter exists for this
 - Smithsonian search results depend on the art_design category -- some terms work better than others
 - EPIC images are sometimes delayed 24-48 hours from NASA
