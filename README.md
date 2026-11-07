@@ -94,7 +94,7 @@ Or run `.\build.ps1` (builds both architectures and copies assets).
 Created by Alex and Claude (Anthropic).
 
 Image sources and data:
-- **NASA** -- Earth textures, EPIC satellite imagery (DSCOVR), Astronomy Picture of the Day, and the NASA Image and Video Library. All public domain.
+- **NASA** -- Earth textures ([Visible Earth](https://visibleearth.nasa.gov/)), EPIC satellite imagery (DSCOVR), Astronomy Picture of the Day, and the NASA Image and Video Library. All public domain.
 - **National Park Service** -- Park photography via the NPS API.
 - **Smithsonian Institution** -- Art and design from the Smithsonian Open Access collection (CC0 public domain).
 - **NASA/GSFC Scientific Visualization Studio** -- Moon texture.
