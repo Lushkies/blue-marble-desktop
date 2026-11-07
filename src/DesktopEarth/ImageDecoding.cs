@@ -15,17 +15,14 @@ namespace DesktopEarth;
 /// they are untrusted input.
 ///
 /// Formats: only JPEG, PNG, GIF, BMP and WebP can be decoded. TIFF (and the other
-/// formats ImageSharp registers by default) is left out: no source the app uses
-/// needs it, and ImageSharp 3.1's TIFF decoder has known flaws — a heap overwrite
-/// from tiled fax TIFFs (GHSA-v76p-62qx-wwq2) and a BigTIFF loop
-/// (GHSA-wmxv-xphr-5c9g). A TIFF now fails to load like any unreadable file.
+/// formats ImageSharp registers by default) is left out on purpose: no source the
+/// app uses needs it, and the TIFF decoder is where most of ImageSharp's recent
+/// security advisories were (GHSA-v76p-62qx-wwq2, GHSA-wmxv-xphr-5c9g — fixed in
+/// 3.2.0, which the app now uses). Less untrusted-input surface, nothing lost.
+/// A TIFF fails to load like any unreadable file.
 ///
-/// SkipMetadata: metadata (EXIF, ICC profiles) is never used for rendering, and
-/// skipping it keeps ImageSharp 3.1's ICC-profile parser — which has a known
-/// allocation flaw (GHSA-gwg2-r3hj-4w44) — off the path.
-///
-/// WORKAROUND: the proper fix is ImageSharp 3.2.0+/4.1.2+, whose Release builds
-/// need a Six Labors license key (free for open source); see DesktopEarth.csproj.
+/// SkipMetadata: metadata (EXIF, ICC profiles) is never used for rendering, so
+/// skipping it keeps the metadata parsers off the untrusted-input path too.
 /// </summary>
 public static class ImageDecoding
 {

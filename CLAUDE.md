@@ -4,7 +4,7 @@
 
 A Windows desktop wallpaper app that renders a real-time 3D Earth globe with day/night lighting using OpenGL, and sets it as your wallpaper. Also supports flat map, moon, and still images from NASA, National Parks, and Smithsonian.
 
-**Current version:** 2.2.1
+**Current version:** 2.2.2
 **Authors:** Alex and Claude (Anthropic)
 **Repo:** https://github.com/Lushkies/blue-marble-desktop
 
@@ -156,7 +156,7 @@ lib/
 
 - **.NET 8** (net8.0-windows) with WinForms
 - **Silk.NET** 2.23.0 -- OpenGL 3.3 Core, GLFW windowing
-- **SixLabors.ImageSharp** 3.1.12 -- texture loading, BMP export (WORKAROUND: kept on 3.1.12 with per-advisory audit suppressions in the csproj; 3.2.0+ and 4.x Release builds need a Six Labors license key -- see csproj comment. Every decode must use `ImageDecoding` options, which register no TIFF decoder -- the suppressions depend on it)
+- **SixLabors.ImageSharp** 3.2.0 -- texture loading, BMP export (Release builds need the Six Labors Community license: `sixlabors.lic` in the repo root, gitignored, NEVER commit it -- public repo; valid until 2028-02-05. Every decode uses `ImageDecoding` options: JPEG/PNG/GIF/BMP/WebP only, no TIFF, by choice)
 - **GLSL 3.3** shaders
 - **Inno Setup 6** -- Windows installers
 - **GitHub Releases** -- distribution (`gh` CLI available and authenticated since 2026-07)
@@ -194,6 +194,7 @@ lib/
 - **v2.1.0** - First public release. 3D Earth globe with real-time day/night illumination, flat map, moon, and still images from 6 sources (NASA EPIC, NASA APOD, NASA Gallery, National Parks, Smithsonian, user images). Auto-rotate wallpaper, favorites, per-display settings, HD textures, dark mode, download status feedback, x64 + ARM64 support.
 - **v2.2.0** - "Studio" redesign of the settings window (sidebar, to-scale monitor picker, live preview, click-the-map location, custom dark/light controls). Pick-then-Set for photos; per-display edits never leak to other displays; stable monitor ids; screen-space offsets; uniform zoom; moon near side; also ships the July 2026 audit fixes that were never released.
 - **v2.2.1** - "Never show this picture" (sidebar link while auto-rotating; `AppSettings.HiddenImages`, filtered from every rotation pool, removed from Favorites; Settings > Hidden pictures > Restore all). Auto-rotate skips unreadable and sub-1080p pictures instead of falling back to the display's old saved pick, and keeps the wallpaper ("Nothing to rotate") when nothing is showable. TIFF decoding disabled (ImageSharp advisory GHSA-v76p).
+- **v2.2.2** - ImageSharp 3.1.12 -> 3.2.0 with the Six Labors Community license (all audit suppressions removed; `dotnet list package --vulnerable` clean). TIFF stays off by choice.
 
 ---
 

@@ -47,3 +47,7 @@ tools/GenIcon/bin/
 tools/GenIcon/obj/
 tools/GenIcon.cs
 tools/GenerateIcon.csx
+
+# Six Labors license (ImageSharp). Never commit: public repo. See CLAUDE.md.
+sixlabors.lic
+*.lic
